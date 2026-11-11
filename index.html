@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Iron Rain — Fleet Command</title>
+<link rel="icon" href="data:,">
+<link rel="preload" href="vendor/fonts/cinzel-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="top" class="panel">
+  <div class="logo">IRON <span>RAIN</span></div>
+  <div class="res he" id="cHe" title="Helium-3: energy, fuel, and part of every hull">He-3<b id="res">0</b><i id="resR"></i></div>
+  <div class="res or" id="cOre" title="Ore: hull metal for building ships and depot repairs">Ore<b id="ore">0</b><i id="oreR"></i></div>
+  <div class="res od" id="cOrd" title="Ordnance: slugs, missiles and nukes. Every rearm draws on it.">Ordnance<b id="ord">0</b><i id="ordR"></i></div>
+  <div class="res mn" id="cMan" title="Manpower: crews and troops. Building and re-crewing ships draws on it.">Manpower<b id="man">0</b><i id="manR"></i></div>
+  <div class="res fd" id="cFood" title="Food balance across your worlds. Below zero means famine: recruitment falls 40%.">Food<b id="food">0</b><i id="foodR">balance</i></div>
+  <div id="wstrip" title="Your worlds. Click to jump; double-click to select the world's orbital authority. [ and ] step through them."></div>
+  <div class="sp"></div>
+  <div class="clock" title="Mission clock"><b id="clock">0:00</b></div>
+  <button class="btn" id="bGrp" title="Battle groups, worlds and commanders">Outliner</button>
+  <button class="btn" id="bCmd" title="Commander roster (Shift+C)">Commanders</button>
+  <button class="btn" id="bSpd" title="Game speed: click for faster, right-click for slower (¼× to 3×)">Speed 1×</button>
+  <button class="btn" id="bPause" title="Pause (P)">Pause</button>
+  <button class="btn ico" id="bOpt" title="Display and sound">⚙</button>
+  <button class="btn ico" id="bHelp" title="Controls and doctrine (H)">?</button>
+  <div id="optp" class="panel hide">
+    <button class="btn" id="bGfx" title="Every graphics setting: resolution, anti-aliasing, effects, bloom, plumes, glare, the sky, hull size and battle labels (F10)">Graphics ▸</button>
+    <button class="btn" id="bVec" title="Trajectory prediction (T)">Vectors</button>
+    <button class="btn" id="bBloom" title="Glow and bloom post-processing">Bloom</button>
+    <button class="btn" id="bQual" title="Graphics quality: resolution, anti-aliasing and post-processing">Quality</button>
+    <button class="btn" id="bHull" title="How many times their true size ships are drawn next to the worlds (1× is true scale)">Hulls 30×</button>
+    <button class="btn" id="bMeter" title="Frame-time meter (F9)">Meter</button>
+    <button class="btn" id="bSnd">Sound</button>
+    <div class="osec">Battle</div>
+    <button class="btn" id="bDir" title="With no ship followed, the camera cuts to the big moments of a battle: a capital ship dying, a nuclear launch, a boarding (Shift+.)">Director</button>
+    <div class="osec">Auto-pause when</div>
+    <div id="apRow" class="aprow"></div>
+  </div>
+  <span class="hide"><b id="fleet"></b><b id="crew"></b><b id="worlds"></b></span>
+</div>
+
+<div id="log" class="panel"></div>
+<div id="selp" class="panel"></div>
+<div id="cmdp" class="panel hide"></div>
+<div id="grpp" class="panel"></div>
+<div id="build" class="panel"></div>
+<canvas id="mini" width="480" height="480"></canvas>
+<div id="toasts"></div>
+<div id="pauseTag" class="hide">PAUSED</div>
+
+<div id="menu" class="overlay">
+  <div class="card wide">
+    <h1>IRON <span>RAIN</span></h1>
+    <div class="sub">Fleet command · The Solar War, 753 PCE</div>
+    <div class="modes" id="modes"><button class="btn" data-mode="camp"><b>Campaign</b><span>The Solar War, week by week: worlds, economy, fleets and Iron Rain. Battles are fought in real time.</span></button><button class="btn" data-mode="sandbox"><b>Sandbox</b><span>One continuous real-time battle across the whole system, against one rival.</span></button></div>
+    <p class="pitch icamp">753 PCE. Ten years after the Rising, three powers fight for the Solar System. Choose one, and win the war week by week and battle by battle.</p>
+    <details class="icamp lore"><summary>The war so far</summary><p>753 PCE, the tenth year of the Solar War. The Solar Republic rules from Luna and holds Earth, Mars and Ceres; its legions are fighting for Mercury. The Society Remnant holds Venus and Mercury, where the Ash Lord lies ailing and Atalantia commands in his name. The Rim Dominion has kept ten years of peace with the Republic, and watches from Io. Each turn is a week. Build up your worlds, lay down hulls in your yards and move fleets between the planets. When fleets meet, take command and fight the battle in real time, or let it resolve. Break a world&rsquo;s defenders, hold orbit for a week, then drop the Iron Rain to take it. Hold the capital of every power that is not your ally to win the war.</p></details>
+    <p class="isand">The Solar War, ten years on. One continuous map of the whole Solar System, forty-five worlds from Mercury out to Eris and the Kuiper dwarfs, with every orbit at its true relative distance. The Solar Republic holds Earth, Luna, Mars and Ceres and besieges Mercury; the Society Remnant holds Venus and Mercury; the Rim Dominion holds Jupiter, Saturn and the outer giants. Whichever side nobody plays keeps its worlds as armed neutrals. Every world pays out its own resources and carries its own benefits and downsides. Take a world by boarding its orbital authority. Ships far from their destination open a transit burn and cross between worlds in a minute or two. Lose your citadel and you lose the war.</p>
+    <div class="facrow"><div><div class="lbl">Your faction</div><div id="facP" class="facs"></div></div><div class="encol"><div class="lbl">Enemy faction</div><div id="facA" class="facs small"></div></div></div>
+    <div class="icamp starts"><div class="lbl">Your start <span class="lbl2">a commander, a place, and a rule of their own</span></div><div id="starts" class="srow"></div></div>
+    <div class="mfoot"><div class="diffs" id="diffs">
+      <button class="btn" data-d="0">Easy</button>
+      <button class="btn on" data-d="1">Normal</button>
+      <button class="btn" data-d="2">Hard</button>
+    </div>
+    <button class="btn icamp" id="bAhist" title="An ahistorical war: the Ash Lord dies sometime between weeks 35 and 60, Romulus may survive the Rim's war, Lysander's allegiance is rolled, and a random House begins the war bitter">Ahistorical</button>
+    <button class="btn icamp" id="bMove" title="Moving planets: every world goes round its orbit at its true rate, a week a turn, and travel times follow the true distance. Mercury laps the Sun in thirteen weeks; Earth and Mars drift apart and back over two years. Off: the planets hold their places of 753 PCE">Moving planets</button>
+    <button class="btn icamp hide" id="bLoad" title="Load a saved campaign: the autosave, a slot, or a file">Load</button>
+    <button class="btn icamp hide" id="bCont" title="Carry on with the most recent save">Continue</button>
+    <button class="btn go" id="start">Break the Line</button><div id="loadp" class="loadp hide"></div></div>
+    <p class="hint" style="margin-top:14px"><b>WASD</b> camera · drag to select · right-click to order · <b>F</b> attack-move · <b>R</b> depot · <b>L</b> hangars · <b>G</b> nuke · <b>Shift+C</b> commanders · <b>H</b> all controls</p>
+  </div>
+</div>
+
+<div id="help" class="overlay hide">
+  <div class="card">
+    <h1 style="font-size:26px">CONTROLS &amp; DOCTRINE</h1>
+    <div class="keys">
+      <b>Left click / drag</b><span>Select ships (Shift adds). Double-click selects every ship of that class on screen.</span>
+      <b>Right click</b><span>Move · attack · mine He-3 (haulers) · board a capital (pods and starShells) · escort or dock with a friendly ship · rearm at the citadel · set the rally point (citadel selected)</span>
+      <b>Carrier + right-click</b><span>Right-clicking an enemy capital with a Dreadnought or moonBreaker selected also launches its starShells from the spitTubes to board it</span>
+      <b>F + click</b><span>Attack-move</span>
+      <b>Right-drag · Shift+right-click</b><span>Drag out the facing a ship or group takes on arrival · queue a waypoint (or a target) after the orders already given</span>
+      <b>. · Shift+.</b><span>Follow the selected ship with a low camera (middle-drag orbits it, Esc or . releases) · the director: in a battle, cut to the big moments</span>
+      <b>The order card</b><span>The bar at the bottom of a battle gives its orders to the ships you have selected, or to the whole fleet when nothing is. Abilities: <b>C</b> the commander's signature move · <b>B</b> brace · <b>N</b> lock on · <b>J</b> flank burn · <b>U</b> go cold / warm up · <b>M</b> all guns on the bridge · <b>I</b> the Iron Rain. Hangars: <b>Y</b> starShells and <b>Shift+Y</b> leechCraft (click an enemy capital ship within 15,000 km: they hold off her hull until her shields fall below 25%, then go in) · <b>L</b> ripWings auto / held · <b>G</b> a nuke (click a point). Each button shows how many are aboard. A right-click attack no longer spends the hangars. <b>Shift+X</b> or Closing 12× in the top bar runs the clock fast while nobody is in reach; it drops back the moment the guns talk.</span>
+      <b>Morale</b><span>The banner at the top shows each fleet's strength and its morale. The white notch on a morale bar is that fleet's breaking point: 30 for ours, and for the enemy whatever their commander's doctrine allows. Losses wear morale down; a flagship lost, a ship taken, a champion cut down, an ambush or a city bombed are shocks that fade over a minute or two. Hover a bar to see what moved it. Past the notch, a fleet breaks.</span>
+      <b>Comms</b><span>In battle the log becomes the open channel: captains speak in the voice of their Color, with a chip in that Color. Lines marked Intercept are the enemy's, heard in the clear.</span>
+      <b>Taking a world from orbit</b><span>Silence the gun platforms, then hold the drop corridor over the near limb alone for 45 seconds: a defending warship in it stops the clock. Then the Iron Rain (I) can fall, in two waves. The first, the starShells and leechCraft of ships within 6,000 km of the surface, takes a beachhead. Then the Storks leave the hangars and fly down through the corridor, 600 legionnaires to each: anything in the corridor can shoot them down, so keep it clear until they land. Optional: a capital ship within 6,000 km of the surface can bombard the capital for 20 seconds. The garrison is cut by 40%, but the Senate, the Reds and every world remember it.</span>
+      <b>Sensors and the approach</b><span>Fleets start 100,000 km apart. A ship with her shields up shows on every scope across the field, so you see the enemy from the start as contacts (an amber diamond: size and heading, rough position). To shoot you need a lock: corvettes 9,000 km, frigates and torchShips 12,000, destroyers 14,000, dreadnoughts 20,000, the moonBreaker 24,000, pickets 18,000. Any lock is shared, and every gun of the fleet can then fire to its full reach. Go cold (U): shields drain, drives drop to a whisper, guns hold, and she vanishes beyond a few thousand km; warm up (U again) and the guns are free at once, but the shields need 6 seconds (3 for the Rim) to spin up from empty. Near the Sun, anything sunward is half lost in the glare. A nuclear blast blinds sensors within 8,000 km for 15 seconds and hides everything inside 3,000 km. The approach runs at 12×; Skip to contact runs it faster still. The battle clock starts at contact. Pickets (in deployment) hear further and catch cold ships.</span>
+      <b>Boarding a capital ship</b><span>Choose what the boarders go for in the fleet card (nothing selected) for every boarding to come, or on the enemy ship's own card once they are aboard: storm her (the default), cut for the bridge (quickest, but the bridge is wrecked), blow the engines (she is dead in space after about ten seconds aboard), or take her whole (slow, but she comes over intact and it shakes her fleet more).</span>
+      <b>The Senate and the Rain</b><span>At the start, the Senate has voted to hold the siege of Mercury. Dropping the Rain there (in battle or from the campaign map) defies it: the Vox Populi and the Moderates turn on the government, and Dancer moves to recall the ArchImperator. In battle, the Rain button asks twice.</span>
+      <b>The action camera</b><span>The window on the right cuts to the moment that matters: a capital ship dying, a lance shot, boarders, a duel, a ship taken, the Rain. Click it to jump there; × hides it. In deep space, the first side to hold the Lagrange point alone for two minutes holds the field.</span>
+      <b>Helm · Line of battle</b><span>In the ship and group panels: present the port or starboard broadside, keep the bow on, or keep at range. The <i>Line of battle</i> stance forms the group across the axis to the enemy at the flagship's range. Hits in the bow band rake her for 25% more. The auto helm chooses a side only every few seconds and seldom swaps: tell a ship which broadside to show and she fights better</span>
+      <b>Alt+right-click</b><span>Hold Alt over an enemy warship to see her stern arc. Attack from astern: the ships swing wide of the target's broadsides and sit on her stern. The engines are the one soft place on a warship: a round there finds no armour plate and does double harm, and knocks out her drive</span>
+      <b>O · the range bands</b><span>As in the books, fleets see each other from well over ten thousand km unless a ship runs cold (no burn, no fire) or dark. Missiles and the long guns reach 8,000 to 15,000 km; the broadsides land from about 4,500 km, escorts close in to 1,500–2,800. Past a gun's effective range its rounds go wide. <b>O</b> toggles fire discipline: hold to the effective range (the default: the magazines last, and a ship that is not firing is harder to see) or open fire at full reach</span>
+      <b>Counters</b><span>Capital ships smash line ships from long range but their guns cannot follow a small hull in close. Destroyers and torchShips hold small hulls in their fire control and shred escorts and fighters. Corvettes, Lancers and frigates carry breaching torpedoes that go through a capital's plate; ripWings each carry one miniature nuke for a capital ship. Frigates' flak screens the ships they guard from missiles and ripWings. Every ship card shows what it is strong and weak against</span>
+      <b>Orders with a price</b><span><i>Brace</i> holds the threatened shield, but halves the guns and slows the turn. <i>Lock on</i> makes every round count, but the ships hold their heading and crawl. A <i>flank burn</i> silences the broadsides. A commander's signature move leaves the crews spent for 25 seconds after</span>
+      <b>Brace</b><span>Shift a ship's shields to the threatened side for 8 seconds (ship panel, or a group's ability bar). A bow lance glows down its bore for a second or two before it fires: that is the moment to brace, or to turn out of its line</span>
+      <b>Hangars</b><span>Every warship has bay space: a torchShip or destroyer 16, a dreadnought 80, a moonBreaker 180. A ripWing takes 2, a starShell 1, a leechCraft 4, a Stork 20. Change the mix from the fleet's Hangars button on the campaign map, at a world of your own not under siege. Missing craft refill there, for helium-3 and manpower.</span>
+      <b>K · R</b><span>Full stop · return to the citadel to rearm, re-crew, repair and refill hangars</span>
+      <b>L</b><span>Toggle hangars between auto-launch and hold (recalls ripWings)</span>
+      <b>G + click</b><span>Nuclear strike from a selected Dreadnought, moonBreaker or the Citadel</span>
+      <b>Alt+1–9 / 1–9</b><span>Form a battle group from the selection (Ctrl+1–9 also works outside a browser that reserves it) · select it (press twice to jump the camera) · Shift+1–9 adds the selection</span>
+      <b>Shift+F · Shift+Q</b><span>Cycle the formation (of the selected group, or of any selection) · cycle the selected group's stance</span>
+      <b>Q / E · Space</b><span>All warships / the citadel · center on the selection (with nothing selected, Space recalls your last battle group)</span>
+      <b>Home · [ ]</b><span>Jump to your citadel · step through the worlds of the Core (the world pips in the top bar do the same; double-click one to select its orbital authority)</span>
+      <b>Tab · Backspace</b><span>Cycle your battle groups · jump to the latest dispatch that has a place (or click any ⌖ dispatch)</span>
+      <b>F9 · ⚙</b><span>Frame-time meter · graphics quality and Hull size (how many times their true size ships are drawn; 1× is true scale)</span>
+      <b>− / =</b><span>Snap the zoom out or in a tier: the whole Core, a planet's system, a fleet, a ship</span>
+      <b>WASD / arrows / edge</b><span>Pan the camera · middle-drag pans · mouse wheel zooms</span>
+      <b>Build row 1</b><span id="hkB1">Z cosmosHauler · X ripWing · C starShell squad (6) · V leechCraft · B Supply Tender · N Sensor Picket</span>
+      <b>Build row 2</b><span id="hkB2">M Corvette · Y Rail Frigate · U Destroyer · I torchShip · O Dreadnought · J moonBreaker (one per side)</span>
+      <b>T · P / Esc</b><span>Trajectory prediction · pause (Esc also cancels a targeting mode)</span>
+    </div>
+    <p class="hint" style="margin-top:14px"><b>The Solar System.</b> Orbits around the Sun are to one true scale (1 AU = 4,000,000 km of map), so the gaps between worlds are right relative to each other. Each planet with its moons is magnified so it can be fought over; inside a planet system, sizes and moon distances are true to each other (Phobos and Deimos are drawn larger than life). Zoom out with the wheel to see the whole system; the minimap frames the inner system near the Sun and the whole system beyond the Belt. Worlds of the side nobody plays are neutral garrisons: they fire only on those who attack them, and can be boarded. Click a world to see what holding it gives you. A ship ordered more than 15,000 km away goes into a <b>transit burn</b>: its top speed and thrust scale with the length of the trip: about a minute and a half from Earth to Mars, three to Jupiter, four and a half to Neptune. It burns half again the fuel and sheds the speed before it arrives. <b>Worlds</b> pay He-3, ore, ordnance and crews every second to whoever holds their orbital authority (a citadel, Dockyard or Mining Station). These can't be destroyed, only boarded. <b>Food</b> is a balance: if your worlds can't feed themselves, recruitment falls 40%.<br>
+    <b>Four resources.</b> <b>He-3</b> pays for energy, fuel and part of every hull. <b>Ore</b> is hull metal: haulers mine it from rust-veined fields (most are at the edges of the asteroid fields), salvaged hulks give mostly ore, and depot hull repairs spend it. <b>Ordnance</b> is the magazine stockpile: the citadel, Dockyards and Mining Stations produce it, every rearm spends it, and a restocked nuke costs 200. <b>Manpower</b> is your pool of crews: building a ship takes its whole crew from the pool (a Dreadnought needs about 20,000), re-crewing at a depot draws more, and losses are permanent except for the 12% who reach the lifeboats. The citadel recruits steadily, owned Dockyards and Mining Stations add more, and taking a station frees its workers to join you. The Remnant recruits fastest, the Republic doubles what stations give, and Rim crews are 15% smaller.<br>
+    <b>Battle groups.</b> A group flies at its slowest ship's pace and holds formation on its flagship, the most valuable ship aboard (a commander's ship wins ties). Order the whole group and it moves as one; give a few members their own orders and they detach until you order the whole group again. Formations: Wedge, Line abreast, Column, Wall, and Screen, which rings the capitals with escorts. Stances: <b>Aggressive</b> breaks formation to chase anything a little past the reach of its guns. <b>Defensive</b> holds formation and engages only what closes on the flagship. <b>Hold fire</b> keeps the main guns silent so the group runs quiet. <b>Evasive</b> spreads out and fights from 40% farther out. Plain selections use the formation you pick in the ship panel.<br>
+    <b>He-3 fuel.</b> Every burn draws on the tank: a full tank gives about two and a half minutes of hard burn for most warships. Refuel at the citadel, a Dockyard or a Mining Station (it costs He-3), or from a Supply Tender. A dry ship drifts on momentum, and gravity takes it from there.<br>
+    <b>Loyalty.</b> Hull damage, a destroyed bridge and a lost commander all erode crew loyalty. Gold-heavy Society crews resist; Rim crews break easiest. Once loyalty is under 20% and the hull under half, a ship near enemies may strike its colors. A warship that stays alongside for four seconds, or any boarder, takes her as a prize. Against the Republic, a breaking crew may simply mutiny and change sides. Republic boarders also call on the lowColors to rise while they fight.<br>
+    <b>Commanders.</b> Destroyers and larger can carry one named commander, assigned at a friendly depot. Traits boost the helm, gunnery, discipline or boarding, and renown earns promotions. Commanders can die with their ship (40% reach an escape pod) or be captured with it, which pays the captor a 250 He-3 ransom and shakes the loser's fleet.<br>
+    <b>Armour and broadsides.</b> Every hull carries armour plate: each slug or round loses that much on the plate (never below 15% of it), so light guns barely scratch a dreadnought, while lances, missiles, nukes and boarders ignore it. Shields come in two halves, port and starboard; a shot lands on the half it strikes, and with that half down it goes straight through to the hull.<br>
+    <b>Command.</b> Orders reach a ship once the flagship's signal crosses to her: a fifth of a second to a second and a half, longer with a damaged bridge, at a distance from the flagship, under EMP or in a sky that jams. The Society's Gold command is quickest, but its captains hold station a few seconds when a flagship dies; the Republic's orders are slower, and nobody waits on a dead flagship; the Rim's hulls fade from sensors on a quiet burn.<br>
+    <b>Subsystems.</b> Frigates and larger have engines, bridge, port and starboard gun decks and a shield generator. Hits land by facing: stern shots hit the engines, bow shots the bridge, a broadside the guns on that side. Damage that is not repaired in the battle stays with the ship until a yard puts it right. Fire control chips in the ship panel tell your gunners what to aim for. Knock out the shield generator and the ship cannot raise shields until repaired.<br>
+    <b>Veterancy.</b> Ships earn renown by dealing damage and making kills: Blooded, Veteran, Scarred, each firing faster, tighter and steadier. Every successful boarding action adds to your legion's renown, which makes all your boarders fight harder.<br>
+    <b>Neutral ground.</b> Derelict hulks drift in the wreckage of the long siege off Mercury: strip them with haulers or board them. Asteroid fields block fire and sensors, and ships inside them are hard to see.</p>
+    <button class="btn go" id="closeHelp">Back to the fight</button>
+  </div>
+</div>
+
+<div id="over" class="overlay hide">
+  <div class="card">
+    <h1 id="overT" style="font-size:38px">VICTORY</h1>
+    <div class="sub" id="overS"></div>
+    <p id="overP"></p>
+    <button class="btn go" id="again">Fight Again</button>
+  </div>
+</div>
+
+<script type="importmap">{"imports":{"three":"./vendor/three/three.webgpu.js","three/webgpu":"./vendor/three/three.webgpu.js","three/tsl":"./vendor/three/three.tsl.js"}}</script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
