@@ -1208,7 +1208,7 @@ function shipFx(s, v, vr, vz, dark) {
 function shipFxDraw(s, v, vr, z) {
   if (!v.hits) return; const ca = Math.cos(s.a), sa = Math.sin(s.a), mn = 3 / Math.max(z, 1e-9);
   for (const h of v.hits) { const k = 1 - (RCLK - h.t) / .35; if (k <= 0) continue; const wx = s.x + (h.lx * ca - h.ly * sa) * vr, wy = s.y + (h.lx * sa + h.ly * ca) * vr, gs = Math.max(mn * (1 + h.k * 2), vr * (.07 + .2 * h.k)) * (1.5 - k * .5);
-    B.glow.add(wx, wy, vr * .12, gs, gs, 0, k > .6 ? 0xfff0dc : 0xffa860, k * k * (.55 + .45 * h.k), 1.9); }
+    B.glow.add(wx, wy, vr * .12, gs, gs, 0, k > .6 ? 0xffd8b0 : 0xff9a50, k * k * (.35 + .4 * h.k), 1.7); } // the scorch on her skin (the strike's own flash is the ring's, in the fx pass)
   if (s.hp / s.def.hp < .35) for (const q of v.scars) { const wx = s.x + (q.lx * ca - q.ly * sa) * vr, wy = s.y + (q.lx * sa + q.ly * ca) * vr, fl = Math.sin(RCLK * q.f + q.p), gs = Math.max(mn, vr * (.13 + .03 * fl + .015 * Math.sin(RCLK * q.f * 2.3 + q.p)));
     B.glow.add(wx, wy, vr * .14, gs, gs, 0, fl > .3 ? 0xffc070 : 0xff8a3c, .45 + .15 * fl, 1.4); } // fires burning in the breaches
 }
