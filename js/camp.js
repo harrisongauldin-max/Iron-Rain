@@ -600,7 +600,8 @@ export function afterBattle(res) {
   else if (winner !== 'neu' && loser !== 'neu') note(`${BLOC_NAME[winner]} defeats ${BLOC_NAME[loser]} at ${nm}.`, '', res.world);
   CM.battleFate(Object.assign({}, res, { margin: res.margin })); if (!res.withdrew) { for (const o of wins) P.react(o, 'victory', (o === winner ? 1 : .5) * GR.react); for (const o of loses) P.react(o, 'defeat', (o === loser ? 1 : .5) * GR.defeat); for (const f of C.fleets) if (loses.includes(f.owner) && f.transit && f.transit.bat === res.world + '|' + C.turn) AG.battleLost(f); gradeSpoils(res, GR, winner, loser, here(winner)); }
   chronBattle(res, winner, loser, leads); aiTally(res, w);
-  if (hostile(winner, w.owner) && !w.siege) { newSiege(w, winner); if (w.owner === me) note(`${nm} is under siege!`, 'bad', res.world); else if (winner === me) note(`${nm} is under siege. Bring troops for an Iron Rain.`, 'gold', res.world); }
+  // the winner lays siege; a siege left by a power whose ships are no longer here passes to the winner
+  if (hostile(winner, w.owner) && (!w.siege || (w.siege.by !== winner && !fleetsAt(res.world, w.siege.by).length))) { newSiege(w, winner); if (w.owner === me) note(`${nm} is under siege!`, 'bad', res.world); else if (winner === me) note(`${nm} is under siege. Bring troops for an Iron Rain.`, 'gold', res.world); }
 }
 // after a battle in deep space: the intercepted fleet goes on (it won, or slipped past) or turns for home; the
 // interceptor goes home either way
@@ -1054,6 +1055,8 @@ function aiTurn(f) {
       if (rel && rel !== fl.at) { moveFleet(fl, rel); continue; } if (rel === fl.at) continue; }
     // hold a siege while troops come up, unless it has gone on hopelessly long
     if (here && hostile(f, here.owner) && here.siege && here.siege.by === f && (aiStalled(f, here.id) ? enoughTroops(f, here, troopsOf(fl)) : troopsOf(fl) > 60 || here.siege.turns < 6)) { const o = rainOdds(fl); if (!(here.siege.turns > 12 && (o.err || o.chance < .25))) continue; }
+    // a strike force that has just won the orbit of an enemy world stays for the siege to form, if it came to take it
+    if (here && hostile(f, here.owner) && !(here.siege && here.siege.by === f) && !fleetsAt(here.id).some(o => hostile(f, o.owner) && !bottled(o)) && (aiStalled(f, here.id) ? enoughTroops(f, here, troopsOf(fl)) : troopsOf(fl) > 60 || nearDead(here.owner))) continue;
     const homeThreat = here && here.owner === f && IN.knownBoundFor(f, fl.at).length > 0;
     // intercept a tracked enemy bound for one of our worlds, when we can catch it and beat it
     if (here && here.owner === f && !fl.garrison && !globalThis.__FOG_OFF) { let pick = null;
