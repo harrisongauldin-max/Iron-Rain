@@ -706,7 +706,9 @@ function buildingTip(k, w, mode) {
   const next = top < B.max ? `<div class='tsec'>${top ? `Level ${top} → ${top + 1}` : 'Level 1'} here</div>${fxRows(levelFx(k, w, top, top + 1))}` : `<div class='tsec'>At its highest level (${B.max})</div>`;
   const now = lv ? `<div class='tsec'>Level ${lv} now gives</div>${fxRows(levelFx(k, w, 0, lv))}` : '';
   const queued = q ? `<div class='tsec'>In the queue: level${q > 1 ? 's' : ''} ${[...Array(q)].map((_, i) => lv + i + 1).join(', ')}</div>${fxRows(levelFx(k, w, lv, top))}` : '';
-  return `<div class='th'>${B.name}</div><div class='tdim'>${B.desc} per level · up to level ${B.max}</div>${now}${queued}${next}<div class='trow'><span>Cost</span><b>${costTxt({ ore: B.ore, he: B.he, ...(EC.BLD[k] || {}) })}</b></div><div class='trow'><span>Time</span><b>${B.t} weeks</b></div>${mode && e ? `<div class='tbad'>Cannot: ${e}</div>` : mode ? `<div class='tgold'>Click to ${mode}</div>` : ''}`;
+  const wk = B.work ? (k === 'barracks' ? EC.levyOf(w.id) : k === 'skimmer' ? EC.skimMul(w.id) : EC.workOf(w.id)) : null;
+  const work = wk != null ? `<div class='trow'><span>${k === 'barracks' ? 'People to raise' : 'Workforce'} here (${EC.popOf(w.id)} million)</span><b class='${wk < .6 ? 'tbad' : ''}'>×${wk.toFixed(2)}</b></div>` : '';
+  return `<div class='th'>${B.name}</div><div class='tdim'>${B.desc} per level · up to level ${B.max}</div>${work}${now}${queued}${next}<div class='trow'><span>Cost</span><b>${costTxt({ ore: B.ore, he: B.he, ...(EC.BLD[k] || {}) })}</b></div><div class='trow'><span>Time</span><b>${B.t} weeks</b></div>${mode && e ? `<div class='tbad'>Cannot: ${e}</div>` : mode ? `<div class='tgold'>Click to ${mode}</div>` : ''}`;
 }
 function estateTip(w, e) {
   const E = EC.ESTATES[e], m = EC.mixOf(w.id)[e], P = EC.targetParts(w, e), t = EC.target(w, e);

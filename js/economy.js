@@ -57,6 +57,15 @@ const MIX = {
 };
 export const mixOf = id => { const b = bodyOf(id); return MIX[id] || (b.gas ? MIX._gas : MIX._world); };
 export const popOf = id => Math.max(id === 'rhea' ? 0 : 5, WD(id).prod.man);   // millions, near enough: what the world can field
+// buildings need hands. A mine, arsenal or foundry turns out √(population / 100) of its rated output, from a quarter
+// on a rock of five million to a quarter more on Mars or Earth; barracks raise men in proportion to the people there
+// are to raise. The Rim's sixty-seven moons hold some hundred and thirty cities between them: wide, but thin.
+// He-3 scoops in a gas giant's atmosphere are automated and need no workforce.
+export const workOf = id => clamp(Math.sqrt(popOf(id) / 100), .25, 1.25);
+export const levyOf = id => clamp(popOf(id) / 150, .05, 1.5);
+// He-3 skimmers: a gas giant's own scoops run themselves (+60%); at one of its moons the scoop ships need crews, as
+// much as the moon can man (+60% at a moon of 100 million, less on a small one); anywhere else they work the regolith
+export const skimMul = id => { const b = bodyOf(id); if (b.gas) return 1.6; if (b.parent != null && BODIES[b.parent].gas) return 1.6 * Math.min(1, workOf(id)); return workOf(id); };
 
 // ---------------------------------------------------------------- strategic resources
 // Rare metals, from deep mines: the stuff of shield arrays, torch drives and capital keels
@@ -197,7 +206,7 @@ const ef = (w, e) => w.cl ? (.6 + w.cl[e] / 250) * (strike(w, e) ? .5 : 1) : (.6
 
 // ---------------------------------------------------------------- yields
 // the Foundries share what ore the realm has in its depots: short of ore, every one of them runs slower
-export function foundryShare(f) { if (f === 'neu') return 1; const need = Object.values(C.worlds).reduce((a, w) => a + (w.owner === f ? 40 * (w.lv.foundry || 0) * (w.siege ? .25 : 1) : 0), 0); return need > 0 ? clamp(Math.max(0, C.fac[f].res.ore) / need, 0, 1) : 1; }
+export function foundryShare(f) { if (f === 'neu') return 1; const need = Object.values(C.worlds).reduce((a, w) => a + (w.owner === f ? 40 * (w.lv.foundry || 0) * workOf(w.id) * (w.siege ? .25 : 1) : 0), 0); return need > 0 ? clamp(Math.max(0, C.fac[f].res.ore) / need, 0, 1) : 1; }
 // keep a world's loyalty equal to its estates after an outside change to them
 // a jolt to the whole world after its weekly tick: it falls on every estate at once
 export function jolt(w, d) { if (!w) return; if (!w.cl) { w.loyalty = clamp(w.loyalty + d, 0, 100); return; } for (const e of EK) w.cl[e] = clamp(w.cl[e] + d, 0, 100); syncLoy(w); }
@@ -207,14 +216,15 @@ export function yieldOf(w, WK) {
   const sieged = w.siege ? .25 : 1, tax = f !== 'neu' ? TAX[C.tax[f]].mul : 1, m = mixOf(w.id), pop = popOf(w.id);
   const R = ef(w, 'red'), O = ef(w, 'orange'), X = ef(w, 'war');
   const y = { he: 0, ore: 0, ord: 0, man: 0, food: 0, alloy: 0, rare: 0, inf: 0, sci: 0 };
-  y.he = (W.prod.he * WK + 35 * w.lv.skimmer * (gas ? 1.6 : 1)) * R * sieged * tax * dm(w, 'he') * (rb(w, 'he') || 1);
-  y.ore = (W.prod.ore * WK + 45 * w.lv.mine) * R * sieged * tax * dm(w, 'ore');
-  y.ord = (W.prod.ord * WK + 90 * w.lv.arsenal) * O * sieged * tax * dm(w, 'ord') * (rb(w, 'ord') || 1);
-  y.man = (W.prod.man * WK * .45 + 600 * w.lv.barracks) * X * sieged * dm(w, 'man') * (rb(w, 'man') || 1);
+  const work = workOf(w.id);
+  y.he = (W.prod.he * WK + 35 * w.lv.skimmer * skimMul(w.id)) * R * sieged * tax * dm(w, 'he') * (rb(w, 'he') || 1);
+  y.ore = (W.prod.ore * WK + 45 * w.lv.mine * work) * R * sieged * tax * dm(w, 'ore');
+  y.ord = (W.prod.ord * WK + 90 * w.lv.arsenal * work) * O * sieged * tax * dm(w, 'ord') * (rb(w, 'ord') || 1);
+  y.man = (W.prod.man * WK * .45 + 600 * w.lv.barracks * levyOf(w.id)) * X * sieged * dm(w, 'man') * (rb(w, 'man') || 1);
   y.food = W.prod.food * WK * (W.prod.food > 0 ? (strike(w, 'red') ? .5 : 1) * dm(w, 'food') * (rb(w, 'food') || 1) : 1) + 70 * w.lv.farms * R * 2 * dm(w, 'food');
   if (w.owner !== w.home && w.home !== 'neu') y.man *= .5; // conquered peoples fill fewer ranks
   // foundries: forty ore become thirty alloy, level by level, while the realm has ore to feed them
-  if (w.lv.foundry) { const k = foundryShare(f); y.ore -= 40 * w.lv.foundry * sieged * k; y.alloy = 30 * w.lv.foundry * O * sieged * dm(w, 'alloy') * k; }
+  if (w.lv.foundry) { const k = foundryShare(f) * work; y.ore -= 40 * w.lv.foundry * sieged * k; y.alloy = 30 * w.lv.foundry * O * sieged * dm(w, 'alloy') * k; }
   y.rare = (RARE[w.id] || 0) * (1 + .35 * w.lv.mine) * R * sieged * dm(w, 'rare') * (rb(w, 'rare') || 1);
   y.inf = (m.gold * pop / 25 + 3 * w.lv.court + (CAPITAL[f] === w.id ? 5 : 0)) * ef(w, 'gold') * sieged * dm(w, 'inf');
   y.sci = (m.green * pop / 10 + 3 * w.lv.lab + (CAPITAL[f] === w.id ? 3 : 0)) * ef(w, 'green') * sieged * dm(w, 'sci');

@@ -32,16 +32,16 @@ const WK = 30 * PROD_K * 4;       // a week's yield, in multiples of the tactica
 const rnd = Math.random, clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 
 export const BUILD = { // what a world can build: per level effect, cost and weeks
-  mine:    { name: 'Deep Mines',      desc: '+45 ore a week',                         ore: 60,  he: 30,  t: 2, max: 3 },
-  skimmer: { name: 'He-3 Skimmers',   desc: '+35 helium-3 a week (+60% at a gas giant)', ore: 80, he: 0, t: 2, max: 3 },
-  arsenal: { name: 'Arsenal',         desc: '+90 ordnance a week',                     ore: 100, he: 40,  t: 3, max: 3 },
+  mine:    { name: 'Deep Mines',      desc: '+45 ore a week, at a world of 100 million', work: true,                         ore: 60,  he: 30,  t: 2, max: 3 },
+  skimmer: { name: 'He-3 Skimmers',   desc: '+35 helium-3 a week at a world of 100 million; a gas giant\u2019s own scoops +56 with no workforce, a moon\u2019s +56 at 100 million', work: true, ore: 80, he: 0, t: 2, max: 3 },
+  arsenal: { name: 'Arsenal',         desc: '+90 ordnance a week, at a world of 100 million', work: true,                     ore: 100, he: 40,  t: 3, max: 3 },
   farms:   { name: 'Agricultural Domes', desc: '+140 food a week',                      ore: 50,  he: 10,  t: 2, max: 3 },
-  barracks:{ name: 'Legion Barracks', desc: '+600 manpower a week, +1,000 garrison cap', ore: 80, he: 20, t: 2, max: 3 },
+  barracks:{ name: 'Legion Barracks', desc: '+600 manpower a week from a people of 150 million, +1,000 garrison cap', work: true, ore: 80, he: 20, t: 2, max: 3 },
   yard:    { name: 'Shipyard',        desc: 'Lv1 light hulls · Lv2 destroyers and torchShips · Lv3 dreadnoughts', ore: 260, he: 160, t: 4, max: 3 },
   grid:    { name: 'Defence Grid',    desc: '+1 orbital gun platform',                 ore: 160, he: 60,  t: 3, max: 3 },
   array:   { name: 'Shield Array',    desc: '+1 shield platform',                      ore: 140, he: 90,  t: 3, max: 3 },
   fort:    { name: 'Fortress',        desc: '+2,500 garrison cap; every estate +4 loyalty', ore: 180, he: 40,  t: 3, max: 3 },
-  foundry: { name: 'Foundry',         desc: 'Refines 40 ore into 30 alloys a week. Needs Deep Mines or a Shipyard here', ore: 140, he: 40, t: 3, max: 3, needs: w => w.lv.mine || w.lv.yard ? null : 'needs Deep Mines or a Shipyard here' },
+  foundry: { name: 'Foundry',         desc: 'Refines 40 ore into 30 alloys a week, at a world of 100 million. Needs Deep Mines or a Shipyard here', work: true, ore: 140, he: 40, t: 3, max: 3, needs: w => w.lv.mine || w.lv.yard ? null : 'needs Deep Mines or a Shipyard here' },
   court:   { name: 'Governor’s Court', desc: '+3 influence a week, +4 administrative capacity; Golds +4 loyalty', ore: 90, he: 60, t: 3, max: 2 },
   lab:     { name: 'Research Spire',  desc: '+3 research a week; a Green arcology of labs and data vaults', ore: 70, he: 50, t: 3, max: 3 },
 };
@@ -222,6 +222,7 @@ export function canBuild(f, w, k) {
   if (w.lv[k] + w.bq.filter(q => q.k === k).length >= B.max) return 'at its highest level';
   if (w.lv[k] === 0 && !w.bq.some(q => q.k === k) && usedSlots(w) >= w.slots) return 'no free building slots';
   if (B.needs && B.needs(w)) return B.needs(w);
+  if ((k === 'mine' || k === 'farms') && bodyOf(w.id).gas) return 'a gas giant has no ground to dig or farm';
   if (k === 'arsenal' && w.lv.arsenal >= 1 && !w.lv.foundry) return 'level 2 needs a Foundry here';
   if (k === 'yard' && w.lv.yard >= 2 && !w.lv.foundry) return 'level 3 needs a Foundry here';
   if (k === 'yard' && w.demil > C.turn) return `demilitarized by treaty for ${w.demil - C.turn} more weeks`;
@@ -1006,6 +1007,7 @@ function aiTurn(f) {
     if (w.bq.length || w.siege) continue;
     const fr = frontier(w), rich = r.he > 8000 && r.ore > 2500, dk = D.def * (rich ? 1.6 : 1); // a full treasury buys walls
     const need = [['skimmer', r.he < 600 ? 3 : 1], ['mine', r.ore < 500 ? 3 : 1], ['arsenal', r.ord < 800 ? 2 : .5], ['farms', r.food < 0 ? 3 : .2], ['barracks', r.man < 6000 ? 4 : r.man < 15000 ? 2.5 : .5], ['yard', r.he > 8000 ? 1.4 : w.id === CAPITAL[f] ? 1.2 : .25], ['grid', (fr ? 2 : rich ? .8 : .3) * dk], ['array', (fr ? 1.5 : rich ? .6 : .2) * dk], ['fort', (fr ? 1 : rich ? .6 : .2) * dk], ['foundry', r.alloy < 300 ? 3.2 : r.alloy < 900 ? 1.2 : .2], ['court', EC.overSprawl(f) > 0 ? 4 : EC.adminCap(f) - EC.sprawl(f) < 3 ? 1.6 : .1], ['lab', rich ? 1.2 : .2]]
+      .map(([k, v]) => [k, BUILD[k].work ? v * (k === 'barracks' ? Math.min(1.2, EC.levyOf(w.id) * 1.5) : k === 'skimmer' ? EC.skimMul(w.id) * 1.1 : EC.workOf(w.id) * 1.1) : v]) // works go where the hands are
       .filter(([k]) => !canBuild(f, w, k)).sort((a, b) => b[1] - a[1] + (rnd() - .5));
     if (need.length && rnd() < .7) startBuild(f, w, need[0][0]);
   }
