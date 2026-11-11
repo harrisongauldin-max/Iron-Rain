@@ -4,6 +4,7 @@ Each publish of `main` to the claude.ai artifact (slug `fc8b77cf-d69b-4cca-9154-
 
 | Artifact version | Date | Commit | What changed |
 |---|---|---|---|
+| 1794415195-0d02 | 2026-11-11 | 54ed367 | `js/hulls.js`: Gun Platform rebuilt as an orbital rail battery (armoured drum core, twin-rail turret on a barbette, capacitor banks, radiator vanes, docking collar). |
 | 1794415176-06fa | 2026-11-11 | f5e35bf | `js/render.js`, `js/sim.js`: ships answer their guns and the enemy's — barrel recoil; a damped hull spring (heel on broadsides, bow lift on spinal guns, shudder on hits); hull scorch + sparks where hits land, whole-hull flash only on heavy blows; damage stages (venting <60%, fires/sparks/stuttering lights <35%, coughing drive <20%) at the actual breaches. sim.js only records `w.fT`, `s.hitX/hitY`, `s.hitSum`. |
 | 1794414754-c738 | 2026-11-11 | cc8e7ed | `js/hulls.js`, `js/render.js`: stations rebuilt as structures (Citadel ring with bastions, spitTubes, docking arms and command tower; Mining Station refinery; Gun Platform turrets; Shield Station emitter ring); warm window material. |
 | 1794414731-d612 | 2026-11-11 | f694ff5 | `js/render.js`: battle punch — shield halves/bubble shatter into hex cells under an arc of glow (from `downP`/`downS`/`shDown`), hull-flip pulse in the new team colour, impact flash on slug hits, tracer tails on gun rounds and hot flak dashes, camera shake on big blasts and shield collapses (`gx.shake=false` to disable); softer lance-charge glow; `TEX.dot` restored. |
