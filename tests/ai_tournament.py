@@ -23,7 +23,7 @@ async def main():
         pg=await ctx.new_page(); errs=[]
         pg.on('pageerror',lambda e: errs.append(str(e)[:200]))
         await pg.goto(URL); await pg.wait_for_timeout(500)
-        await pg.evaluate("()=>localStorage.setItem('ir.quality','standard')"); await pg.reload(); await pg.wait_for_timeout(3500); await pg.mouse.move(480,270)
+        await pg.evaluate("()=>{localStorage.setItem('ir.quality','standard'); localStorage.setItem('ironrain.opts', JSON.stringify({skipTrivial:false}))}"); await pg.reload(); await pg.wait_for_timeout(3500); await pg.mouse.move(480,270)
         await pg.evaluate("()=>document.querySelector('[data-mode=camp]').click()"); await pg.wait_for_timeout(300)
         await pg.evaluate("()=>document.querySelector('#start').click()"); await pg.wait_for_timeout(5000)
         for _ in range(5):

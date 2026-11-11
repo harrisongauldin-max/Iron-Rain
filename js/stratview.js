@@ -25,6 +25,8 @@ import * as CQ from './conquest.js';
 import * as SR from './starts.js';
 import * as QS from './quests.js';
 import { initAudio, sfx } from './audio.js';
+import { OPTS, saveOpts } from './ui.js';
+import { DEFS } from './data.js';
 import * as SV from './save.js';
 
 const $ = id => document.getElementById(id);
@@ -1318,7 +1320,7 @@ async function endTurnUI() {
       const A0 = sideSum(cf, cf.att), D0 = sideSum(cf, cf.def);
       const myMobile = K.cfFleets(cf, me).some(f => f.ships.length);
       { const p = cf.space ? IN.locPos(cf.space.loc, LP) : LAY.pos[cf.world]; S.cam.x = p.x; S.cam.y = p.y; } S.cam.z = clamp(S.H * .035 / bodyOf(cf.world).r, Math.min(S.cam.z, 1e-3), .25);
-      let v = myMobile ? await battlePrompt(cf, A0, D0) : 'auto';
+      let v = !myMobile ? 'auto' : (await sureWin(cf)) ? 'auto' : await battlePrompt(cf, A0, D0);
       let res;
       if (v === 'withdraw') { res = { attWin: cf.att !== me, world: cf.world, att: cf.att, def: cf.def, atts: cf.atts, defs: cf.defs, withdrew: true, space: cf.space }; K.afterBattle(res); }
       else if (v === 'fight') res = await fightBattle(cf);
@@ -1375,6 +1377,41 @@ function rainArt(id, cls = '') {
 }
 const SPACE_T = { open: 'Open space', belt: 'The Belt', glare: 'In the Sun\'s glare', giant: 'In a gas giant\'s shadow' };
 const SPACE_D = { open: 'Nothing to hide behind: no world, no platforms, no Iron Rain.', belt: 'Among the asteroids of the Belt: rocks for cover, lanes for ambush.', glare: 'So close to the Sun that sensors burn out at range: the fight starts close.', giant: 'In the shadow of a gas giant, where its moons and storms break up the sensors.' };
+// a battle the forecast calls certain (97%+ and no ship of ours expected lost) is auto-resolved without the battle
+// screen: a banner says so for a few seconds, with "Fight it anyway". The setting lives on the battle screen
+const SURE_WIN = .97, SURE_LOSS = .5; // the same "we lose none" the battle screen shows
+function sureWin(cf) {
+  if (OPTS.skipTrivial === false || cf.quest || cf.assault) return Promise.resolve(false);
+  const me = C.player, att = cf.att === me, fc = K.forecastBattle(cf, 200), win = att ? fc.attWin : 1 - fc.attWin, lost = fc.lost[att ? 0 : 1];
+  if (win < SURE_WIN || lost > SURE_LOSS) return Promise.resolve(false);
+  return new Promise(done => {
+    const el = document.createElement('div'); el.className = 'surewin';
+    el.innerHTML = `<div class="kicker">${cf.space ? 'Battle in deep space off ' : 'Battle of '}${nm(cf.world)}</div><b>A sure win: auto-resolving</b><span>${Math.round(win * 100)}% to win, no ships of ours expected lost</span><div class="swbtns"><button class="btn go" data-sw="fight">Fight it anyway</button><button class="btn" data-sw="ask" title="Always show the battle screen. You can turn this back on there.">Always ask</button></div><i class="swbar"></i>`;
+    document.body.appendChild(el); let t = null;
+    const end = v => { clearTimeout(t); el.remove(); done(v); };
+    el.addEventListener('click', e => { const b = e.target.closest('[data-sw]'); if (!b) return; if (b.dataset.sw === 'ask') { OPTS.skipTrivial = false; saveOpts(); } end(false); });
+    // four seconds, and the clock stops while the pointer is over the banner: nobody should lose a battle to a reflex
+    let left = 4000, t0 = performance.now(); const go = () => { t0 = performance.now(); t = setTimeout(() => end(true), left); };
+    el.addEventListener('mouseenter', () => { clearTimeout(t); left = Math.max(800, left - (performance.now() - t0)); el.classList.add('held'); });
+    el.addEventListener('mouseleave', () => { el.classList.remove('held'); go(); }); go();
+  });
+}
+// what only a battle fought on the map can win here, and what it risks: the line under the forecast
+function fightWins(cf, fc, att, myLost) {
+  const me = C.player, foeO = att ? cf.def : cf.att, foes = K.cfFleets(cf, foeO).flatMap(f => f.ships), mine = K.cfFleets(cf, me).flatMap(f => f.ships);
+  const dv = s => { const d = DEFS[s.t] || {}; return d.value || d.cost || 50; };
+  const capN = foes.filter(s => (DEFS[s.t] || {}).capture).length, ore = Math.round(foes.reduce((a, s) => a + (fc.dieP[s.id] || 0) * dv(s), 0) * .15);
+  const caps = mine.filter(s => { const d = DEFS[s.t] || {}; return d.cmd && (d.len || 0) >= 1500; }).length, G = K.GRADES;
+  const it = [
+    `<span data-tip="${tipA(`<div class='th'>Victory grades</div><div class='tdim'>A Decisive victory: ${G.decisive.inf} influence, enemy war-weariness +${G.decisive.weary}, commanders +${G.decisive.xp} xp. An Annihilation: ${G.annihilation.inf} influence, war-weariness +${G.annihilation.weary}, commanders +${G.annihilation.xp} xp, and the court's biggest reaction. Auto-resolve stops at Victory (${G.victory.inf} influence).</div>`)}"><b>Up to Annihilation</b> (auto-resolve stops at Victory)</span>`,
+    capN ? `<span data-tip="${tipA('Hulls that strike their colours, are boarded, or are left derelict on a field you hold come home as prize ships.')}"><b>Prizes</b> ${capN} of their hulls can be taken</span>` : '',
+    ore > 0 ? `<span data-tip="${tipA('Hold the field and the salvage crews strip the wrecks.')}"><b>Salvage</b> ~${fmt(ore)} ore</span>` : '',
+    `<span data-tip="${tipA('Hold the field and most of our wrecked escorts (about 6 in 10) are towed home for repair, and some of theirs (about 3 in 10) come in as prize hulls. Capital ships go up with their reactors.')}"><b>Wrecks towed home</b></span>`,
+    `<span data-tip="${tipA('The ship of the battle gains a rank: a better crew from then on.')}"><b>Crew ranks</b></span>`,
+  ].filter(Boolean).join('');
+  const risk = `<span class="bwrisk" data-tip="${tipA(`Auto-resolve spreads losses thin: it leaves capital ships crippled rather than lost unless the enemy is strong, and keeps a big winner's losses small. A battle you fight has no such cushion: what happens on the map is what you keep.`)}"><b>The risk</b> no auto-resolve cushion${caps ? ': capital ships can be lost outright' : ''} (auto-resolve expects ${myLost < .5 ? 'no losses' : '~' + Math.max(1, Math.round(myLost)) + ' lost'})</span>`;
+  return `<div class="bwins"><div class="kicker">Take command to win</div><div class="bwl">${it}</div>${risk}</div>`;
+}
 function battlePrompt(cf, A0, D0) {
   const me = C.player, w = C.worlds[cf.world], att = cf.att === me;
   // fleets a week out that arrive while the battle is joined: the forecast counts them, so the balance shows them too
@@ -1393,7 +1430,9 @@ function battlePrompt(cf, A0, D0) {
   return modal(`<div class="bhead">${pic ? `<img class="bport" src="${pic}" alt="">` : ''}<div><div class="kicker">${date(C.turn)} · ${sp ? SPACE_T[sp.terrain] : WDEF[cf.world].region || ''}</div><h2>${sp ? 'Battle in deep space off ' + nm(cf.world) : 'Battle of ' + nm(cf.world)}</h2><div class="bvs">${lead(cf.att)}<i>${sp ? (sp.kind === 'ambush' ? 'ambushes' : 'intercepts') : cf.att === me ? 'attacks' : 'comes against'}</i>${lead(cf.def)}${cf.withWorld ? `<i>and the world's guns</i>` : ''}</div>${sp ? `<div class="tdim">${SPACE_D[sp.terrain]}${sp.kind === 'ambush' ? ' Out of the dark: the ambushers strike first (+25% on auto-resolve).' : ''}</div>` : ''}</div></div>
     <div class="bop" data-tip="${tipA('Balance of power: fleets, crews and condition, with the world\'s platforms on the defender\'s side')}"><span style="width:${Math.round(share * 100)}%;background:${meC}"></span><span style="width:${Math.round((1 - share) * 100)}%;background:${foeC}"></span><em style="left:${Math.round(share * 100)}%"></em></div>
     <div class="bopl"><b>${fmt(myS)}</b><span class="${lc}" data-tip="${tipA('From 300 dry runs of this battle on auto-resolve. Red figures on the cards are each ship\'s chance of being lost.')}">Auto-resolve: ${label} · ${Math.round(myWin * 100)}% to win · we lose ${range(myLost)}, they lose ${range(foeLost)}</span><b>${fmt(foeS)}</b></div>${incLine(incA, cf.att)}${incLine(incD, cf.def)}
-    <div class="bsides">${sideCards(cf, cf.att, false, att, fc)}${sideCards(cf, cf.def, cf.withWorld, !att, fc)}</div>`,
+    ${fightWins(cf, fc, att, myLost)}
+    <div class="bsides">${sideCards(cf, cf.att, false, att, fc)}${sideCards(cf, cf.def, cf.withWorld, !att, fc)}</div>
+    <label class="bskip" data-tip="${tipA('Battles the forecast calls certain (97% or better, with no ship of ours expected lost) are auto-resolved after a short notice with a Fight it anyway button.')}"><input type="checkbox" data-skipsure ${OPTS.skipTrivial !== false ? 'checked' : ''}> Auto-resolve sure wins without asking</label>`,
     [[canW ? 'withdraw' : 'nowithdraw', sp ? (att ? 'Break off' : 'Break through') : att ? 'Withdraw' : 'Abandon orbit', canW ? '' : 'off', sp ? (att ? 'Let them go and turn for home. Every ship takes 8–18% hull damage on the way out.' : 'Run the gauntlet: hold your course for your destination under fire. Every ship takes 8–18% hull damage.') : canW ? (att ? 'Pull back to your nearest world. Every ship takes 8–18% hull damage on the way out, and you cannot slip away from this enemy here again next week.' : 'Fall back and leave the world to its platforms and garrison. Every ship takes 8–18% hull damage on the way out.') : 'You withdrew from this enemy here last week: this time you must fight.'], ['auto', 'Auto-resolve', '', `${Math.round(myWin * 100)}% to win`], ['fight', 'Take command ▸', 'go', 'Fight it in real time on the tactical map']], { enter: 'fight', esc: null, cls: 'battle wide' });
 }
 function battleResult(cf, res, snap, W0) {
@@ -1403,10 +1442,13 @@ function battleResult(cf, res, snap, W0) {
   const lost = i => snap[i].filter(e => fate(e) !== 'ok').length, tot = i => snap[i].length;
   const myLoss = lost(meSide) / Math.max(1, tot(meSide)), foeLoss = lost(1 - meSide) / Math.max(1, tot(1 - meSide));
   const won = (res.attWin && cf.att === me) || (!res.attWin && cf.def === me);
-  const grade = res.held && won ? 'The orbit holds' : cf.space && res.through ? (won ? 'Through the line' : 'They broke through') : cf.space && res.timeout ? (won ? 'Lost in the dark' : 'They slipped away') : res.withdrew ? (cf.space ? (cf.att === me ? 'Broken off' : 'Through the gauntlet') : cf.att === me ? 'Withdrawal' : 'Orbit abandoned') : won && res.rout ? (myLoss < .2 ? 'Rout' : 'The enemy breaks') : won ? (myLoss < .15 && foeLoss > .5 ? 'Decisive victory' : myLoss > .5 ? 'Pyrrhic victory' : myLoss < foeLoss * .6 ? 'Clear victory' : 'Close victory') : (foeLoss > .5 ? 'Close defeat' : myLoss > .6 ? 'Crushing defeat' : 'Defeat');
+  const grade = res.held && won ? 'The orbit holds' : cf.space && res.through ? (won ? 'Through the line' : 'They broke through') : cf.space && res.timeout ? (won ? 'Lost in the dark' : 'They slipped away') : res.withdrew ? (cf.space ? (cf.att === me ? 'Broken off' : 'Through the gauntlet') : cf.att === me ? 'Withdrawal' : 'Orbit abandoned') : won && res.rout ? (myLoss < .2 ? 'Rout' : 'The enemy breaks') : won ? (K.GRADES[res.grade] ? K.GRADES[res.grade].name : myLoss < .15 && foeLoss > .5 ? 'Decisive victory' : myLoss > .5 ? 'Pyrrhic victory' : myLoss < foeLoss * .6 ? 'Clear victory' : 'Close victory') : (foeLoss > .5 ? 'Close defeat' : myLoss > .6 ? 'Crushing defeat' : 'Defeat');
   const col = i => { const o = i === 0 ? cf.att : cf.def; return `<div class="bside" style="--fc:${colS(o)}"><div class="bsh">${SHIELD(o, 30)}<div><b>${K.BLOC_NAME[o]}</b><span>Lost ${lost(i)} of ${tot(i)} ships</span></div></div><div class="bcards">${snap[i].map(e => { const fa = fate(e); return shipCard(e.s, e.o, { dead: fa === 'dead', prize: fa === 'prize' }); }).join('')}</div>${i === 1 && cf.withWorld && (W0.gun !== w.gun || W0.shield !== w.shield) ? `<div class="bdef"><span class="bad">⊕ ${W0.gun - w.gun} gun platforms destroyed</span><span class="bad">◈ ${W0.shield - w.shield} shield platforms destroyed</span></div>` : ''}</div>`; };
   const after = cf.quest ? `<div class="${res.quest === 'won' ? 'good' : 'bad'} big">${esc(QS.QUESTS[cf.quest].title)}: ${res.quest === 'won' ? 'done' : 'it fails'}.</div>` : cf.space ? '' : res.taken && cf.assault ? `<div class="good big">The legions hold two landing zones of three: ${nm(cf.world)} is taken.</div>` : cf.assault && !res.taken ? `<div class="bad big">The assault on ${nm(cf.world)} fails: the garrison holds. The siege goes on.</div>` : res.taken ? `<div class="${res.attWin === (cf.att === me) ? 'good' : 'bad'} big">${res.rain ? `The Iron Rain fell: ${nm(cf.world)} is taken.` : `The orbital authority was boarded: ${nm(cf.world)} is taken.`}</div>` : w.siege && !res.withdrew ? `<p class="dim">${nm(cf.world)} is under siege by ${K.BLOC_NAME[w.siege.by]}.${w.siege.by === me ? ' Hold orbit a week, then drop the Iron Rain.' : ''}</p>` : '';
-  return modal(`<div class="kicker">${cf.space ? 'Battle in deep space off ' : 'Battle of '}${nm(cf.world)} · ${date(C.turn)}</div><h2 class="${won ? 'good' : 'bad'}">${grade}</h2>${after}${res.aar ? aarHTML(res.aar, meSide) : ''}<div class="bsides">${col(0)}${col(1)}</div>`, [['ok', 'Continue', 'go']], { enter: 'ok', esc: 'ok', cls: 'battle wide' });
+  // the grade of the victory, and what it was worth
+  const GD = res.grade && K.GRADES[res.grade], sp0 = res.spoils || {}, foeN = K.BLOC_NAME[won ? (cf.att === me ? cf.def : cf.att) : (cf.att === me ? cf.att : cf.def)];
+  const gradeLine = GD ? `<div class="vgrade g-${res.grade} ${won ? 'ours' : 'theirs'}"><b>${won ? 'Grade: ' : 'Theirs: '}${GD.name}</b><span>${esc(GD.text)}</span><span class="vgx">${[sp0.inf ? `${won ? '+' : 'They gain '}${sp0.inf} influence` : '', sp0.weary ? `${won ? foeN : 'Our'} war-weariness +${sp0.weary}` : '', sp0.xp ? `${won ? 'Our' : 'Their'} commanders +${sp0.xp} xp` : '', `the court ${GD.react >= 1.5 ? 'rejoices' : GD.react >= 1 ? 'approves' : 'counts the cost'}`].filter(Boolean).join(' · ')}</span>${!res.tactical && won && res.grade === 'victory' ? `<span class="vgcap">Auto-resolve never rises above Victory. Decisive victories and Annihilations are won by taking command.</span>` : ''}</div>` : '';
+  return modal(`<div class="kicker">${cf.space ? 'Battle in deep space off ' : 'Battle of '}${nm(cf.world)} · ${date(C.turn)}</div><h2 class="${won ? 'good' : 'bad'}">${grade}</h2>${gradeLine}${after}${res.aar ? aarHTML(res.aar, meSide) : ''}<div class="bsides">${col(0)}${col(1)}</div>`, [['ok', 'Continue', 'go']], { enter: 'ok', esc: 'ok', cls: 'battle wide' });
 }
 // the after-action report of a battle fought on the tactical map
 function aarHTML(A, meSide) {
@@ -1421,6 +1463,9 @@ function aarHTML(A, meSide) {
   for (const c of A.cmdrs) ev.push(`<span class="${c.fate === 'came through' ? '' : c.ours ? 'bad' : 'good'}">${c.ours ? '' : 'Enemy: '}${esc(c.name)} ${c.fate}</span>`);
   for (const n of A.champs) ev.push(`<span class="bad">The champion ${esc(n)} fell in a duel</span>`);
   const hon = h => `<div class="hon ${h.lost ? 'lost' : ''}"><b>${esc(h.name)}</b><i>${esc(h.cls)}</i><span>${h.kills} kill${h.kills === 1 ? '' : 's'} · ${fmt(h.dmg)} damage${h.lost ? ' · lost' : ''}</span></div>`;
+  const nW = n => ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six'][n] || String(n);
+  if (A.towed && A.towed.own) ev.push(`<span class="good">${nW(A.towed.own)} of our wrecked escorts taken in tow: back to the yards for repair</span>`.replace('One of our wrecked escorts', 'One wrecked escort of ours'));
+  if (A.towed && A.towed.prize) ev.push(`<span class="good">${nW(A.towed.prize)} enemy wreck${A.towed.prize > 1 ? 's' : ''} towed in as prize hull${A.towed.prize > 1 ? 's' : ''}</span>`);
   if (A.derelictPrizes) ev.push(`<span class="good">${A.derelictPrizes} hulk${A.derelictPrizes > 1 ? 's' : ''} left on the field taken in tow</span>`);
   if (A.salvage && A.salvage.ore) ev.push(`<span class="${A.salvage.team === 0 ? 'good' : ''}">Salvage: ${A.salvage.n} wreck${A.salvage.n > 1 ? 's' : ''} stripped, +${fmt(A.salvage.ore)} ore${A.salvage.team === 0 ? '' : ' to the enemy'}</span>`);
   return `<div class="aar"><div class="aev">${ev.join('')}</div>${A.mvp ? `<div class="amvp"><div class="kicker">Ship of the battle</div><b>${esc(A.mvp.name)}</b><i>${esc(A.mvp.cls)}${A.mvp.lost ? ' · lost with honour' : ''}</i><span>${A.mvp.kills} kill${A.mvp.kills === 1 ? '' : 's'} · ${fmt(A.mvp.dmg)} damage dealt</span>${A.mvp.killed.length ? `<em>${A.mvp.killed.map(esc).join(' · ')}</em>` : ''}</div>` : ''}${A.honours.length ? `<div class="ahon"><div class="kicker">Mentioned in dispatches</div>${A.honours.map(hon).join('')}</div>` : ''}</div>${whyHTML(A)}`;
@@ -1489,3 +1534,6 @@ function checkOver() {
 }
 function showReport() { refresh(); }
 window.__CAMP = { C, V, K, layout: () => LAY };
+
+// the sure-win setting, from the checkbox on the battle screen
+document.addEventListener('change', e => { const b = e.target.closest && e.target.closest('[data-skipsure]'); if (b) { OPTS.skipTrivial = !!b.checked; saveOpts(); } });

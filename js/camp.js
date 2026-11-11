@@ -546,11 +546,32 @@ export function autoResolve(cf) {
     let kill = Math.round(n * k * (.8 + rnd() * .4)); while (kill-- > 0 && w.gun + w.shield > 0) { if (w.gun && (rnd() < .6 || !w.shield)) w.gun--; else w.shield--; }
     if (attWin) w.gov = Math.max(.1, w.gov - .2 - .1 * Math.min(3, res.r - 1));
   }
-  const out = { attWin, world: cf.world, att: cf.att, def: cf.def, atts: cf.atts, defs: cf.defs, margin: res.r, space: cf.space };
+  const lossF = [0, 1].map(i => { const tot = sides[i].ships.reduce((a, s) => a + sval(sides[i].own.get(s) || sides[i].o, s), 0) || 1; return res.dead[i].reduce((a, s) => a + sval(sides[i].own.get(s) || sides[i].o, s), 0) / tot; });
+  const out = { attWin, world: cf.world, att: cf.att, def: cf.def, atts: cf.atts, defs: cf.defs, margin: res.r, space: cf.space, lossF };
   afterBattle(out); return out;
+}
+// how big the victory was: the share of each side's strength lost (lossF, [attacker, defender]), the rout and the
+// prizes. A victory that cost more than it won is Pyrrhic; a fleet broken and taken is an Annihilation. Auto-resolve
+// never rises above Victory: the big grades are won by fighting the battle
+export const GRADES = {
+  pyrrhic: { name: 'Pyrrhic victory', react: .5, defeat: .7, weary: 0, inf: 0, xp: 0, text: 'Won, at a price the court will count' },
+  victory: { name: 'Victory', react: 1, defeat: 1, weary: 1, inf: 4, xp: 0, text: 'The field is ours' },
+  decisive: { name: 'Decisive victory', react: 1.6, defeat: 1.4, weary: 3, inf: 10, xp: 20, text: 'Their line broken, ours whole' },
+  annihilation: { name: 'Annihilation', react: 2.2, defeat: 1.8, weary: 6, inf: 20, xp: 40, text: 'Their fleet is gone from the board' },
+};
+export function gradeOf(res) {
+  if (res.withdrew || !res.lossF) return null;
+  const wi = res.attWin ? 0 : 1, won = res.lossF[wi], lost = res.lossF[1 - wi], prizes = res.captured || 0;
+  let g = 'victory';
+  if (won >= .45 || (won > .15 && won > lost)) g = 'pyrrhic';
+  else if ((lost >= .85 || (prizes >= 2 && lost >= .6)) && won <= .2) g = 'annihilation';
+  else if (lost >= .5 && won <= .25 && lost >= won * 2.5) g = 'decisive';
+  if (!res.tactical && (g === 'decisive' || g === 'annihilation')) g = 'victory';
+  return g;
 }
 // whoever lost the field falls back to their nearest world; the winner holds orbit (and lays siege if the world is hostile)
 export function afterBattle(res) {
+  res.grade = gradeOf(res); const GR = GRADES[res.grade] || GRADES.victory;
   const loser = res.attWin ? res.def : res.att, winner = res.attWin ? res.att : res.def, w = C.worlds[res.world];
   const A = res.atts || [res.att], D = res.defs || [res.def], wins = res.attWin ? A : D, loses = res.attWin ? D : A; res.wins = wins; res.loses = loses;
   const here = o => { const L = o === winner ? wins : o === loser ? loses : [o]; return res.space ? C.fleets.filter(f => f.engage === res.space.id && L.includes(f.owner)) : C.fleets.filter(f => f.at === res.world && !f.transit && L.includes(f.owner)); };
@@ -573,7 +594,7 @@ export function afterBattle(res) {
   else if (wins.includes(me)) note(`Victory at ${nm}: our ships fight beside ${BLOC_NAME[winner]}, and ${BLOC_NAME[loser]} falls back.`, 'good', res.world);
   else if (loses.includes(me)) note(`Defeat at ${nm}: ${BLOC_NAME[loser]} is beaten, and our ships fall back with it.`, 'bad', res.world);
   else if (winner !== 'neu' && loser !== 'neu') note(`${BLOC_NAME[winner]} defeats ${BLOC_NAME[loser]} at ${nm}.`, '', res.world);
-  CM.battleFate(Object.assign({}, res, { margin: res.margin })); if (!res.withdrew) { for (const o of wins) P.react(o, 'victory', o === winner ? 1 : .5); for (const o of loses) P.react(o, 'defeat', o === loser ? 1 : .5); for (const f of C.fleets) if (loses.includes(f.owner) && f.transit && f.transit.bat === res.world + '|' + C.turn) AG.battleLost(f); }
+  CM.battleFate(Object.assign({}, res, { margin: res.margin })); if (!res.withdrew) { for (const o of wins) P.react(o, 'victory', (o === winner ? 1 : .5) * GR.react); for (const o of loses) P.react(o, 'defeat', (o === loser ? 1 : .5) * GR.defeat); for (const f of C.fleets) if (loses.includes(f.owner) && f.transit && f.transit.bat === res.world + '|' + C.turn) AG.battleLost(f); gradeSpoils(res, GR, winner, loser, here(winner)); }
   chronBattle(res, winner, loser, leads);
   if (hostile(winner, w.owner) && !w.siege) { newSiege(w, winner); if (w.owner === me) note(`${nm} is under siege!`, 'bad', res.world); else if (winner === me) note(`${nm} is under siege. Bring troops for an Iron Rain.`, 'gold', res.world); }
 }
@@ -593,7 +614,15 @@ function afterSpace(res, winner, loser) {
   if (res.through || res.timeout) { if (loser === me) note(res.through ? `The enemy breaks through our line ${nmS} and holds its course.` : `We lose them in the dark ${nmS}: the enemy slips away.`, 'bad', e.near); }
   else if (winner === me) note(`Victory ${nmS}: ${BLOC_NAME[loser]} ${res.withdrew ? 'breaks off' : 'is beaten'}.`, 'good', e.near);
   else if (loser === me) note(`Defeat ${nmS}.`, 'bad', e.near);
-  CM.battleFate(Object.assign({}, res, { margin: res.margin })); if (!res.withdrew) { for (const o of res.wins || [winner]) P.react(o, 'victory', o === winner ? 1 : .5); for (const o of res.loses || [loser]) P.react(o, 'defeat', o === loser ? 1 : .5); }
+  CM.battleFate(Object.assign({}, res, { margin: res.margin })); if (!res.withdrew) { const GR = GRADES[res.grade] || GRADES.victory; for (const o of res.wins || [winner]) P.react(o, 'victory', (o === winner ? 1 : .5) * GR.react); for (const o of res.loses || [loser]) P.react(o, 'defeat', (o === loser ? 1 : .5) * GR.defeat); gradeSpoils(res, GR, winner, loser, C.fleets.filter(f => f.batE === e.id && (res.wins || [winner]).includes(f.owner))); }
+}
+// what the grade of a victory is worth beyond the court's mood: the loser's war-weariness, the winner's influence,
+// and the winning commanders' standing
+function gradeSpoils(res, GR, winner, loser, fls) {
+  if (winner !== 'neu' && C.fac[winner] && C.fac[winner].res) C.fac[winner].res.inf = (C.fac[winner].res.inf || 0) + GR.inf;
+  if (GR.weary) CM.weary(loser, GR.weary);
+  if (GR.xp) for (const f of fls) { const c = CM.cmdrOf(f); if (c) CM.gainXp(c, GR.xp); }
+  res.spoils = { inf: winner === 'neu' ? 0 : GR.inf, weary: loser === 'neu' ? 0 : GR.weary, xp: GR.xp };
 }
 const nearestOwned = (f, from) => { let best = null, bd = 99; for (const id in C.worlds) if (C.worlds[id].owner === f && id !== from) { const d = travel(from, id); if (d < bd) { bd = d; best = id; } } return best; };
 

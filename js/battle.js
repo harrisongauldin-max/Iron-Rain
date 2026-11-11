@@ -157,7 +157,12 @@ function holderOf(r) {
 }
 function writeBack(r0) {
   const { out, fleetOf, me, foe, cf, defTeam, teamOf } = B, owner = t => t === 0 ? me : foe, w = C.worlds[cf.world]; let captured = 0; B.lostV = [0, 0]; B.lostN = 0;
-  const hold = holderOf(r0); B.dprize = 0; B.drecov = 0;
+  const hold = holderOf(r0); B.dprize = 0; B.drecov = 0; B.towed = { own: 0, prize: 0 }; B.startV = [0, 0];
+  for (const s of out.ships) { const fl = fleetOf.get(s.campRef); if (s.campRef && fl && !s.def.fighter && !s.def.shell) B.startV[teamOf(fl.owner)] += s.def.value || s.def.cost || 50; }
+  // an escort's hull often outlives her crew: whoever holds the field when it is over tows the wrecks home. Ours go
+  // back to the yards (more often than not); theirs come in as prize hulls, more rarely. Capital ships go up with
+  // their reactors and a nuke leaves nothing, so neither is towed. Only a battle fought on the map does this
+  const towable = s => s.dead && !s.recovered && !s.rained && !s.def.fighter && !s.def.shell && !s.def.static && s.def.capture !== false && !(s.def.cmd && (s.def.len || 0) >= 1500) && s.killKind !== 'nuke' && s.killKind !== 'blast';
   for (const s of out.ships) {
     const r = s.campRef, fl = fleetOf.get(r); if (!r || !fl) continue;
     const origTeam = teamOf(fl.owner);
@@ -172,10 +177,17 @@ function writeBack(r0) {
       if (s.surrendered) { const S0 = B.struck = B.struck || { n: 0, crew: 0, ids: [], by: cap, foe: fl.owner }; S0.n++; S0.crew += d.crew || 0; S0.ids.push(r.id); } /* a crew that struck its colours: what becomes of them is the captor's choice */
       continue;
     }
+    if (hold != null && towable(s) && Math.random() < (hold === origTeam ? .6 : .3)) {
+      const d = s.def; r.hp = .06; r.crew = hold === origTeam ? Math.max(.25, s.crew / (d.crew || 1)) : .08; r.ammo = .1; r.sub = subOf(s); r.towed = true;
+      if (hold === origTeam) { B.towed.own++; continue; } // ours: back to the yards with what is left of her crew
+      B.lostV[origTeam] += d.value || d.cost || 50; B.lostN++; fl.ships = fl.ships.filter(x => x !== r); CM.weary(fl.owner, (d.value || 50) / 700); if (!fl.ships.length) CM.fleetLost(fl, owner(hold));
+      const cap = owner(hold); let to = K.cfOwn(cf, cap).find(f => f.at === cf.world && !f.transit) || (cf.space ? K.cfOwn(cf, cap)[0] : null); if (!to) to = K.fleet(cap, cf.world, {}, hold === 0 ? 'Prize Squadron' : null);
+      r.prize = true; to.ships.push(r); B.towed.prize++; continue; // listed on its own line, not among the prizes taken
+    }
     const lost = (s.dead && !s.recovered) || s.surrendered || s.derelict;
     if (lost) { B.lostV[origTeam] += s.def.value || s.def.cost || 50; if (!s.def.fighter && !s.def.shell) B.lostN++; fl.ships = fl.ships.filter(x => x !== r); CM.weary(fl.owner, (s.def.value || 50) / 700); if (!fl.ships.length) CM.fleetLost(fl, owner(1 - origTeam)); continue; }
     const d = s.def; r.hp = Math.max(.05, s.hp / d.hp); r.crew = d.crew > 2 ? Math.max(.1, s.crew / d.crew) : 1;
-    const ws = s.weapons.filter(x => !x.def.nuke && !x.def.pd); r.ammo = ws.length ? ws.reduce((a, x) => a + x.ammo / x.mag, 0) / ws.length : 1; r.rank = Math.max(r.rank || 0, s.rank || 0); r.battles = (r.battles || 0) + 1; r.kills = (r.kills || 0) + (s.kills || 0); if (s.mvp) { r.honours = (r.honours || 0) + 1; CM.gainXp(CM.cmdrOf(fl), 10); if (r.honours >= 2 && !r.crewName) { r.crewName = crewName(); if (fl.owner === me) K.note(`The crew of the ${r.name || d.name} name themselves ${r.crewName}.`, 'gold'); } }
+    const ws = s.weapons.filter(x => !x.def.nuke && !x.def.pd); r.ammo = ws.length ? ws.reduce((a, x) => a + x.ammo / x.mag, 0) / ws.length : 1; r.rank = Math.max(r.rank || 0, s.rank || 0); r.battles = (r.battles || 0) + 1; r.kills = (r.kills || 0) + (s.kills || 0); if (s.mvp) { r.honours = (r.honours || 0) + 1; r.rank = Math.min(3, (r.rank || 0) + 1); /* the ship of the battle: her crew comes out of it a rank better */ CM.gainXp(CM.cmdrOf(fl), 10); if (r.honours >= 2 && !r.crewName) { r.crewName = crewName(); if (fl.owner === me) K.note(`The crew of the ${r.name || d.name} name themselves ${r.crewName}.`, 'gold'); } }
     r.sub = subOf(s); // damage that lasts: subsystems stay knocked about until a yard puts them right
     const nk = nukesOf(s); if (nk.length) r.nukes = nk.reduce((a, x) => a + x.ammo / Math.max(1, x.mag), 0) / nk.length;
     if (s.h) { const h = Object.assign({}, s.h); for (const f of S.ships) if (f.carrier === s && !f.dead && f.def.fighter) h[f.type] = (h[f.type] || 0) + 1; r.hangar = h; }
@@ -214,7 +226,8 @@ function finish(r) {
   B.struck = null; const captured = writeBack(r); aar.prizes = captured; if (B.struck) CQ.onStruck(B.struck); aar.derelictPrizes = B.dprize || 0; aar.recovered = B.drecov || 0; aar.salvage = B.salvage || null;
   K.leaveWrecks(cf, B.lostV[0] + B.lostV[1], (B.lostN || 0));
   { const wt = r.attWin ? attTeam : 1 - attTeam; r.margin = Math.max(.5, Math.min(4, (B.lostV[1 - wt] + 100) / (B.lostV[wt] + 100))); }
-  const res = { attWin: !!r.attWin, world: cf.world, space: cf.space, through: r.through, att: cf.att, def: cf.def, atts: cf.atts, defs: cf.defs, captured, margin: r.margin, withdrew: r.withdrew, timeout: r.timeout, rout: r.rout, held: r.held, escaped: MO.M.esc.slice(), tactical: true, aar };
+  const lossF = [attTeam, 1 - attTeam].map(t => B.lostV[t] / Math.max(1, B.startV[t])); aar.towed = B.towed;
+  const res = { attWin: !!r.attWin, world: cf.world, space: cf.space, through: r.through, att: cf.att, def: cf.def, atts: cf.atts, defs: cf.defs, captured, margin: r.margin, withdrew: r.withdrew, timeout: r.timeout, rout: r.rout, held: r.held, escaped: MO.M.esc.slice(), tactical: true, lossF, aar };
   res.quest = r.quest || (cf.quest ? (((r.attWin && attTeam === 0) || (!r.attWin && B.defTeam === 0)) && !r.withdrew ? 'won' : 'lost') : undefined); res.assault = !!cf.assault; res.rain = !!r.rain;
   if (r.taken && cf.quest) r.taken = false; /* a quest battle never changes a world's owner */
   if (r.taken) { // the orbital authority was boarded: the world changes hands at once
@@ -366,7 +379,7 @@ function buildBar() {
     wb.addEventListener('mouseleave', () => { const o = $('bobj'); if (o) o.classList.remove('peek'); }); }
   wb.innerHTML = `<div class="wban">${side(0, lead0)}<div class="wmid"><b id="bclk"></b><span>Strength<br>Morale</span><i class="wpau">Paused</i></div>${side(1, lead1)}</div>${B.deploy ? '' : '<div class="ochips" id="bochips"></div>'}`;
   el.innerHTML = `<div class="bt">${B.space ? 'Deep space off ' + nm : 'Battle of ' + nm}<small id="btime"></small></div>
-    <div class="bbtns"><button class="btn" data-ba="auto" title="Let the dice decide the rest of the battle">Auto-resolve</button><button class="btn hide" data-ba="closing" id="bClose" title="Closing speed (Shift+X): the clock runs at 12× to 48× while nobody is in reach, fastest across the long gaps. Before contact it is on by default; click to watch the approach at your own speed. It drops back at contact, when anyone opens fire, or inside 8,000 km">Closing speed ▸▸</button><button class="btn" data-ba="skip" id="bSkip" title="Run the approach fast until the fleets are within reach of each other">Skip to contact ▸▸</button><button class="btn" data-ba="withdraw" title="Disengage: every ship burns away from the enemy and must survive ${DISENGAGE} seconds under fire">Withdraw</button></div>`;
+    <div class="bbtns"><button class="btn" data-ba="auto" title="Let the dice decide the rest of the battle">Auto-resolve</button><button class="btn hide" data-ba="closing" id="bClose" title="Closing speed (Shift+X): the clock runs at 12× to 48× while nobody is in reach, fastest across the long gaps. Before contact it is on by default; click to watch the approach at your own speed. It drops back to normal speed at the first shot, or once the fleets are inside the longest weapon reach on the field">Closing speed ▸▸</button><button class="btn" data-ba="skip" id="bSkip" title="Run the approach fast until the fleets are within reach of each other">Skip to contact ▸▸</button><button class="btn" data-ba="withdraw" title="Disengage: every ship burns away from the enemy and must survive ${DISENGAGE} seconds under fire">Withdraw</button></div>`;
   const win = att ? [B.cf.withWorld ? `Board ${nm}'s orbital authority: the world falls at once` : null, `Destroy or rout every armed enemy ship${B.cf.alone ? ' and platform' : ''}`] : [`Destroy or rout every attacking warship`, `Hold for ${TIME_LIMIT / 60} minutes: the attack breaks off`];
   const lose = att ? [`Lose every armed ship`, `Fail to win within ${TIME_LIMIT / 60} minutes: the attack breaks off`] : [B.cf.withWorld ? `The enemy boards ${nm}'s orbital authority` : null, `Lose every armed ship`];
   if (B.space) { win.length = 0; lose.length = 0;
@@ -521,9 +534,38 @@ function placePickets(L, team = 0) {
   let ux = tg.x - m.x, uy = tg.y - m.y; const d = Math.hypot(ux, uy) || 1; ux /= d; uy /= d; const go = Math.min(30000, d * .45);
   P.forEach((s, i) => { const side = i ? -1 : 1; s.x = m.x + ux * go - uy * 6000 * side; s.y = m.y + uy * go + ux * 6000 * side; s.a = Math.atan2(uy, ux); for (const w of s.weapons) w.ang = s.a + w.dir; s.picket = true; if (s.group) s.detached = true; s.order = { type: 'idle', x: s.x, y: s.y }; });
 }
+// what each approach does in this battle, measured: try it, see where the fleet ends up, put everything back
+function approachFacts() {
+  const ap = approaches(), cur = B.approach || ap[0][0], mine = S.ships.filter(s => s.team === 0 && !s.dead);
+  const snap = mine.map(s => [s, s.x, s.y, s.a, s.glare, s.loy, s.order, s.picket, s.detached, s.weapons.map(w => w.ang), s.vx, s.vy]), cam = { x: S.cam.x, y: S.cam.y, z: S.cam.z }, hdg = groupList().map(g => [g, g.hdg]);
+  const foes = mobile(1), b = bodyOf(B.bw), plats = S.ships.filter(s => s.team === 1 && s.def.static && !s.dead && s.weapons.length), out = {};
+  for (const [k, , , ok] of ap) { if (!ok) continue; applyApproach(0, k); const L = mobile(0); if (!L.length) continue; const c = centroid(L), f = foes.length ? centroid(foes) : b;
+    out[k] = { gap: Math.hypot(c.x - f.x, c.y - f.y), world: Math.hypot(c.x - b.x, c.y - b.y) - (b.r || 0), plat: plats.length ? Math.min(...plats.map(p => Math.hypot(c.x - p.x, c.y - p.y))) : null }; }
+  for (const [s, x, y, a, gl, loy, ord, pk, det, wa, vx, vy] of snap) { s.x = x; s.y = y; s.vx = vx; s.vy = vy; s.a = a; s.glare = gl; s.loy = loy; s.order = ord; s.picket = pk; s.detached = det; s.weapons.forEach((w, i) => { w.ang = wa[i]; }); }
+  for (const [g, h] of hdg) g.hdg = h; B.approach = cur; Object.assign(S.cam, cam);
+  return out;
+}
+const kmT = d => d >= 10000 ? `${Math.round(d / 1000)},000 km` : `${Math.round(d / 100) * 100} km`;
+function approachLine(k, F, all) {
+  const f = F[k]; if (!f) return '';
+  const w = !B.space && C.worlds[B.cf.world], wn = bodyOf(B.bw).name, dark = all.dark, flare = (TRN.info().name || '').toLowerCase().includes('flare');
+  const gun = w ? w.gun : 0, shd = w ? w.shield : 0, far = f.plat != null && f.plat > 12000;
+  switch (k) {
+    case 'dark': return `Starts ${kmT(f.gap)} from them. They see you coming the whole way in.`;
+    case 'sun': return `Starts ${kmT(f.gap)} from them. Their scopes find you at a third of the usual range, so the first shots should be yours.${flare ? ' In the open, the flares hit your shields too.' : ''}`;
+    case 'shadow': return `Starts ${kmT(f.gap)} from them, out of sight behind the world until you clear it.`;
+    case 'line': return `Starts ${kmT(f.gap)} from them${dark && dark.gap > f.gap + 5000 ? `, ${kmT(dark.gap - f.gap)} closer than the dark approach` : ''}.`;
+    case 'orbit': return gun + shd ? `${gun} gun platform${gun === 1 ? '' : 's'} and ${shd} shield platform${shd === 1 ? '' : 's'} fight beside you. They start ${kmT(f.gap)} out.` : `No platforms here to help. They start ${kmT(f.gap)} out.`;
+    case 'forward': return `You meet them ${kmT(f.world)} out from ${wn}.${gun && far ? ` Out there the ${gun} gun platform${gun === 1 ? '' : 's'} cannot reach the fight.` : ''}`;
+    case 'wshadow': return `Hidden behind ${wn}, ${kmT(f.gap)} from them. They find you only as they come round${gun ? `, under the guns of ${gun} platform${gun === 1 ? '' : 's'}` : ''}.`;
+    case 'course': return `Holds your heading for the break-through line. They start ${kmT(f.gap)} off.`;
+    case 'face': return `Turns the line to face them where you stand, ${kmT(f.gap)} apart.`;
+  }
+  return '';
+}
 function deployHTML() {
-  const ap = approaches(), cur = B.approach || ap[0][0];
-  let h = `<div class="dsec">${B.attTeam === 0 ? 'Approach' : 'Deployment'}</div><div class="daps">${ap.map(([k, t, d, ok]) => `<button class="btn sm ${cur === k ? 'on' : ''}" data-ap="${k}" ${ok ? '' : 'disabled'} title="${d}">${t}</button>`).join('')}</div>`;
+  const ap = approaches(), cur = B.approach || ap[0][0], F = approachFacts();
+  let h = `<div class="dsec">${B.attTeam === 0 ? 'Approach' : 'Deployment'}</div><div class="daps dcards">${ap.map(([k, t, d, ok]) => `<button class="btn dap ${cur === k ? 'on' : ''}" data-ap="${k}" ${ok ? '' : 'disabled'}><b>${t}</b><span>${d}</span>${ok && F[k] ? `<em>${approachLine(k, F, F)}</em>` : ''}</button>`).join('')}</div>`;
   const gs = groupList().filter(g => g.flag && g.flag.team === 0).concat(B.res.filter(r => r.kind === 'reserve' && !r.done).map(r => S.bgroups[r.gn]).filter(Boolean));
   const seen = new Set();
   h += `<div class="dsec">Battle groups</div><div class="dgrps">` + gs.filter(g => !seen.has(g.n) && seen.add(g.n)).map(g => { const inRes = B.res.some(r => r.kind === 'reserve' && r.gn === g.n && !r.done);

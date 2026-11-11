@@ -1020,7 +1020,7 @@ export function damage(s, amt, team, x, y, kind, src) {
     if (s.team < 2 && !s.def.static) s.loy = Math.max(loyFloor(s), s.loy - amt / s.def.hp * .35 * resist(s));
   }
   if (s.team === 0 && team !== s.team) alertAttack(s);
-  if (s.hp <= 0) destroy(s, team, src);
+  if (s.hp <= 0) { s.killKind = kind; destroy(s, team, src); } // how she died: a nuke leaves nothing to tow home
 }
 function hitSubsystem(s, amt, x, y, src) {
   let k;

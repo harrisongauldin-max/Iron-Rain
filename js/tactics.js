@@ -18,7 +18,7 @@ const armedShip = s => !s.dead && !s.def.static && !s.surrendered && !s.derelict
 export const T = { feed: [], callouts: [], hits: [], tac: false, ff: false, prev: 1, contact: false, rain: [] };
 
 export function setup() {
-  Object.assign(T, { dmg: [{}, {}], kills: [], rain: [], feed: [], callouts: [], hits: [], beams: [], ff: false, ffOff: false, stall: false, stallG: null, stallT: 0, prev: S.speed || 1, contact: false, lastCheck: 0, engaged: false, foe0: str(1), real: 0, slowUntil: 0, slowPrev: 1, lastSlow: -99 });
+  Object.assign(T, { dmg: [{}, {}], kills: [], rain: [], feed: [], callouts: [], hits: [], beams: [], ff: false, ffOff: false, stall: false, stallG: null, stallM: null, stallT: 0, prev: S.speed || 1, contact: false, lastCheck: 0, engaged: false, foe0: str(1), real: 0, slowUntil: 0, slowPrev: 1, lastSlow: -99 });
   S.hooks = { kill: onKill, shDown: onShDown, hit: onHit, absorb: onAbsorb, halfDown: onHalfDown, note: (t, c) => push(t, c), board: onBoard, beam: onBeam, wrecked: onWrecked, nuke: onNuke, voice, capture: onCapture, ripple: onRipple, bombFx }; T.rip = []; T.bombs = []; T.decks = new Map(); CO.reset(); T.hullTold = new Set(); T.nukes = [0, 0]; S.wash = [];
   S.battleOverlay = draw; SNS.setup(); S.decksFn = decks; S.boardAim0 = null; DIR.cur = null; DIR.heat = new Map(); DIR.lastCut = -99; S.pip = null;
 }
@@ -126,20 +126,33 @@ export function closest() { // the gap between the nearest armed ships of the tw
   for (const x of a) for (const p of S.ships) if (p.team === 1 && p.def.static && !p.dead && p.weapons.length) { const e = hyp(x.x - p.x, x.y - p.y); if (e < d) d = e; }
   return d;
 }
+// the longest reach of any gun or rack on the field: inside it, someone may open fire at any moment
+function longReach() { let r = 0; for (const s of S.ships) if (s.team < 2 && !s.dead && !s.def.fighter && !s.def.shell) for (const w of s.weapons) if (!w.def.pd && !w.def.nuke && w.ammo > 0 && w.def.range > r) r = w.def.range; return r || CONTACT; }
+// the gap between the two fleets' main bodies (pickets and platforms do not count): what "closing" means
+function mainGap() {
+  const c = t => { const L = S.ships.filter(s => s.team === t && armedShip(s) && !s.def.static && !s.picket); if (!L.length) return null; let x = 0, y = 0; for (const s of L) { x += s.x; y += s.y; } return { x: x / L.length, y: y / L.length }; };
+  const a = c(0), b = c(1); return a && b ? hyp(a.x - b.x, a.y - b.y) : null;
+}
 export function tick(dt, paused) {
   T.real += dt;
   // the moment a capital ship dies, the battle slows to watch it go
   if (T.slowUntil && T.real > T.slowUntil) { S.speed = T.slowPrev; T.slowUntil = 0; speedLabel(); }
   T.lastCheck -= dt; if (T.lastCheck > 0) return; T.lastCheck = .25;
   vent(); SNS.tick();
-  const d = closest(), contact = d < CONTACT;
-  if (!paused && !contact && !T.ff && !T.ffOff && !T.slowUntil && S.speed < FF) { T.prev = S.speed; T.ff = true; }
+  const d = closest(), contact = d < CONTACT, reach = longReach() * 1.02;
+  // closing speed holds until someone opens fire or the fleets are inside the longest reach on the field, not just at
+  // first contact: the minute of slow closing after contact was dead time
+  const engaged = gunsTalking() || d < reach;
+  if (!paused && !engaged && !T.ff && !T.ffOff && !T.slowUntil && S.speed < FF) { T.prev = S.speed; T.ff = true; }
   if (T.ff) { const r = ffRate(d); if (S.speed !== r) { S.speed = r; speedLabel(); } S.ffStep = d > CONTACT + 1500 && !gunsTalking() ? (d > 60000 ? FF_STEP * 1.5 : FF_STEP) : null; } else S.ffStep = null;
-  // nobody closing: the approach would run forever at any speed; say so once, and show it in the clock
-  if (!contact && !paused) { if (T.stallG == null || d < T.stallG - 400) { T.stallG = d; T.stallT = S.time; T.stall = false; } else if (S.time - T.stallT > 20) T.stall = true; } else T.stall = false;
-  if (T.ff && T.manual) { if (d < 8000 || gunsTalking()) { S.speed = T.prev; T.ff = false; T.manual = false; S.ffStep = null; speedLabel(); push('Closing speed off: the guns are talking', 0xffd27a); } }
-  else if (contact && T.ff) { S.speed = T.prev; T.ff = false; S.ffStep = null; speedLabel(); push('Contact: the fleets are within range', 0xffd27a); }
-  if (contact) T.ffOff = false;
+  // nobody closing: the approach would run forever at any speed; say so once, and show it in the clock. Measured on
+  // the main bodies as well as the nearest pair: pickets halted out ahead stop the nearest gap shrinking while the
+  // fleets themselves close at full burn, which is not a stall
+  if (!engaged && !paused) { const g = mainGap();
+    const moved = (T.stallG == null || d < T.stallG - 400) || (g != null && (T.stallM == null || g < T.stallM - 400));
+    if (moved) { T.stallG = d; T.stallM = g; T.stallT = S.time; T.stall = false; } else if (S.time - T.stallT > 20) T.stall = true; } else T.stall = false;
+  if (T.ff && engaged) { const fired = gunsTalking(); S.speed = T.prev; T.ff = false; T.manual = false; S.ffStep = null; speedLabel(); push(fired ? 'First shots: closing speed off' : 'Inside weapons reach: closing speed off', 0xffd27a); }
+  if (engaged) T.ffOff = false;
   if (contact && !T.saidContact) { T.saidContact = S.time; voice('contact', null, { N: SNS.counts().seen + SNS.counts().contacts || 'several' }); }
   if (T.saidContact && !T.saidIcpt && S.time - T.saidContact > 5) { T.saidIcpt = true; voice('contact', null, { enemy: true }); }
   if (!T.saidPicket && SNS.SN.contacts[0].length) { const pk = S.ships.find(s => s.team === 0 && s.picket && !s.dead); if (pk) { T.saidPicket = true; voice('picket', pk, { N: SNS.SN.contacts[0].length }); } }
@@ -157,8 +170,8 @@ const ffRate = d => d > 60000 ? 48 : d > 30000 ? 24 : FF;
 export function closing() {
   if (T.ff) { ffStop(); if (!T.contact) T.ffOff = true; return null; }
   const d = closest();
-  if (d < 8000) return 'Too close for closing speed: the enemy is inside 8,000 km';
   if (gunsTalking()) return 'Not while the guns are firing';
+  if (d < longReach() * 1.02) return `Already inside weapons reach (${Math.round(longReach() / 1000)},000 km)`;
   T.prev = S.speed; T.ff = true; T.manual = !!T.contact; T.ffOff = false; S.speed = ffRate(d); speedLabel(); return null;
 }
 // the speed button or a key took the clock back: closing speed ends and stays off until contact
