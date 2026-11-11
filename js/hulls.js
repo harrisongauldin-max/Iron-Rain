@@ -8,7 +8,8 @@
 //  - the destroyer a long spine with a crescent blade at the bow, a tower amidships and swept fins;
 //  - the dreadnought a layered slab, 80 rail guns in broadside decks (the Pax, Golden Son); 10 houses of 4 a side;
 //  - the moonBreaker "twice the length of my ship, three times the girth ... a floating military dock city eight
-//    kilometers long" (Morning Star), up to 1.5 km tall: about 3 km wide here, its back a city of decks and towers;
+//    kilometers long" (Morning Star), up to 1.5 km tall: about 3 km wide here. "City" means a dock the size of one,
+//    never buildings on the hull: its back is layered armour decks and hangar tiers;
 //  - the Annihilo, Atalantia's flagship, "shaped like an atavistic spear": a long shaft and a leaf-bladed head.
 // Navies: the Society builds polished grey-white hulls with gold-trimmed crescent bows; the Republic flies the same
 // Society hulls refitted, patched with red armour; the Rim's Ganymede-built ships are black, lean and fork-bowed.
@@ -151,24 +152,6 @@ function bridge(K, x, y, w, h, tiers = 2) {
   K.add(SLOT.dark, cylX(x - .02, x + .02, yy + .03, 0, .004)); K.add(SLOT.dark, box(x - .02, yy + .02, 0, .004, .04, .004)); // mast
   return yy;
 }
-// a moonBreaker's back: a city in blocks along a central avenue, rising toward the bridge, with spires and gantries
-function city(K, R, body, x0, x1, y, hmax, wk = .62) {
-  const rows = 9;
-  for (let i = 0; i < rows; i++) {
-    const x = x0 + (i + .5) * (x1 - x0) / rows, s = at(body, x), half = s.w * wk, rise = .45 + .55 * Math.sin((i + .5) / rows * Math.PI);
-    for (const side of [-1, 1]) for (let j = 0; j < 3; j++) {
-      const z = side * (.05 + (j + .5) * (half - .05) / 3), hh = hmax * rise * (.35 + R() * .65) * (1 - j * .18), sx = (x1 - x0) / rows * (.55 + R() * .3), sz = (half - .05) / 3 * .8;
-      K.add(R() < .75 ? SLOT.hull : SLOT.armour, box(x, y + hh / 2, z, sx, hh, sz));
-      K.add(SLOT.armour, box(x, y + hh + .003, z, sx * 1.04, .006, sz * 1.04));               // a parapet
-      for (let f = 1; f * .03 < hh; f++) K.add(SLOT.glow, box(x, y + f * .03, z - side * sz * .51, sx * .7, .004, .002)); // lit floors facing the avenue
-      if (R() < .14) K.add(SLOT.armour, box(x, y + hh + .025, z, .012, .05, .012));               // a mast
-    }
-  }
-  K.add(SLOT.dark, box((x0 + x1) / 2, y + .004, 0, x1 - x0, .008, .05)); // the avenue
-  for (let i = 0; i < 12; i++) K.add(SLOT.glow, box(x0 + (i + .5) * (x1 - x0) / 12, y + .01, 0, .01, .003, .03)); // its lamps
-  const sx = x0 + (x1 - x0) * .55; K.add(SLOT.armour, box(sx, y + .14, 0, .05, .28, .05)); K.add(SLOT.hull, box(sx, y + .31, 0, .025, .1, .025)); K.add(SLOT.red, box(sx, y + .37, 0, .012, .012, .012)); // the spire
-}
-
 // ---------------------------------------------------------------- the classes
 const BUILD = {
   torch(K, st, R) { // a long rocket dart: engines clustered at the stern, raked fins, a cockpit hump
@@ -249,7 +232,13 @@ const BUILD = {
     K.loft(SLOT.armour, [{ x: -.95, w: .22 * s, h: .05, y: -.17, p: P }, { x: .5, w: .34 * s, h: .07, y: -.28, p: P }, { x: 1.0, w: .18, h: .05, y: -.2, p: P }, { x: 1.2, w: .04, h: .02, y: -.1, p: P }], x0, x1, false); // the keel, deepest under the dock
     for (const side of [-1, 1]) for (let i = 0; i < 4; i++) { const x = .05 + i * .18, sx = at(body, x); K.add(SLOT.dark, box(x, -.02, side * sx.w * .99, .12, .12, .012)); K.add(SLOT.glow, box(x, -.02, side * (sx.w * .99 + .007), .1, .1, .004)); } // the dock's open bays, lit
     for (let i = 0; i < 6; i++) { const x = -.05 + i * .16, sx = at(body, x); K.add(SLOT.armour, box(x, sx.h + .004, 0, .014, .01, sx.w * 1.3)); }       // armour ribs across the dock's back
-    city(K, R, body, -.08, .88, .28, .2, .7);                                 // the city on the dock's back
+    // the dock's back: layered armour decks stepping up to a long armoured spine, hangar tiers cut into the steps, sensor masts
+    K.loft(SLOT.armour, [{ x: -.1, w: .4 * s, h: .03, y: .28, p: P }, { x: .5, w: .42 * s, h: .03, y: .29, p: P }, { x: .9, w: .28 * s, h: .025, y: .27, p: P }, { x: 1.05, w: .1, h: .012, y: .24, p: P }], x0, x1);
+    K.loft(SLOT.hull, [{ x: -.05, w: .26 * s, h: .035, y: .32, p: P }, { x: .45, w: .28 * s, h: .04, y: .33, p: P }, { x: .82, w: .14 * s, h: .025, y: .3, p: P }], x0, x1);
+    K.loft(SLOT.armour, [{ x: .0, w: .12 * s, h: .03, y: .37, p: P }, { x: .4, w: .13 * s, h: .035, y: .38, p: P }, { x: .7, w: .05, h: .015, y: .35, p: P }], x0, x1);
+    for (const side of [-1, 1]) for (let i = 0; i < 5; i++) { const x = .02 + i * .16; K.add(SLOT.dark, box(x, .325, side * .27 * s, .1, .05, .012)); K.add(SLOT.glow, box(x, .325, side * (.27 * s + .007), .08, .04, .004)); } // hangar tiers in the step, lit
+    for (let i = 0; i < 8; i++) { const x = -.05 + i * .13; K.add(SLOT.armour, box(x, .42, 0, .012, .012, .25 * s)); }                      // armour ribs across the spine
+    for (const x of [.15, .55]) { K.add(SLOT.dark, box(x, .47, 0, .01, .08, .01)); K.add(SLOT.dark, box(x, .5, 0, .006, .006, .08)); }        // sensor masts
     const top = bridge(K, -.65, .25, .16, .08, 3);
     gunDecks(K, body, -1.0, -.2, .02, 10, 2, .5, .5); gunDecks(K, body, -1.0, -.2, -.06, 10, 2, .5, .5);  // aft: 20 houses of 2 a side in two rows
     gunDecks(K, body, 0, .9, .1, 15, 2, .5, .5); gunDecks(K, body, 0, .9, -.1, 15, 2, .5, .5);           // the dock's flanks: 30 houses of 2 a side in two rows: 160 guns in all
