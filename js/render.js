@@ -8,7 +8,7 @@ import * as TSL from 'three/tsl';
 import { bloom } from '../vendor/three/tsl/BloomNode.js';
 import { smaa } from '../vendor/three/tsl/SMAANode.js';
 import { loadGfx, preset, meterTick, gpuTimer } from './gfx.js';
-import { HAS_3D, buildHull, hullTextures, paintOf, buildStation } from './hulls.js';
+import { HAS_3D, buildHull, hullTextures, paintOf, buildStation, missileGeoOf, missileMaterial } from './hulls.js';
 import { mergeGeometries } from '../vendor/three/utils/BufferGeometryUtils.js';
 import { buildSlip, ganymedeDocks, phobosTraffic } from './yards.js';
 import { S } from './state.js';
@@ -21,7 +21,7 @@ import { FOV, SE, CE, ELEV, AZ, setView, camDist, camOffset, screenAng, toWorld,
 export { toWorld, project } from './cam.js';
 
 let renderer, scene, camera, composer, bloomPass, ov, ctx, DPR = 1, ODPR = 1; // composer: the post-processing RenderPipeline; bloomPass: its bloom node
-let bgMesh, bodiesG, orbitL = [], rocksG, debrisM, shipsG, turretM = {}, B = {};
+let bgMesh, bodiesG, orbitL = [], rocksG, debrisM, shipsG, turretM = {}, missileM = {}, B = {};
 let nodesRef = null, fieldsRef = null, bodyVerSeen = -1, bodyVis = [], rockGroups = [];
 const O = { x: 0, y: 0 };
 const shipVis = new Map(), structVis = new Map();
@@ -527,6 +527,9 @@ export async function initRender() {
   turretM.base = new Inst(tb, new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: .6, roughness: .45 }), 8000, true);
   turretM.barrel = new Inst(tbr, new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: .5, roughness: .4 }), 16000, true);
   turretM.box = new Inst(box, new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: .5, roughness: .5 }), 8000, true);
+  // missiles: 3-D bodies, one instanced mesh per kind, the fins and bands tinted per instance (hulls.js)
+  missileM.std = new Inst(missileGeoOf('std'), missileMaterial(), 2000, true); missileM.emp = new Inst(missileGeoOf('emp'), missileMaterial(), 600, true); missileM.nuke = new Inst(missileGeoOf('nuke'), missileMaterial(), 300, true);
+  for (const m of Object.values(missileM)) { m.m.castShadow = false; scene.add(m.m); }
   for (const t of Object.values(turretM)) scene.add(t.m);
   B.smoke = new Batch(TEX.smoke, { add: false, order: 8 }); B.dot = new Batch(TEX.dot, { order: 12 }); B.glow = new Batch(TEX.glow, { order: 13, cap: 3000 });
   B.streak = new Batch(TEX.streak, { ground: true, ax: -.5, order: 11 }); B.plume = new Batch(TEX.plume, { ground: true, ax: -.5, order: 10, cap: 3000 }); B.missile = new Batch(TEX.missile, { add: false, ground: true, order: 11, cap: 2000 }); B.fins = new Batch(TEX.fins, { add: false, ground: true, order: 11, cap: 2000 }); B.anam = new Batch(TEX.anam, { order: 13, cap: 300 }); B.sglow = new Batch(TEX.sunglow, { order: 13, cap: 1500 }); // the soft wide glow of a flash or a fireball
@@ -1026,7 +1029,7 @@ function sceneFrame() {
   for (const m of S.missiles) {
     if (!onScr(m.x, m.y, 60)) continue; const k = Math.max(1, px * 2.2) * (m.nuke ? 1.8 : 1), ca = Math.cos(m.a), sa = Math.sin(m.a), L = k * 14, Wd = k * 3.5;
     const tc = m.emp ? 0x8fd3ff : m.nuke ? 0xff4b3e : hex(S.teamc[m.team].light);
-    B.missile.add(m.x, m.y, 3, L, Wd, m.a, 0xe6e9ee, 1, 1); B.fins.add(m.x, m.y, 3.01, L, Wd, m.a, tc, 1, 1.2); // the body, then the fins and band in the team's colour
+    (m.nuke ? missileM.nuke : m.emp ? missileM.emp : missileM.std).add(m.x, m.y, 3, -m.a, L, L, L, tc); // the 3-D body, its fins and bands in the team's colour (hulls.js)
     if (m.nuke && (S.time * 5 | 0) % 2) B.glow.add(m.x + ca * L * .1, m.y + sa * L * .1, 3.1, Wd * 2.2, Wd * 2.2, 0, 0xff5040, .9, 1.8); // the warhead's blinking light
     if (m.thrusting) { const ex = m.emp ? 0x8fd3ff : 0xffc8a0, fl = .9 + .1 * Math.sin(S.time * 53 + m.x), nx = m.x - ca * L * .5, ny = m.y - sa * L * .5, pl = Math.max(44, 30 * px) * (m.nuke ? 1.6 : 1) * fl;
       B.glow.add(nx, ny, 3, Wd * 1.5, Wd * 1.5, 0, ex, .8, 1.8); // glare at the nozzle
@@ -1039,7 +1042,7 @@ function sceneFrame() {
     if (f.fire) { const d = f.r * (.5 + e * 1.3), col = k > .75 ? 0xfff2dc : k > .5 ? 0xffc860 : k > .25 ? 0xff8a3a : 0xd0481c, kk = k > .75 ? 2.4 : k > .5 ? 1.8 : 1.3; // a fireball: two turning layers, white → yellow → orange → ember
       B.fire.add(f.x, f.y, 6, d, d, f._rot + g * .7, col, Math.min(1, k * 1.5), kk); B.fire.add(f.x, f.y, 6.01, d * .8, d * .8, f._rot + 2.1 - g * .5, col, Math.min(1, k * 1.3) * .8, kk);
       if (k < .5) B.smoke.add(f.x, f.y, 5.9, d * 1.25, d * 1.25, f._rot - g, 0x2a2420, (.5 - k) * .8); } } // and the soot that follows
-  for (const b of Object.values(B)) b.end();
+  for (const m of Object.values(missileM)) m.end(); for (const b of Object.values(B)) b.end();
   return { z, px, icons };
 }
 function drawMeter() { // F9: frame time, draw calls and the preset, top right under the bar
@@ -1081,7 +1084,7 @@ function renderOrrery(L) {
   for (const Lr of orbitL) Lr.n = 0;
   for (const [cx, cy, R, k] of L.orbits) ring(orbitL[k], cx, cy, R, reach);
   for (const Lr of orbitL) flushOrbit(Lr);
-  shipsG.visible = false; rocksG.visible = false; debrisM.end(); for (const t of Object.values(turretM)) t.end(); for (const b of Object.values(B)) b.end();
+  shipsG.visible = false; rocksG.visible = false; debrisM.end(); for (const t of Object.values(turretM)) t.end(); for (const m of Object.values(missileM)) m.end(); for (const b of Object.values(B)) b.end();
   paradeDraw(S.parade); // the fleets in orbit
   renderer.info.reset();
   if (composer && (S.bloom || preset().post)) composer.render(); else renderer.render(scene, camera);

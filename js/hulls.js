@@ -21,6 +21,8 @@
 // Units: the same as the old flat hulls (the outline in SHAPES), so mounts, plumes and hit circles still line up.
 // World axes: x along the hull (bow +x), y up, z across.
 import * as THREE from 'three';
+import { MeshStandardNodeMaterial } from 'three/webgpu';
+import { attribute, mix, max, vec3, instanceColor } from 'three/tsl';
 import { mergeGeometries } from '../vendor/three/utils/BufferGeometryUtils.js';
 import { SHAPES, fshape, LEN_M } from './data.js';
 
@@ -546,6 +548,43 @@ export function buildStation(type) {
     for (let i = 0; i < 6; i++) { const a = i / 6 * TAU + .5; at('hull', SG.box(.08, .1, .14, 0, 0, 0), .64, a, .1); at('glow', SG.box(.02, .06, .1, 0, 0, 0), .685, a, .1); at('lt', SG.sph(.018, 0, 0, 0, 8, 6), .74, a, .02); }
   }
   return P;
+}
+
+// ---------------------------------------------------------------- missiles
+// Instanced 3-D missile bodies for the battle (render.js draws them with Inst, scaled to read on screen as the old
+// sprites did). Built along +X (the flight direction), origin at the centre, length 1. Three bodies: the standard
+// ship-to-ship missile (slim, four fins), the EMP round (a blunt sensor nose, canards) and the nuke (fat, a warhead
+// band, six fins). Vertex colours carry the paint; a `tm` mask marks the fins and bands, where missileMaterial()
+// lands the per-instance colour (the team's light colour, blue for EMP, red for a nuke).
+function missileGeo(kind = 'std') {
+  const parts = [], add = (g, paint, tm = 0) => { g = g.index ? g.toNonIndexed() : g; const n = g.attributes.position.count, c = new THREE.Color(paint), col = new Float32Array(n * 3); for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; } g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setAttribute('tm', new THREE.BufferAttribute(new Float32Array(n).fill(tm), 1)); for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'color', 'tm'].includes(k)) g.deleteAttribute(k); parts.push(g); };
+  const cylX = (rt, rb, h, x, seg = 10) => { const g = new THREE.CylinderGeometry(rt, rb, h, seg); g.rotateZ(-Math.PI / 2); g.translate(x, 0, 0); return g; };
+  const body = '#d8dbe0', dark = '#8a8e96', steel = '#2a2c31', hot = '#ffc8a0';
+  if (kind === 'nuke') {
+    add(cylX(.09, .09, .62, -.08, 12), body); add(cylX(.0, .09, .22, .42, 12), dark);                 // body, nose cone
+    add(cylX(.1, .1, .1, .2, 12), '#ffffff', 1); add(cylX(.1, .1, .04, -.3, 12), '#ffffff', 1);     // the warhead band and a tail band (tinted red)
+    add(cylX(.07, .09, .08, -.43, 12), steel); add(cylX(.04, .06, .03, -.49, 10), hot);               // boat-tail and nozzle
+    for (let i = 0; i < 6; i++) { const g = new THREE.BoxGeometry(.18, .13, .012); g.translate(0, .1, 0); g.rotateX(i * Math.PI / 3); g.translate(-.34, 0, 0); add(g, '#ffffff', 1); }
+  } else if (kind === 'emp') {
+    add(cylX(.06, .06, .66, -.06, 10), body); add(cylX(.07, .06, .14, .34, 10), '#3a4a5c'); add(cylX(.0, .07, .08, .45, 10), '#3a4a5c'); // body, blunt sensor nose
+    add(cylX(.065, .065, .05, .05, 10), '#ffffff', 1); add(cylX(.05, .06, .06, -.42, 10), steel); add(cylX(.03, .045, .03, -.465, 8), hot);
+    for (let i = 0; i < 4; i++) { const g = new THREE.BoxGeometry(.14, .11, .01); g.translate(0, .07, 0); g.rotateX(i * Math.PI / 2 + Math.PI / 4); g.translate(-.36, 0, 0); add(g, '#ffffff', 1); }
+    for (let i = 0; i < 4; i++) { const g = new THREE.BoxGeometry(.08, .06, .008); g.translate(0, .07, 0); g.rotateX(i * Math.PI / 2 + Math.PI / 4); g.translate(.2, 0, 0); add(g, dark); }   // canards
+  } else {
+    add(cylX(.055, .055, .7, -.05, 10), body); add(cylX(.0, .055, .2, .4, 10), dark);                 // body, nose cone
+    add(cylX(.06, .06, .04, .12, 10), '#ffffff', 1); add(cylX(.045, .055, .06, -.43, 10), steel); add(cylX(.025, .04, .03, -.475, 8), hot); // band, boat-tail, nozzle
+    for (let i = 0; i < 4; i++) { const g = new THREE.BoxGeometry(.16, .12, .01); g.translate(0, .06, 0); g.rotateX(i * Math.PI / 2 + Math.PI / 4); g.translate(-.37, 0, 0); add(g, '#ffffff', 1); }
+    for (let i = 0; i < 2; i++) { const g = new THREE.BoxGeometry(.5, .012, .012); g.translate(-.1, .058, 0); g.rotateX(i * Math.PI); add(g, '#6a6e76'); }   // raceways along the body
+  }
+  const g = mergeGeometries(parts); g.computeBoundingSphere(); g.userData.tris = g.attributes.position.count / 3; return g;
+}
+const MGEO = {};
+export const missileGeoOf = kind => MGEO[kind] || (MGEO[kind] = missileGeo(kind));
+export function missileMaterial() { // paint × instance colour where tm is set; the base node material multiplies by instanceColor itself, so pre-divide
+  const m = new MeshStandardNodeMaterial({ roughness: .4, metalness: .55 });
+  const paint = attribute('color', 'vec3'), tm = attribute('tm', 'float'), tinted = mix(paint, paint.mul(instanceColor), tm);
+  m.colorNode = tinted.div(max(instanceColor, vec3(.05, .05, .05)));
+  return m;
 }
 
 // ---------------------------------------------------------------- materials
