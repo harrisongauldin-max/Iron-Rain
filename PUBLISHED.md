@@ -4,4 +4,5 @@ Each publish of `main` to the claude.ai artifact (slug `fc8b77cf-d69b-4cca-9154-
 
 | Artifact version | Date | Commit | What changed |
 |---|---|---|---|
+| 1794405968-ef1a | 2026-11-11 | 5bd494f | Published outside the repository; brought into `main` from the live artifact: new `js/groundfx.js` (ground terrain, water, sky dome), `js/groundview.js` using it, newer `js/render.js`. |
 | 1794365068-e6ef | 2026-11-11 | 501dc30 | Repository created from this live version: 57 game files, unchanged. |

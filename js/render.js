@@ -98,33 +98,57 @@ function hullTex(type, col, fac) {
   for (const cx of [g, e]) { hullPath(cx, pts, K); cx.strokeStyle = col.main; cx.lineWidth = Math.max(1.5, K * .035); cx.globalAlpha = cx === e ? .75 : 1; cx.stroke(); cx.globalAlpha = 1; }
   return [tex(c), tex(ce)];
 }
-function ringTexC() { // ringlets of random width and density, the Cassini Division and the faint inner C ring
-  const [c, g] = canvas(1024, 4), rnd = seeded(91), A = new Float32Array(1024);
-  for (let x = 0; x < 1024; x++) A[x] = .35;
-  for (let i = 0; i < 140; i++) { const x0 = rnd() * 1024 | 0, w = 1 + rnd() * (rnd() < .2 ? 40 : 8) | 0, d = (rnd() - .45) * .5; for (let x = x0; x < Math.min(1024, x0 + w); x++) A[x] += d; }
-  for (let x = 0; x < 1024; x++) { const f = x / 1024; let a = clamp(A[x], .03, .8); if (f < .22) a *= .35; if (f > .62 && f < .68) a *= .06; if (f > .93) a *= .4;
-    const k = .8 + .2 * Math.sin(f * 31) + (f < .22 ? -.15 : 0); g.fillStyle = `rgba(${226 * k | 0},${205 * k | 0},${160 * k | 0},${a})`; g.fillRect(x, 0, 1, 4); }
+function ringTexC() { // Saturn's rings across the radius: the translucent C ring, the bright B ring full of fine ringlets, the Cassini Division, the A ring with the Encke gap, the thin F ring beyond
+  const N = 2048, [c, g] = canvas(N, 8), rnd = seeded(91), A = new Float32Array(N), K = new Float32Array(N);
+  for (let x = 0; x < N; x++) { const f = x / N; let a, k = 1;
+    if (f < .2) { a = .1 + .12 * f / .2 + .05 * Math.sin(f * 140); k = .82; } // C ring: dim, grey-tan
+    else if (f < .6) { a = .78 + .14 * Math.sin((f - .2) * 60) * Math.sin(f * 230); k = 1 + .05 * Math.sin(f * 75); } // B ring
+    else if (f < .67) { a = .05 + .06 * Math.sin((f - .6) / .07 * Math.PI) ** 4; k = .8; } // Cassini Division, a faint ringlet inside it
+    else if (f < .93) { a = .5 + .12 * (f - .67) / .26 + .06 * Math.sin(f * 180); k = .96; if (Math.abs(f - .89) < .004) a *= .08; if (Math.abs(f - .925) < .002) a *= .3; } // A ring, the Encke and Keeler gaps
+    else { a = .015; k = .7; if (Math.abs(f - .965) < .0025) a = .3; } // the F ring
+    A[x] = a; K[x] = k; }
+  for (let i = 0; i < 260; i++) { const x0 = rnd() * N | 0, w = 1 + rnd() * (rnd() < .15 ? 30 : 7) | 0, d = (rnd() - .5) * .3; for (let x = x0; x < Math.min(N, x0 + w); x++) A[x] *= 1 + d; } // ringlets of random width and density
+  const S = new Float32Array(N); for (let x = 0; x < N; x++) { let t = 0, n = 0; for (let j = -2; j <= 2; j++) { const y = x + j; if (y >= 0 && y < N) { t += A[y]; n++; } } S[x] = t / n; } // a touch of blur against moiré at a distance
+  for (let x = 0; x < N; x++) { const a = clamp(S[x], 0, .95), k = K[x] * (.92 + .08 * Math.sin(x / N * 31)); g.fillStyle = `rgba(${232 * k | 0},${212 * k | 0},${168 * k | 0},${a})`; g.fillRect(x, 0, 1, 8); }
   return c;
 }
-function nebulaC() { // the real sky: near black, the Milky Way as one faint band with a dust lane, the barest tint of nebula
-  const [c, n] = canvas(1024, 1024), R = seeded(4242); n.fillStyle = '#030308'; n.fillRect(0, 0, 1024, 1024);
+// the Sun's corona for the map: a soft wide glow with faint radial streamers, drawn additive behind the disc
+function coronaC() { const [c, g] = canvas(512, 512), R = seeded(5); const gr = g.createRadialGradient(256, 256, 0, 256, 256, 256); gr.addColorStop(0, 'rgba(255,245,225,.9)'); gr.addColorStop(.1, 'rgba(255,225,170,.55)'); gr.addColorStop(.3, 'rgba(255,200,130,.16)'); gr.addColorStop(.6, 'rgba(255,180,110,.04)'); gr.addColorStop(1, 'rgba(255,170,100,0)'); g.fillStyle = gr; g.fillRect(0, 0, 512, 512);
+  g.globalCompositeOperation = 'lighter'; g.translate(256, 256);
+  for (let i = 0; i < 90; i++) { const a = R() * Math.PI * 2, L = 90 + R() * 150, w = .4 + R() * 1.6, al = .025 + R() * .05; const sg = g.createLinearGradient(0, 0, Math.cos(a) * L, Math.sin(a) * L); sg.addColorStop(0, `rgba(255,230,190,${al})`); sg.addColorStop(.5, `rgba(255,215,160,${al * .5})`); sg.addColorStop(1, 'rgba(255,200,140,0)'); g.strokeStyle = sg; g.lineWidth = w; g.beginPath(); g.moveTo(Math.cos(a) * 30, Math.sin(a) * 30); g.lineTo(Math.cos(a) * L, Math.sin(a) * L); g.stroke(); }
+  return c; }
+function nebulaC() { // the deep sky: near black, the Milky Way as one soft band with a dark dust lane through it, faint colour in the star clouds
+  const [c, n] = canvas(1024, 1024), R = seeded(4242); n.fillStyle = '#020207'; n.fillRect(0, 0, 1024, 1024);
   // the galactic band runs across the tile (the tile repeats, so it is one band, wide and soft, never a stripe pattern)
   const band = (w, col, a0) => { const gr = n.createLinearGradient(0, 512 - w, 0, 512 + w); gr.addColorStop(0, col + '0)'); gr.addColorStop(.3, col + (a0 * .45) + ')'); gr.addColorStop(.5, col + a0 + ')'); gr.addColorStop(.7, col + (a0 * .45) + ')'); gr.addColorStop(1, col + '0)'); n.fillStyle = gr; n.fillRect(0, 512 - w, 1024, w * 2); };
-  n.globalCompositeOperation = 'lighter'; band(300, 'rgba(22,21,30,', .35); band(150, 'rgba(26,24,32,', .3); band(60, 'rgba(32,30,36,', .3);
-  for (let i = 0; i < 70; i++) { const x = R() * 1024, y = 512 + (R() - .5) * 320, r = 20 + R() * 90, a = .05 + R() * .07; const gr = n.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, `rgba(60,56,66,${a * .5})`); gr.addColorStop(1, 'rgba(60,56,66,0)'); n.fillStyle = gr; for (const ox of [-1024, 0, 1024]) n.fillRect(x - r + ox, y - r, r * 2, r * 2); } // star clouds
-  n.globalCompositeOperation = 'multiply'; // the dust lane, ragged
-  for (let i = 0; i < 40; i++) { const x = R() * 1024, y = 500 + (R() - .5) * 70 + Math.sin(x / 160) * 24, r = 30 + R() * 70; const gr = n.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, 'rgba(110,100,105,1)'); gr.addColorStop(1, 'rgba(255,255,255,1)'); n.fillStyle = gr; for (const ox of [-1024, 0, 1024]) n.fillRect(x - r + ox, y - r, r * 2, r * 2); }
+  n.globalCompositeOperation = 'lighter'; band(340, 'rgba(30,28,42,', .6); band(170, 'rgba(44,40,54,', .55); band(70, 'rgba(62,56,64,', .5);
+  // star clouds: bright knots along the band, warm toward the core, cooler further out
+  for (let i = 0; i < 110; i++) { const x = R() * 1024, y = 512 + (R() - .5) * 340 * (R() < .5 ? 1 : .5), r = 18 + R() * 100, a = .06 + R() * .09, warm = R() < .6;
+    const cc = warm ? '88,74,70' : '64,66,86'; const gr = n.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, `rgba(${cc},${a * .6})`); gr.addColorStop(.5, `rgba(${cc},${a * .22})`); gr.addColorStop(1, `rgba(${cc},0)`); n.fillStyle = gr; for (const ox of [-1024, 0, 1024]) n.fillRect(x - r + ox, y - r, r * 2, r * 2); }
+  // a brighter central bulge, once per tile
+  for (const ox of [-1024, 0, 1024]) { const gr = n.createRadialGradient(300 + ox, 512, 0, 300 + ox, 512, 420); gr.addColorStop(0, 'rgba(96,80,70,.16)'); gr.addColorStop(.5, 'rgba(70,60,62,.06)'); gr.addColorStop(1, 'rgba(60,50,60,0)'); n.fillStyle = gr; n.fillRect(0, 0, 1024, 1024); } // drawn thrice so the tile wraps without a seam
+  n.globalCompositeOperation = 'multiply'; // the dust lane, ragged, darkest through the middle of the band
+  for (let i = 0; i < 70; i++) { const x = R() * 1024, y = 500 + (R() - .5) * 80 + Math.sin(x / 150) * 30 + Math.sin(x / 47) * 8, r = 24 + R() * 80, k = 70 + R() * 50; const gr = n.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, `rgba(${k},${k - 6},${k + 2},1)`); gr.addColorStop(.55, `rgba(${k + 60},${k + 56},${k + 60},1)`); gr.addColorStop(1, 'rgba(255,255,255,1)'); n.fillStyle = gr; for (const ox of [-1024, 0, 1024]) n.fillRect(x - r + ox, y - r, r * 2, r * 2); }
+  for (let i = 0; i < 24; i++) { const x = R() * 1024, y = 512 + (R() - .5) * 420, r = 40 + R() * 120; const gr = n.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, 'rgba(150,146,150,1)'); gr.addColorStop(1, 'rgba(255,255,255,1)'); n.fillStyle = gr; for (const ox of [-1024, 0, 1024]) n.fillRect(x - r + ox, y - r, r * 2, r * 2); } // thinner dust off the lane
   n.globalCompositeOperation = 'lighter';
-  const blobs = [['rgba(60,22,20,', .05], ['rgba(30,20,50,', .045], ['rgba(50,36,20,', .035], ['rgba(16,28,48,', .045]];
-  for (let i = 0; i < 8; i++) { const [cc, a] = blobs[i % 4]; const x = R() * 1024, y = R() * 1024, r = 160 + R() * 300; const gr = n.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, cc + a + ')'); gr.addColorStop(1, cc + '0)'); n.fillStyle = gr; for (const ox of [-1024, 0, 1024]) for (const oy of [-1024, 0, 1024]) n.fillRect(x - r + ox, y - r + oy, r * 2, r * 2); }
+  // the faintest wash of nebula colour, far from the band as well: rust, violet, ochre, deep blue
+  const blobs = [['rgba(70,26,22,', .07], ['rgba(34,22,60,', .065], ['rgba(58,42,22,', .05], ['rgba(16,30,56,', .065], ['rgba(40,18,40,', .05]];
+  for (let i = 0; i < 11; i++) { const [cc, a] = blobs[i % blobs.length]; const x = R() * 1024, y = R() * 1024, r = 160 + R() * 320; const gr = n.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, cc + a + ')'); gr.addColorStop(.45, cc + (a * .4) + ')'); gr.addColorStop(1, cc + '0)'); n.fillStyle = gr; for (const ox of [-1024, 0, 1024]) for (const oy of [-1024, 0, 1024]) n.fillRect(x - r + ox, y - r + oy, r * 2, r * 2); }
+  // a dense sprinkle of the faintest stars baked into the sky itself: the depth behind the parallax layers
+  for (let i = 0; i < 5000; i++) { const x = R() * 1024, y = R() * 1024, inBand = Math.abs(y - 512) < 260; if (!inBand && R() < .45) continue; const a = (.08 + R() * .22) * (inBand ? 1 : .7); n.fillStyle = `rgba(${235 + R() * 20 | 0},${228 + R() * 22 | 0},${225 + R() * 30 | 0},${a})`; n.fillRect(x, y, 1, 1); }
   return c;
 }
-function starC(count, maxSize, alpha) {
-  const [c, g] = canvas(1024, 1024);
-  const COLS = [[255, 244, 232], [255, 236, 210], [255, 220, 180], [230, 236, 255], [200, 215, 255], [255, 255, 250], [255, 200, 160]]; // G, K, M, A, B, F, orange giants
-  for (let i = 0; i < count; i++) { const b = Math.random(), col = COLS[Math.random() < .55 ? 0 : (Math.random() * COLS.length) | 0], x = Math.random() * 1024, y = Math.random() * 1024; const bright = Math.random() < .035;
-    g.fillStyle = `rgba(${col[0]},${col[1]},${col[2]},${alpha * (bright ? 1 : .25 + b * .6)})`; const s = bright ? maxSize : 1; g.fillRect(x, y, s, s);
-    if (bright && maxSize > 1) { const gr = g.createRadialGradient(x + s / 2, y + s / 2, 0, x + s / 2, y + s / 2, 4); gr.addColorStop(0, `rgba(${col[0]},${col[1]},${col[2]},${alpha * .5})`); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(x - 4, y - 4, 10, 10); } }
+// a star layer: colours by spectral class, a few bright ones with a soft halo and, on the nearest layer, a faint diffraction cross
+function starC(count, maxSize, alpha, spikes = false) {
+  const [c, g] = canvas(1024, 1024), R = seeded(count * 31 + maxSize * 7 + 1);
+  const COLS = [[255, 244, 232], [255, 236, 210], [255, 220, 180], [228, 234, 255], [196, 212, 255], [255, 255, 250], [255, 196, 150], [255, 170, 120]]; // G, K, M, A, B, F, orange and red giants
+  for (let i = 0; i < count; i++) { const b = R(), col = COLS[R() < .5 ? 0 : (R() * COLS.length) | 0], x = R() * 1024 | 0, y = R() * 1024 | 0, bright = R() < .035, mid = !bright && R() < .1;
+    const a = alpha * (bright ? 1 : mid ? .55 + b * .45 : .2 + b * .5), rgb = `${col[0]},${col[1]},${col[2]}`;
+    if (bright) { const s = maxSize, hr = spikes ? 3.5 + R() * 2.5 : 2.2 + R(); const gr = g.createRadialGradient(x + .5, y + .5, 0, x + .5, y + .5, hr); gr.addColorStop(0, `rgba(${rgb},${a * .6})`); gr.addColorStop(.35, `rgba(${rgb},${a * .14})`); gr.addColorStop(1, `rgba(${rgb},0)`); g.fillStyle = gr; g.fillRect(x - hr, y - hr, hr * 2 + 2, hr * 2 + 2);
+      g.fillStyle = `rgba(${rgb},${a})`; g.fillRect(x, y, s, s);
+      if (spikes && R() < .45) { const L = 4 + R() * 5; g.strokeStyle = `rgba(${rgb},${a * .25})`; g.lineWidth = 1; g.beginPath(); g.moveTo(x - L, y + .5); g.lineTo(x + s + L, y + .5); g.moveTo(x + .5, y - L); g.lineTo(x + .5, y + s + L); g.stroke(); } }
+    else if (mid) { g.fillStyle = `rgba(${rgb},${a})`; g.fillRect(x, y, 1, 1); g.fillStyle = `rgba(${rgb},${a * .28})`; g.fillRect(x - 1, y, 1, 1); g.fillRect(x + 1, y, 1, 1); g.fillRect(x, y - 1, 1, 1); g.fillRect(x, y + 1, 1, 1); }
+    else { g.fillStyle = `rgba(${rgb},${a})`; g.fillRect(x, y, 1, 1); } }
   return c;
 }
 
@@ -132,7 +156,7 @@ function starC(count, maxSize, alpha) {
 // Each material carries a `uniforms` map shaped like the old ShaderMaterial's ({ name: { value } }), so the rest of
 // the renderer sets them exactly as before. Texture slots hold a 1×1 placeholder until a map arrives.
 // the shader block keeps its TSL names (clamp, mix, length …) to itself
-const { planetMat, cloudMat, sunMat, atmoMat, ringMat, bgMat, batchMat } = (() => {
+const { planetMat, cloudMat, sunMat, atmoMat, ringMat, bgMat, batchMat, orbitMat, SH } = (() => {
 const PH = (() => { const t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1); t.magFilter = t.minFilter = THREE.LinearFilter; t.needsUpdate = true; return t; })();
 // a texture uniform that may be sampled at several places in one shader: setting .value updates every sample
 function texU(init = null) {
@@ -142,8 +166,10 @@ function texU(init = null) {
 }
 const { Fn, float, vec2, vec3, vec4, uniform, uv, varying, attribute, positionGeometry, normalGeometry, positionWorld, cameraPosition,
   modelWorldMatrix, cameraViewMatrix, cameraProjectionMatrix, fwidth, smoothstep, mix, dot, cross, normalize, length, fract, floor,
-  max, clamp, pow, abs, select, sin, cos } = TSL;
+  max, min, clamp, pow, abs, select, sin, cos, step, exp } = TSL;
 const one = float(1);
+// shared per-frame uniforms: the view's size in pixels (for anything drawn a fixed number of pixels wide) and the clock
+const SH = { res: uniform(new THREE.Vector2(1, 1)), time: uniform(0) };
 // the worlds' noise: a value-noise lattice hashed in place, looked up twice on rotated lattices so no square cells show
 const h3 = Fn(([p0]) => { const p = fract(vec3(p0).mul(.3183099).add(.1)).mul(17).toVar(); return fract(p.x.mul(p.y).mul(p.z).mul(p.x.add(p.y).add(p.z))); })
   .setLayout({ name: 'ir_h3', type: 'float', inputs: [{ name: 'p', type: 'vec3' }] });
@@ -164,12 +190,14 @@ const mkMat = (frag, o = {}) => { const m = new THREE.NodeMaterial(); Object.ass
 
 // the worlds: the generated surface map (alpha marks water, for the sun's glint), city light on the night side,
 // relief lit from the map itself, cloud shadows cast on the ground, a fresnel rim of atmosphere reddening at the
-// terminator, and procedural fine ground detail that fades in as the camera closes (so a close pass never goes soft)
+// terminator, and procedural fine ground detail that fades in as the camera closes (so a close pass never goes soft).
+// Gas giants are limb-darkened with a deep, soft terminator and pale polar hoods; a ringed world wears its ring's shadow.
 const planetMat = (atmo, o = {}) => {
-  const GAS = !!o.gas, AIR = o.air ? 1 : 0, BUMP = o.bump ?? 1;
+  const GAS = !!o.gas, AIR = o.air ? 1 : 0, BUMP = o.bump ?? 1, RING = !!o.ring;
   const U = { map: texU(), night: texU(), hasNight: uniform(0), hmap: texU(), hasH: uniform(0), clouds: texU(), hasClouds: uniform(0), cloudOff: uniform(0),
     texel: uniform(new THREE.Vector2(1 / 512, 1 / 256)), bumpK: uniform(BUMP), gas: uniform(GAS ? 1 : 0), hasAtmo: uniform(AIR),
-    sunPos: uniform(new THREE.Vector3()), atmo: uniform(new THREE.Color().setRGB(...atmo.map(v => v / 255), THREE.SRGBColorSpace)) };
+    sunPos: uniform(new THREE.Vector3()), atmo: uniform(new THREE.Color().setRGB(...atmo.map(v => v / 255), THREE.SRGBColorSpace)),
+    C: uniform(new THREE.Vector3()), pr: uniform(1), ringN: uniform(new THREE.Vector3(0, 1, 0)), ringR: uniform(new THREE.Vector2(1.35, 2.3)), ringMap: texU() };
   const vN = worldN();
   const vT = varying(Fn(() => { const n = normalGeometry, t = vec3(n.z, 0, n.x.mul(-1)); return normalize(modelWorldMatrix.mul(vec4(select(length(t).greaterThan(1e-4), t, vec3(0, 0, 1)), 0)).xyz); })());
   const frag = Fn(() => {
@@ -198,64 +226,106 @@ const planetMat = (atmo, o = {}) => {
       const dn = n3(vP.mul(900)), dd = one.sub(smoothstep(.06, .22, fw.mul(900))), dn2 = n3(vP.mul(3200).add(1.7)), dd2 = one.sub(smoothstep(.06, .22, fw.mul(3200)));
       N.assign(normalize(N.add(land.mul(BUMP).mul(dd.mul(.34).mul(T.mul(n3(vP.mul(900).add(3.1))).add(B.mul(dn))).add(dd2.mul(.22).mul(T.mul(n3(vP.mul(3200).add(5.3))).add(B.mul(dn2))))))));
     }
-    const nl = dot(N, L), nl0 = dot(N0, L).toVar(), day = smoothstep(-.12, .22, nl0);
+    const nl = dot(N, L), nl0 = dot(N0, L).toVar(), day = smoothstep(-.12, .22, nl0), mu = max(dot(N0, V), 0).toVar();
     // cloud shadows, cast a little away from the sun
     const off = vec2(dot(L, T), dot(L, B)).mul(-.0035);
     const sh = one.sub(U.hasClouds.mul(.45).mul(U.clouds.at(uv().add(vec2(U.cloudOff, 0)).add(off)).a).mul(smoothstep(0, .2, nl0))).toVar();
-    const fr = pow(one.sub(max(dot(N0, V), 0)), 2.6).toVar();
-    const col = base.mul(max(nl, 0).mul(.97).mul(sh).add(.035)).toVar();
-    col.assign(mix(col, U.atmo.mul(smoothstep(-.2, .5, nl0).mul(.75).add(.25)), fr.mul(AIR * .55).mul(smoothstep(-.3, .3, nl0))).add(U.atmo.mul(fr).mul(fr).mul(.25).mul(smoothstep(-.25, .5, nl0))));
-    // sunset band along the terminator, where the light comes through the most air
-    if (AIR) col.addAssign(vec3(1, .42, .16).mul(base).mul(smoothstep(-.08, .02, nl0)).mul(one.sub(smoothstep(.02, .2, nl0))).mul(.35));
+    // the ring's shadow: where the ray to the Sun crosses the ring plane inside the ring, the ring's own density darkens the ground
+    if (RING) {
+      const dn = dot(L, U.ringN), tt = dot(U.C.sub(positionWorld), U.ringN).div(select(abs(dn).lessThan(1e-4), float(1e-4), dn)).toVar();
+      const Hp = positionWorld.add(L.mul(tt)), rr = length(Hp.sub(U.C)).div(U.pr).toVar();
+      const inR = step(0, tt).mul(step(U.ringR.x, rr)).mul(step(rr, U.ringR.y)), ra = U.ringMap.at(vec2(rr.sub(U.ringR.x).div(U.ringR.y.sub(U.ringR.x)), .5)).a;
+      sh.mulAssign(one.sub(inR.mul(ra).mul(.82)));
+    }
+    const fr = pow(one.sub(mu), 2.6).toVar();
+    const diff = GAS ? max(nl.add(.12), 0).div(1.12).mul(.95) : max(nl, 0).mul(.97); // a gas giant's thick air wraps the light a little round the terminator
+    const col = base.mul(diff.mul(sh).add(.03).add(float(AIR * .03).mul(lum(U.atmo)))).toVar();
+    if (GAS) {
+      col.mulAssign(float(.48).add(pow(mu, .55).mul(.52))); // limb darkening: the light leaves through more haze at the edge
+      const lat = abs(normalGeometry.y), hood = smoothstep(.72, .96, lat).mul(.45); // pale polar hoods
+      col.assign(mix(col, mix(col, vec3(lum(col)), .5).mul(1.08), hood));
+      col.addAssign(U.atmo.mul(fr).mul(fr).mul(.42).mul(smoothstep(-.35, .4, nl0))); // the high haze at the limb, in the world's own tint
+      col.addAssign(vec3(1, .55, .3).mul(fr).mul(smoothstep(-.1, .02, nl0)).mul(one.sub(smoothstep(.02, .22, nl0))).mul(.18)); // a thin sunset arc
+    } else {
+      // air: the blue of the sky seen from above, strongest at the limb; the shell itself (atmoMat) carries the glow outside the disc
+      const rim = mix(U.atmo, vec3(1, .5, .22), one.sub(smoothstep(-.05, .3, nl0)).mul(.75)); // the rim reddens toward the terminator
+      col.assign(mix(col, rim.mul(smoothstep(-.2, .5, nl0).mul(.75).add(.25)), fr.mul(AIR * .6).mul(smoothstep(-.3, .3, nl0))).add(rim.mul(fr).mul(fr).mul(.3).mul(smoothstep(-.25, .5, nl0))));
+      if (AIR) { col.assign(mix(col, U.atmo.mul(day).mul(.9), pow(one.sub(mu), 1.6).mul(.1))); // aerial haze across the disc
+        col.addAssign(vec3(1, .42, .16).mul(base).mul(smoothstep(-.08, .02, nl0)).mul(one.sub(smoothstep(.02, .2, nl0))).mul(.4)); } // sunset band along the terminator
+    }
     const H = normalize(L.add(V));
     col.addAssign(vec3(1, .93, .8).mul(pow(max(dot(N, H), 0), 420)).mul(t.a).mul(smoothstep(0, .15, nl0)).mul(.7).mul(sh));
     col.addAssign(vec3(1, .9, .75).mul(pow(max(dot(N0, H), 0), 60)).mul(t.a).mul(smoothstep(0, .15, nl0)).mul(.035).mul(sh));
-    col.addAssign(U.night.at(uvw).rgb.mul(one.sub(day)).mul(1.8).mul(one.sub(one.sub(sh).mul(.6))).mul(U.hasNight));
+    col.addAssign(vec3(1, .95, .85).mul(pow(max(dot(N0, H), 0), 14)).mul(t.a).mul(fr).mul(smoothstep(0, .2, nl0)).mul(.25).mul(sh)); // the sea's broad fresnel sheen toward the limb
+    const nt = U.night.at(uvw).rgb.toVar();
+    col.addAssign(nt.mul(one.sub(day)).mul(1.9).mul(one.sub(one.sub(sh).mul(.6))).mul(U.hasNight));
+    col.addAssign(nt.mul(.5).mul(one.sub(day)).mul(pow(one.sub(mu), 1.5)).mul(U.hasNight)); // a little of the city light scatters in the air at the limb
     return vec4(col, 1);
   })();
   const m = mkMat(frag); m.uniforms = U; return m;
 };
-const cloudMat = () => { // the cloud deck, its edges broken into wisps and billows as the camera closes
+const cloudMat = () => { // the cloud deck, its edges broken into wisps and billows as the camera closes; lit tops, blue-grey undersides at the terminator
   const U = { map: texU(), sunPos: uniform(new THREE.Vector3()) }, vN = worldN();
   const frag = Fn(() => {
-    const N = normalize(vN), L = normalize(U.sunPos.sub(positionWorld)), nl = dot(N, L).toVar(), c = U.map.at(uv()).toVar();
+    const N = normalize(vN), L = normalize(U.sunPos.sub(positionWorld)), V = normalize(cameraPosition.sub(positionWorld)), nl = dot(N, L).toVar(), c = U.map.at(uv()).toVar();
     const vP = positionGeometry.toVar(), fw = length(fwidth(vP)).toVar();
     let d = float(0), s = float(0);
     for (let k = 0; k < 4; k++) { const f = 60 * Math.pow(3, k), a = one.sub(smoothstep(.06, .22, fw.mul(f))).div(1 + k).toVar();
       d = d.add(n3(vP.mul(vec3(f, f * 1.6, f)).add(k * 3.7)).mul(a)); s = s.add(a); }
     const dd = d.div(max(s, 1)).toVar(); // where s is 0 so is d: the deck keeps its painted edge
-    const al = clamp(c.a.add(dd.mul(.5).mul(one.sub(abs(c.a.mul(2).sub(1))))).add(dd.mul(.06)), 0, 1);
-    const shade = dd.mul(.2).add(.8);
-    return vec4(c.rgb.mul(shade).mul(max(nl, 0).mul(1.05).add(.025).add(smoothstep(-.1, .1, nl).mul(.12))), al.mul(.82));
+    const al = clamp(c.a.add(dd.mul(.5).mul(one.sub(abs(c.a.mul(2).sub(1))))).add(dd.mul(.06)), 0, 1).toVar();
+    const shade = dd.mul(.22).add(.8);
+    const mu = max(dot(N, V), 0), fr = pow(one.sub(mu), 3);
+    // thicker cloud is brighter on top and bluer-grey where it is thin and lit from behind; a warm edge at the terminator
+    const lit = max(nl, 0).mul(1.1).add(.03).add(smoothstep(-.12, .12, nl).mul(.1)).toVar();
+    const col = c.rgb.mul(shade).mul(lit).toVar();
+    col.assign(mix(col, vec3(.62, .68, .8).mul(lit), one.sub(al).mul(.35)));
+    col.addAssign(vec3(1, .55, .3).mul(smoothstep(-.1, .02, nl)).mul(one.sub(smoothstep(.02, .2, nl))).mul(.25).mul(al));
+    col.addAssign(vec3(1, .97, .9).mul(pow(max(dot(N, normalize(L.add(V))), 0), 8)).mul(.08).mul(al)); // the silver lining
+    return vec4(col, al.mul(.84).mul(one.sub(fr.mul(.25))));
   })();
   const m = mkMat(frag, { transparent: true, depthWrite: false }); m.uniforms = U; return m;
 };
+// the Sun: its painted photosphere, limb-darkened, with slow-boiling granulation and a thin red chromosphere at the edge
 const sunMat = () => {
   const U = { map: texU() }, vN = worldN();
-  const frag = Fn(() => { const V = normalize(cameraPosition.sub(positionWorld)), mu = max(dot(normalize(vN), V), 0);
-    return vec4(U.map.at(uv()).rgb.mul(pow(mu, .45).mul(.9).add(.55)).mul(1.6), 1); })();
+  const frag = Fn(() => { const V = normalize(cameraPosition.sub(positionWorld)), mu = max(dot(normalize(vN), V), 0).toVar(), p = positionGeometry.toVar(), t = SH.time;
+    const g1 = n3(p.mul(16).add(vec3(t.mul(.03), t.mul(.011), 0))), g2 = n3(p.mul(52).add(vec3(0, t.mul(.07), t.mul(.02)))), g3 = n3(p.mul(140).add(vec3(t.mul(.1), 0, 0)));
+    const gran = one.add(g1.mul(.16)).add(g2.mul(.09)).add(g3.mul(.05)), limb = pow(mu, .5).mul(.72).add(.38);
+    const base = U.map.at(uv()).rgb;
+    const col = mix(base.mul(vec3(1, .66, .38)), base.mul(vec3(1.06, 1.01, .92)), pow(mu, .6)).mul(gran).mul(limb).mul(2.3).toVar();
+    col.addAssign(vec3(1, .5, .25).mul(pow(one.sub(mu), 10)).mul(.7));
+    return vec4(col, 1); })();
   const m = mkMat(frag); m.uniforms = U; return m;
 };
-// atmosphere: a back-facing shell, bright where the view ray grazes the planet's limb, brighter on the day side
+// atmosphere: a back-facing shell, bright where the view ray grazes the planet's limb, brighter on the day side,
+// reddening where the Sun sets along the terminator
 const atmoMat = (rgb, k) => {
   const U = { C: uniform(new THREE.Vector3()), r: uniform(1), R: uniform(1), sunPos: uniform(new THREE.Vector3()), col: uniform(new THREE.Color().setRGB(...rgb.map(v => v / 255), THREE.SRGBColorSpace)), k: uniform(k) };
   const frag = Fn(() => {
     const D = normalize(positionWorld.sub(cameraPosition)), oc = U.C.sub(cameraPosition), cp = cameraPosition.add(D.mul(dot(oc, D))).toVar(), b = length(cp.sub(U.C)).toVar();
     const g = clamp(U.R.sub(b).div(U.R.sub(U.r)), 0, 1).toVar();
-    const lim = pow(g, 6).mul(.55).mul(select(b.lessThan(U.r), float(.35), float(1))).add(pow(g, 20).mul(.9)); // a soft skirt and a bright thin line at the limb
-    const s = smoothstep(-.4, .55, dot(normalize(cp.sub(U.C)), normalize(U.sunPos.sub(U.C)))).mul(.92).add(.08);
-    const c2 = mix(U.col, vec3(1), pow(g, 8).mul(.3).add(.3));
-    return vec4(c2.mul(lim).mul(s).mul(U.k).mul(.7), 1);
+    const lim = pow(g, 5).mul(.6).mul(select(b.lessThan(U.r), float(.35), float(1))).add(pow(g, 18).mul(.95)); // a soft skirt and a bright thin line at the limb
+    const sd = dot(normalize(cp.sub(U.C)), normalize(U.sunPos.sub(U.C))).toVar(), s = smoothstep(-.4, .55, sd).mul(.92).add(.08);
+    const c2 = mix(U.col, vec3(1), pow(g, 8).mul(.3).add(.3)).toVar();
+    c2.assign(mix(c2, vec3(1, .45, .2), smoothstep(.35, -.05, sd).mul(smoothstep(-.45, -.1, sd)).mul(.6))); // sunset along the terminator
+    return vec4(c2.mul(lim).mul(s).mul(U.k).mul(.82), 1);
   })();
   const m = mkMat(frag, { side: THREE.BackSide, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }); m.uniforms = U; return m;
 };
+// the rings: the world's shadow falls across them with a soft edge (the Sun has size), the unlit face is dim, and
+// looking toward the Sun the thin ringlets glow with forward-scattered light
 const ringMat = map => {
-  const U = { map: texU(map), sunPos: uniform(new THREE.Vector3()), C: uniform(new THREE.Vector3()), r0: uniform(1.35), r1: uniform(2.3), pr: uniform(1) };
+  const U = { map: texU(map), sunPos: uniform(new THREE.Vector3()), C: uniform(new THREE.Vector3()), r0: uniform(1.35), r1: uniform(2.3), pr: uniform(1), N: uniform(new THREE.Vector3(0, 1, 0)) };
   const frag = Fn(() => {
     const rr = length(positionGeometry.xy), t = U.map.at(vec2(rr.sub(U.r0).div(U.r1.sub(U.r0)), .5)).toVar();
     const L = normalize(U.sunPos.sub(U.C)), p = positionWorld.sub(U.C).toVar(), along = dot(p, L).toVar(), perp = length(p.sub(L.mul(along)));
-    const shadow = select(along.lessThan(0).and(perp.lessThan(U.pr)), float(.15), float(1));
-    return vec4(t.rgb.mul(shadow.mul(.9).add(.25)), t.a.mul(.9));
+    const V = normalize(cameraPosition.sub(positionWorld)).toVar();
+    const shadow = select(along.lessThan(0), smoothstep(U.pr.mul(.9), U.pr.mul(1.08), perp), float(1)).mul(.9).add(.1).toVar();
+    const lit = smoothstep(-.08, .08, dot(U.N, L).mul(dot(U.N, V))).mul(.45).add(.55); // the face the Sun lights, or the one it does not
+    const fs = pow(max(dot(V.negate(), L), 0), 5).mul(one.sub(t.a)).mul(.7).mul(shadow); // forward scattering through the thin parts
+    const col = t.rgb.mul(shadow.mul(1.0).add(.2)).mul(lit).add(vec3(1, .95, .85).mul(fs));
+    return vec4(col, min(one, t.a.mul(.96).add(fs.mul(.4))));
   })();
   const m = mkMat(frag, { side: THREE.DoubleSide, transparent: true, depthWrite: false }); m.uniforms = U; return m;
 };
@@ -282,7 +352,23 @@ const batchMat = (map, { add, ground, ax }) => {
   const m = mkMat(frag, { transparent: true, depthWrite: false, blending: add ? THREE.AdditiveBlending : THREE.NormalBlending, side: THREE.DoubleSide /* ground quads wind clockwise from above: never cull them */ });
   m.vertexNode = vtx; m.uniforms = U; return m;
 };
-return { planetMat, cloudMat, sunMat, atmoMat, ringMat, bgMat, batchMat };
+// orbit lines as screen-space ribbons: each segment is a quad pushed sideways in the vertex shader by a fixed number
+// of pixels (oq: the segment's other end; os: which side; ot: across the ribbon for the profile), so the lines stay
+// a crisp anti-aliased core with a soft halo at every zoom, where GPU lines are one aliased pixel
+const ORBIT_HW = 4.5; // half-width in pixels, halo included
+const orbitMat = (col, op) => {
+  const U = { col: uniform(new THREE.Color(col)), op: uniform(op) }, oq = attribute('oq', 'vec3'), os = attribute('os', 'float'), ot = attribute('ot', 'float'), oa = attribute('oa', 'float');
+  const vT = varying(ot), vA = varying(oa);
+  const vtx = Fn(() => {
+    const cp = cameraProjectionMatrix.mul(cameraViewMatrix.mul(vec4(positionGeometry, 1))).toVar(), cq = cameraProjectionMatrix.mul(cameraViewMatrix.mul(vec4(oq, 1))).toVar();
+    const sp = cp.xy.div(cp.w).mul(SH.res), sq = cq.xy.div(cq.w).mul(SH.res), d = normalize(sq.sub(sp)).toVar(), n = vec2(d.y.negate(), d.x);
+    const px = float(ORBIT_HW * 2).div(SH.res); // the half-width in clip units, per pixel
+    return vec4(cp.xy.add(n.mul(px).mul(os).mul(cp.w)), cp.z, cp.w);
+  })();
+  const frag = Fn(() => { const t = abs(vT), core = one.sub(smoothstep(.1, .3, t)), halo = pow(one.sub(t), 2).mul(.1); return vec4(U.col.mul(U.op).mul(vA).mul(core.add(halo)), 1); })();
+  const m = mkMat(frag, { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }); m.vertexNode = vtx; m.uniforms = U; return m;
+};
+return { planetMat, cloudMat, sunMat, atmoMat, ringMat, bgMat, batchMat, orbitMat, SH };
 })();
 
 // ---------------------------------------------------------------- sprite batches: one draw call each
@@ -383,10 +469,12 @@ export async function initRender() {
   camera = new THREE.PerspectiveCamera(FOV, S.W / S.H, 1, 1e6);
   TEX.glow = tex(radial(64, [[0, 1], [.35, .55], [1, 0]])); TEX.dot = tex(radial(16, [[0, 1], [.6, .8], [1, 0]])); TEX.smoke = tex(radial(64, [[0, .9], [.6, .35], [1, 0]]));
   TEX.streak = tex(streakC()); TEX.plume = tex(plumeC()); TEX.missile = tex(missileC()); TEX.ring = tex(ringTexC());
-  FLARE_C = flareC(); TEX.fire = tex(fireC()); TEX.shock = tex(shockC()); TEX.hex = tex(hexC()); TEX.spark = tex(sparkC()); TEX.flare = tex(flareC());
+  FLARE_C = flareC(); TEX.fire = tex(fireC()); TEX.shock = tex(shockC()); TEX.hex = tex(hexC()); TEX.spark = tex(sparkC()); TEX.flare = tex(flareC()); TEX.corona = tex(coronaC());
+  TEX.glint = tex(radial(64, [[0, 1], [.08, .9], [.25, .32], [.6, .06], [1, 0]])); // a far world as a point of light
+  TEX.sunglow = tex(radial(128, [[0, 1], [.12, .8], [.3, .3], [.6, .07], [1, 0]]));
   // sky
   const bm = bgMat(); bm.uniforms.neb.value = tex(nebulaC(), { wrap: 1 });
-  [[1600, 1, .45], [500, 2, .7], [160, 2, 1]].forEach(([n, m, a], i) => { const t = tex(starC(n, m, a), { wrap: 1 }); t.minFilter = t.magFilter = THREE.NearestFilter; t.generateMipmaps = false; bm.uniforms['s' + i].value = t; });
+  [[2600, 1, .5, false], [700, 2, .75, false], [200, 2, 1, true]].forEach(([n, m, a, sp], i) => { const t = tex(starC(n, m, a, sp), { wrap: 1 }); t.minFilter = t.magFilter = THREE.NearestFilter; t.generateMipmaps = false; bm.uniforms['s' + i].value = t; });
   bm.toneMapped = false; // the sky keeps its painted look; tone mapping is for lit things and flashes
   bgMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), bm); bgMesh.frustumCulled = false; bgMesh.renderOrder = -100; scene.add(bgMesh); bm.uniforms.nk.value = S.gx ? S.gx.sky : 1;
   // light: the Sun lights the worlds in their own shaders; hulls get a key light from above, the Sun from the side and a cool fill
@@ -396,8 +484,13 @@ export async function initRender() {
   const rim = new THREE.DirectionalLight(0x9fc4ff, 1.5); rim.position.set(.6, -.25, -.9); scene.add(rim); scene.add(rim.target); // a cold edge light from below and behind: hulls separate from the dark
   scene.userData.sun = new THREE.PointLight(0xffe2b0, 2.4, 0, 0); scene.add(scene.userData.sun);
   bodiesG = new THREE.Group(); scene.add(bodiesG); buildBodies(); initGen();
-  for (const [col, op] of [[0xf2c14e, .16], [0xc8c8c8, .13], [0x9a8a78, .09]]) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(60000 * 3), 3).setUsage(THREE.DynamicDrawUsage)); g.setDrawRange(0, 0);
-    const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: op, depthWrite: false })); l.frustumCulled = false; l.renderOrder = 1; scene.add(l); orbitL.push({ l, a: g.attributes.position.array, n: 0 }); }
+  // orbit lines: ribbons of quads (see orbitMat), 4 vertices and 6 indices a segment; planets, moons, the Belt
+  for (const [col, op] of [[0xf2c14e, .34], [0xd8d8d8, .24], [0xb09a80, .17]]) { const SEG = 14000, g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(SEG * 12), 3).setUsage(THREE.DynamicDrawUsage)); g.setAttribute('oq', new THREE.BufferAttribute(new Float32Array(SEG * 12), 3).setUsage(THREE.DynamicDrawUsage));
+    const os = new Float32Array(SEG * 4), ot = new Float32Array(SEG * 4), ix = new Uint32Array(SEG * 6);
+    for (let i = 0; i < SEG; i++) { os.set([-1, 1, 1, -1], i * 4); ot.set([-1, 1, -1, 1], i * 4); const v = i * 4; ix.set([v, v + 1, v + 3, v, v + 3, v + 2], i * 6); }
+    g.setAttribute('os', new THREE.BufferAttribute(os, 1)); g.setAttribute('ot', new THREE.BufferAttribute(ot, 1)); g.setAttribute('oa', new THREE.BufferAttribute(new Float32Array(SEG * 4), 1).setUsage(THREE.DynamicDrawUsage)); g.setIndex(new THREE.BufferAttribute(ix, 1)); g.setDrawRange(0, 0);
+    const l = new THREE.Mesh(g, orbitMat(col, op)); l.frustumCulled = false; l.renderOrder = 1; scene.add(l); orbitL.push({ l, a: g.attributes.position.array, q: g.attributes.oq.array, al: g.attributes.oa.array, n: 0 }); }
   rocksG = new THREE.Group(); scene.add(rocksG);
   GEO.rock = jitterGeo(new THREE.IcosahedronGeometry(1, 1), .55, 3.1, .62); GEO.shard = jitterGeo(new THREE.IcosahedronGeometry(1, 0), .8, 7.7, .35);
   MAT.rock = new THREE.MeshStandardMaterial({ color: 0x4a423c, roughness: .95, metalness: .05, flatShading: true });
@@ -542,6 +635,18 @@ function applySurface(v) {
   if (t.clouds) { if (!v.clouds) { v.clouds = new THREE.Mesh(GEO.sphere, cloudMat()); v.clouds.scale.setScalar(1.012); v.clouds.renderOrder = 2; v.g.add(v.clouds); } v.clouds.material.uniforms.map.value = t.clouds; }
   v.mesh.visible = true;
 }
+// a far world's point of light: on while its disc is under a few pixels, fading out as the disc grows
+const GL_Q = new THREE.Quaternion(), GL_N = new THREE.Vector3();
+function glintFor(v, x, y, rpx, z, on) {
+  if (!v.glint) return; const k = clamp((6 - rpx) / 4, 0, 1); v.glint.visible = on && k > 0; if (!v.glint.visible) return;
+  v.glint.position.set(x, 0, y); const gs = (14 + 6 * clamp(rpx, 0, 2)) / z; v.glint.scale.set(gs, gs, 1); v.glint.material.opacity = k * .85;
+}
+// the ring and its world share the ring's plane and the Sun: for the ring's lit face and the shadow it casts on the ground
+function ringUniforms(v, x, y, pr, sunP) {
+  const R = v.ring.material.uniforms; R.sunPos.value.copy(sunP); R.C.value.set(x, 0, y); R.pr.value = pr;
+  v.g.updateMatrixWorld(); v.g.getWorldQuaternion(GL_Q); GL_N.set(0, 1, 0).applyQuaternion(GL_Q); R.N.value.copy(GL_N);
+  const U = v.mesh.material.uniforms; if (U.ringN) { U.ringN.value.copy(GL_N); U.ringR.value.set(1.35, 2.3); }
+}
 // the worlds' axes lean back from the camera so their equators, where the lore puts so much, face you;
 // Uranus rolls on its side
 const TILT = { uranus: -1.55, saturn: -.5, io: -.75, europa: -.7, ganymede: -.7, luna: -.95 };
@@ -555,12 +660,17 @@ function buildBodies() {
     const v = { b, g: new THREE.Group(), spin: (b.gas ? .01 : .003) * (i % 2 ? 1 : -.8), tilt: TILT[b.id] ?? -.6, face: -PI / 2 - (FACE[b.id] ?? (i * 47) % 360) * PI / 180, cspin: (i % 3 - 1) * .002 + .004 };
     if (b.kind === 'star') {
       v.mesh = new THREE.Mesh(sph, sunMat());
-      const gm = new THREE.SpriteMaterial({ map: TEX.glow, color: 0xffc870, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: .75 });
+      const gm = new THREE.SpriteMaterial({ map: TEX.sunglow, color: 0xffc870, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: .8 });
       v.glow = new THREE.Sprite(gm); v.glow.renderOrder = 2; bodiesG.add(v.glow);
+      const cm = new THREE.SpriteMaterial({ map: TEX.corona, color: 0xffd9a0, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, depthTest: false, opacity: .55 });
+      v.corona = new THREE.Sprite(cm); v.corona.renderOrder = -1; bodiesG.add(v.corona); // the corona, behind everything but the sky
     } else {
-      v.mesh = new THREE.Mesh(sph, planetMat(pal.atmo || [180, 180, 190], { gas: b.gas, air: !!pal.atmo && !b.gas, bump: b.gas ? 0 : b.id === 'earth' || b.id === 'venus' || b.id === 'titan' ? .55 : 1 }));
+      v.mesh = new THREE.Mesh(sph, planetMat(pal.atmo || [180, 180, 190], { gas: b.gas, air: !!pal.atmo && !b.gas, ring: !!pal.ring, bump: b.gas ? 0 : b.id === 'earth' || b.id === 'venus' || b.id === 'titan' ? .55 : 1 }));
       if (pal.atmo && !b.dwarf && b.r > 250) { v.atmo = new THREE.Mesh(sph, atmoMat(pal.atmo, b.gas ? .75 : b.kind === 'moon' ? .55 : 1)); v.atmoK = b.gas ? 1.07 : 1.12; v.atmo.renderOrder = 3; bodiesG.add(v.atmo); }
-      if (pal.ring) { const rg = new THREE.RingGeometry(1.35, 2.3, 192, 1); v.ring = new THREE.Mesh(rg, ringMat(TEX.ring)); v.ring.rotation.x = -PI / 2; v.ring.renderOrder = 4; v.g.add(v.ring); }
+      if (pal.ring) { const rg = new THREE.RingGeometry(1.35, 2.3, 192, 1); v.ring = new THREE.Mesh(rg, ringMat(TEX.ring)); v.ring.rotation.x = -PI / 2; v.ring.renderOrder = 4; v.g.add(v.ring); v.mesh.material.uniforms.ringMap.value = TEX.ring; }
+      // seen from far enough that its disc is a pixel or two, a world is a point of light in its own colour
+      const gc = new THREE.Color(pal.c[1] || pal.c[0] || '#cccccc').lerp(new THREE.Color(1, 1, 1), .35);
+      v.glint = new THREE.Sprite(new THREE.SpriteMaterial({ map: TEX.glint, color: gc, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, depthTest: false, opacity: 0 })); v.glint.renderOrder = 5; v.glint.visible = false; bodiesG.add(v.glint);
       if (b.id === 'phobos') { v.extra = phobosDocks(); v.traffic = phobosTraffic(1.38); v.extra.add(v.traffic.g); }
     }
     v.mesh.visible = false; v.g.add(v.mesh); if (v.extra) v.g.add(v.extra);
@@ -718,7 +828,7 @@ function sceneFrame() {
   camera.aspect = S.W / S.H; camera.near = d * .04; camera.far = d * 30; camera.position.set(...camOffset(d));
   camera.lookAt(0, 0, 0); camera.updateProjectionMatrix(); camera.updateMatrixWorld();
   // sky parallax, as before
-  const u = bgMesh.material.uniforms; u.res.value.set(S.W, S.H);
+  const u = bgMesh.material.uniforms; u.res.value.set(S.W, S.H); SH.res.value.set(S.W, S.H); SH.time.value = performance.now() / 1000;
   const sp = [.02, .05, .1].map(k => k * Math.min(1, z * 2));
   u.o01.value.set((-c.x * sp[0]) % 1024, (-c.y * sp[0]) % 1024, (-c.x * sp[1]) % 1024, (-c.y * sp[1]) % 1024);
   u.o2n.value.set((-c.x * sp[2]) % 1024, (-c.y * sp[2]) % 1024, (-c.x * .04 * z) % 4096, (-c.y * .04 * z) % 4096);
@@ -732,14 +842,16 @@ function sceneFrame() {
     const b = v.b, x = b.x - O.x, y = b.y - O.y, vis = onScr(b.x, b.y, Math.max(b.r * z * 2.6, 40)) && b.r * z > .6;
     v.g.visible = vis; if (v.atmo) v.atmo.visible = vis; if (v.ring) v.ring.visible = vis;
     if (v.glow) { v.glow.position.set(x, 0, y); const gs = Math.max(b.r * 7, 70 / z); v.glow.scale.set(gs, gs, 1); }
+    if (v.corona) { v.corona.position.set(x, 0, y); const cs = Math.max(b.r * 14, 300 / z); v.corona.scale.set(cs, cs, 1); v.corona.material.opacity = .4; }
+    glintFor(v, x, y, b.r * z, z, onScr(b.x, b.y, 40));
     if (!vis) continue;
     v.g.position.set(x, 0, y); v.g.scale.setScalar(b.r); v.g.rotation.set(v.tilt, 0, 0); v.mesh.rotation.y = v.face + S.time * v.spin;
     if (v.clouds) { v.clouds.rotation.y = v.face + 1.3 + S.time * (v.spin + v.cspin); v.clouds.material.uniforms.sunPos.value.copy(sunP); v.mesh.material.uniforms.cloudOff.value = -(1.3 + S.time * v.cspin) / TAU; }
     if (v.extra) v.extra.rotation.y = v.face + S.time * v.spin;
     if (v.traffic) v.traffic.update(S.time);
-    const U = v.mesh.material.uniforms; if (U.sunPos) U.sunPos.value.copy(sunP);
+    const U = v.mesh.material.uniforms; if (U.sunPos) U.sunPos.value.copy(sunP); if (U.C) { U.C.value.set(x, 0, y); U.pr.value = b.r; }
     if (v.atmo) { const R = b.r * v.atmoK; v.atmo.position.set(x, 0, y); v.atmo.scale.setScalar(R); const A = v.atmo.material.uniforms; A.C.value.set(x, 0, y); A.r.value = b.r; A.R.value = R; A.sunPos.value.copy(sunP); }
-    if (v.ring) { const R = v.ring.material.uniforms; R.sunPos.value.copy(sunP); R.C.value.set(x, 0, y); R.pr.value = b.r; }
+    if (v.ring) ringUniforms(v, x, y, b.r, sunP);
   }
   // orbits and the Belt, only the arcs near the screen
   const fpz = footprint(); let reach = 0; for (const [wx, wy] of fpz) reach = Math.max(reach, hyp(wx - c.x, wy - c.y)); reach *= 1.15;
@@ -749,7 +861,7 @@ function sceneFrame() {
     if (b.kind === 'planet') ring(orbitL[0], 0, 0, hyp(b.x, b.y), reach);
     else if (b.orbitR) { const p = BODIES[b.parent] || { x: 0, y: 0 }; ring(orbitL[1], p.x, p.y, b.orbitR, reach); }
   }
-  for (const L of orbitL) { const g = L.l.geometry; g.setDrawRange(0, L.n); L.l.visible = L.n > 1; /* WebGPU warns on an empty draw */ const a = g.attributes.position; a.clearUpdateRanges(); a.addUpdateRange(0, L.n * 3); a.needsUpdate = true; }
+  for (const L of orbitL) flushOrbit(L);
 
   // rocks
   if (nodesRef !== S.nodes || fieldsRef !== S.fields) buildRocks();
@@ -860,7 +972,7 @@ function renderOrrery(L) {
   const c = S.cam, z = c.z, d = camDist();
   O.x = c.x; O.y = c.y;
   camera.aspect = S.W / S.H; camera.near = d * .04; camera.far = d * 40; camera.position.set(0, d * SE, d * CE); camera.lookAt(0, 0, 0); camera.updateProjectionMatrix(); camera.updateMatrixWorld();
-  const u = bgMesh.material.uniforms; u.res.value.set(S.W, S.H);
+  const u = bgMesh.material.uniforms; u.res.value.set(S.W, S.H); SH.res.value.set(S.W, S.H); SH.time.value = performance.now() / 1000;
   u.o01.value.set((-c.x * .002 * z * 50) % 1024, (-c.y * .002 * z * 50) % 1024, (-c.x * .005 * z * 50) % 1024, (-c.y * .005 * z * 50) % 1024);
   u.o2n.value.set((-c.x * .01 * z * 50) % 1024, (-c.y * .01 * z * 50) % 1024, (-c.x * .04 * z) % 4096, (-c.y * .04 * z) % 4096);
   if ((S.bodyVer || 0) !== bodyVerSeen) buildBodies();
@@ -868,19 +980,21 @@ function renderOrrery(L) {
   for (const v of bodyVis) {
     const P = L.pos[v.b.id]; if (!P) { v.g.visible = false; if (v.atmo) v.atmo.visible = false; continue; }
     const x = P.x - O.x, y = P.y - O.y, vis = onScr(P.x, P.y, Math.max(P.r * z * 2.6, 40)); v.g.visible = vis; if (v.atmo) v.atmo.visible = vis;
-    if (v.glow) { v.glow.position.set(x, 0, y); const gs = P.r * 4.2; v.glow.scale.set(gs, gs, 1); }
+    if (v.glow) { v.glow.position.set(x, 0, y); const gs = Math.max(P.r * 5, 120 / z); v.glow.scale.set(gs, gs, 1); } // never smaller than a glow on the screen
+    if (v.corona) { v.corona.position.set(x, 0, y); const cs = Math.max(P.r * 11, 520 / z); v.corona.scale.set(cs, cs, 1); v.corona.material.opacity = .55 * clamp((P.r * z - 1.5) / 8, .35, 1); }
+    glintFor(v, x, y, P.r * z, z, onScr(P.x, P.y, 40));
     if (!vis) continue;
     v.g.position.set(x, 0, y); v.g.scale.setScalar(P.r); v.g.rotation.set(v.tilt, 0, 0); v.mesh.rotation.y = v.face + performance.now() / 1000 * v.spin * 3;
     if (v.clouds) { v.clouds.rotation.y = v.face + 1.3 + performance.now() / 1000 * (v.spin + v.cspin) * 3; v.clouds.material.uniforms.sunPos.value.copy(sunP); v.mesh.material.uniforms.cloudOff.value = -(1.3 + performance.now() / 1000 * v.cspin * 3) / TAU; }
     if (v.extra) v.extra.rotation.y = v.face;
-    const U = v.mesh.material.uniforms; if (U.sunPos) U.sunPos.value.copy(sunP);
+    const U = v.mesh.material.uniforms; if (U.sunPos) U.sunPos.value.copy(sunP); if (U.C) { U.C.value.set(x, 0, y); U.pr.value = P.r; }
     if (v.atmo) { const R = P.r * v.atmoK; v.atmo.position.set(x, 0, y); v.atmo.scale.setScalar(R); const A = v.atmo.material.uniforms; A.C.value.set(x, 0, y); A.r.value = P.r; A.R.value = R; A.sunPos.value.copy(sunP); }
-    if (v.ring) { const R = v.ring.material.uniforms; R.sunPos.value.copy(sunP); R.C.value.set(x, 0, y); R.pr.value = P.r; }
+    if (v.ring) ringUniforms(v, x, y, P.r, sunP);
   }
   const fpz = footprint(); let reach = 0; for (const [wx, wy] of fpz) reach = Math.max(reach, hyp(wx - c.x, wy - c.y)); reach *= 1.15;
   for (const Lr of orbitL) Lr.n = 0;
   for (const [cx, cy, R, k] of L.orbits) ring(orbitL[k], cx, cy, R, reach);
-  for (const Lr of orbitL) { const g = Lr.l.geometry; g.setDrawRange(0, Lr.n); Lr.l.visible = Lr.n > 1; const a = g.attributes.position; a.clearUpdateRanges(); a.addUpdateRange(0, Lr.n * 3); a.needsUpdate = true; }
+  for (const Lr of orbitL) flushOrbit(Lr);
   shipsG.visible = false; rocksG.visible = false; debrisM.end(); for (const t of Object.values(turretM)) t.end(); for (const b of Object.values(B)) b.end();
   paradeDraw(S.parade); // the fleets in orbit
   renderer.info.reset();
@@ -892,16 +1006,22 @@ function renderOrrery(L) {
   L.overlay(G, label, projectTo);
   flushLabels(); ctx.globalAlpha = 1;
 }
-// an orbit as line segments: only the part near the screen, at a fixed number of segments
+// an orbit as a ribbon of quads: only the part near the screen, at a fixed number of segments
 function ring(L, x, y, r, reach) {
   const c = S.cam, dc = hyp(c.x - x, c.y - y);
   if (dc - reach > r || dc + reach < r) return;
   let a0 = 0, a1 = TAU;
   if (reach < r * .5) { const mid = Math.atan2(c.y - y, c.x - x), half = Math.min(PI, reach / Math.max(1, dc - reach * .99) * 1.2 + .02); a0 = mid - half; a1 = mid + half; }
-  const n = 160, A = L.a; if ((L.n + n * 2) * 3 > A.length) return;
+  const n = 160, A = L.a, Qa = L.q, Al = L.al; if ((L.n + n) * 12 > A.length) return;
+  const fade = clamp((r * c.z - 10) / 60, .2, 1); // a small orbit on the screen fades, so the crowded middle never burns white
   let lx = x + Math.cos(a0) * r - O.x, ly = y + Math.sin(a0) * r - O.y;
-  for (let i = 1; i <= n; i++) { const a = a0 + (a1 - a0) * i / n, nx = x + Math.cos(a) * r - O.x, ny = y + Math.sin(a) * r - O.y; let o = L.n * 3; A[o] = lx; A[o + 1] = 0; A[o + 2] = ly; A[o + 3] = nx; A[o + 4] = 0; A[o + 5] = ny; L.n += 2; lx = nx; ly = ny; }
+  for (let i = 1; i <= n; i++) { const a = a0 + (a1 - a0) * i / n, nx = x + Math.cos(a) * r - O.x, ny = y + Math.sin(a) * r - O.y, o = L.n * 12, o4 = L.n * 4;
+    Al[o4] = Al[o4 + 1] = Al[o4 + 2] = Al[o4 + 3] = fade;
+    A[o] = lx; A[o + 1] = 0; A[o + 2] = ly; A[o + 3] = lx; A[o + 4] = 0; A[o + 5] = ly; A[o + 6] = nx; A[o + 7] = 0; A[o + 8] = ny; A[o + 9] = nx; A[o + 10] = 0; A[o + 11] = ny;
+    Qa[o] = nx; Qa[o + 1] = 0; Qa[o + 2] = ny; Qa[o + 3] = nx; Qa[o + 4] = 0; Qa[o + 5] = ny; Qa[o + 6] = lx; Qa[o + 7] = 0; Qa[o + 8] = ly; Qa[o + 9] = lx; Qa[o + 10] = 0; Qa[o + 11] = ly;
+    L.n++; lx = nx; ly = ny; }
 }
+function flushOrbit(L) { const g = L.l.geometry; g.setDrawRange(0, L.n * 6); L.l.visible = L.n > 0; /* WebGPU warns on an empty draw */ for (const k of ['position', 'oq', 'oa']) { const a = g.attributes[k]; a.clearUpdateRanges(); a.addUpdateRange(0, L.n * a.itemSize * 4); a.needsUpdate = true; } }
 
 // Drop 3 materials, one set per class, team and navy: plating with lit windows, team-coloured trim (gold or bone on
 // Society and Rim hulls), dark recesses, glowing windows and engines, and heavier armour plate
