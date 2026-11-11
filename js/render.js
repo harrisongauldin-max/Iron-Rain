@@ -1090,7 +1090,10 @@ function paradeDraw(L) {
   for (const [id, v] of paradeVis) if (!seen.has(id)) { paradeG.remove(v.g); paradeVis.delete(id); }
 }
 // a named flagship with its own hull: the Annihilo, Atalantia au Grimmus's dreadnought, "shaped like an atavistic spear"
-const variantOf = s => (s.type === 'dread' && s.cmdr && /Atalantia/.test(s.cmdr.name || '') ? 'spear' : '') + (s.vt ? '|' + s.vt : ''); // the Annihilo, and a class's fittings
+// the named flagships, by who commands the dreadnought: the Annihilo (Atalantia), the Pandora (the Julii: Victra, Antonia),
+// the Invictus (House Augustus), the Pax (Orion, who captained her for Darrow); then a class's fittings
+const NAMED = [[/Atalantia/, 'spear'], [/Victra|Antonia|Julii/, 'pandora'], [/Augustus/, 'invictus'], [/Orion|Darrow/, 'pax']];
+const variantOf = s => (s.type === 'dread' && s.cmdr ? (NAMED.find(([re]) => re.test(s.cmdr.name || '')) || [0, ''])[1] : '') + (s.vt ? '|' + s.vt : '');
 function makeShip(s) {
   if (HAS_3D(s.type)) {
     const vt = variantOf(s), H = buildHull(s.type, facKey(s.team) || 'none', vt), mats = shipMats3(s.type, s.team), g = new THREE.Group();
