@@ -525,14 +525,19 @@ export function buildStation(type) {
       at('armour', SG.cyl(.16, .04, .1, 14, 0, 0, 0, 0, -Math.PI / 2), 1.08, a); at('glow', SG.cyl(.06, .06, .02, 12, 0, 0, 0, 0, -Math.PI / 2), 1.0, a); at('lt', SG.sph(.02, 0, 0, 0, 8, 6), 1.16, a); } // collector arms and scoop dishes
     add('hull', SG.cyl(.18, .24, .18, 12, 0, .22, 0)); windows(.185, .22, 12, .03, .012); add('dark', SG.cyl(.03, .04, .34, 8, .3, .3, .2)); add('glow', SG.sph(.05, .3, .5, .2, 10, 8)); // control block, flare stack
     for (let i = 0; i < 4; i++) { const a = i / 4 * TAU + .4; at('dark', SG.cyl(.012, .012, .3, 6, 0, 0, 0, 0, Math.PI / 2), .35, a, .1); }                   // pipework
-  } else if (type === 'gunplat') { // the Gun Platform: an armoured wedge with three twin rail turrets, a magazine block aft, a reactor glow and a sensor mast
-    const sh = new THREE.Shape([[.95, 0], [-.55, .7], [-.4, 0], [-.55, -.7]].map(([x, y]) => new THREE.Vector2(x, -y)));
-    const ex = (d, sc, y, slot) => { const g = new THREE.ExtrudeGeometry(sh, { depth: d, bevelEnabled: false }); g.rotateX(-Math.PI / 2); g.scale(sc, 1, sc); g.translate(0, y, 0); add(slot, g); };
-    ex(.22, 1, -.11, 'hull'); ex(.02, 1.03, .1, 'trim'); ex(.1, .86, .12, 'armour'); ex(.06, .6, .22, 'dark');
-    for (const [x, zz] of [[.4, 0], [-.05, .33], [-.05, -.33]]) { add('dark', SG.cyl(.1, .12, .04, 12, x, .24, zz)); add('armour', SG.box(.14, .08, .16, x, .3, zz)); add('gun', SG.cyl(.012, .012, .3, 6, x + .2, .31, zz - .035, 0, Math.PI / 2)); add('gun', SG.cyl(.012, .012, .3, 6, x + .2, .31, zz + .035, 0, Math.PI / 2)); }
-    add('armour', SG.box(.2, .1, .5, -.3, .27, 0)); for (let i = 0; i < 4; i++) add('dark', SG.box(.03, .06, .08, -.3, .33, -.18 + i * .12));          // the magazine
-    add('glow', SG.cyl(.07, .07, .05, 12, -.45, .24, 0)); add('hull', SG.cyl(.012, .02, .5, 6, -.2, .5, 0)); add('lt', SG.sph(.03, -.2, .77, 0, 8, 6));
-    for (const z of [-.25, .25]) add('glow', SG.box(.3, .012, .02, .1, .2, z));                                                                          // deck strips
+  } else if (type === 'gunplat') { // the Gun Platform: an orbital rail battery — an armoured drum core, a heavy twin-rail turret on a barbette, long barrels with cooling rings, capacitor banks and radiator vanes round the core, a docking collar beneath
+    add('armour', SG.cyl(.46, .5, .3, 12, 0, 0, 0)); add('dark', SG.cyl(.5, .5, .04, 12, 0, .17, 0)); add('hull', SG.cyl(.52, .46, .08, 12, 0, -.19, 0));   // the core, faceted
+    windows(.48, -.06, 24, .04, .012);
+    for (let i = 0; i < 6; i++) { const a = i / 6 * TAU; at('armour', SG.box(.18, .22, .3, 0, 0, 0), .5, a, -.02); at('dark', SG.box(.06, .16, .24, 0, 0, 0), .6, a, -.02); // capacitor banks, hull-mounted
+      for (let k = 0; k < 3; k++) at('glow', SG.box(.012, .02, .18, 0, 0, 0), .63, a, -.1 + k * .07); }                                                         // their charge lights
+    for (let i = 0; i < 6; i++) { const a = i / 6 * TAU + Math.PI / 6; at('hull', SG.box(.4, .012, .14, 0, 0, 0), .78, a, -.08); at('dark', SG.box(.4, .03, .02, 0, 0, 0), .78, a, -.08); } // radiator vanes between the banks
+    add('dark', SG.cyl(.3, .34, .08, 24, 0, .23, 0)); add('trim', SG.torus(.32, .012, 48, 0, .27, 0));                                                         // the barbette ring
+    add('armour', SG.box(.5, .2, .44, -.05, .37, 0)); add('hull', SG.box(.36, .06, .4, -.08, .5, 0)); add('dark', SG.box(.2, .12, .34, .18, .4, 0));           // the turret: armoured house, mantlet forward
+    for (const z of [-.11, .11]) { add('gun', SG.cyl(.028, .032, .9, 10, .68, .4, z, 0, Math.PI / 2)); for (let k = 0; k < 4; k++) add('dark', SG.cyl(.04, .04, .025, 10, .4 + k * .18, .4, z, 0, Math.PI / 2)); add('dark', SG.cyl(.036, .036, .06, 10, 1.12, .4, z, 0, Math.PI / 2)); } // the rails, with cooling rings and muzzle collars
+    add('glow', SG.box(.02, .05, .3, .28, .42, 0)); add('armour', SG.box(.14, .1, .14, -.28, .4, .0)); add('win', SG.box(.04, .03, .1, -.36, .42, 0));         // breech glow, the gun director aft with its lit window
+    add('hull', SG.cyl(.012, .02, .36, 6, -.2, .68, .12)); add('lt', SG.sph(.025, -.2, .88, .12, 8, 6));                                                      // sensor mast
+    add('dark', SG.cyl(.2, .24, .1, 16, 0, -.28, 0)); add('glow', SG.cyl(.1, .1, .02, 16, 0, -.34, 0));                                                        // docking collar and reactor beneath
+    for (let i = 0; i < 3; i++) { const a = i / 3 * TAU + .3; at('lt', SG.sph(.018, 0, 0, 0, 8, 6), .56, a, .17); }
   } else if (type === 'shieldplat') { // the Shield Station: a hub with three emitter pylons holding a ring above it (the shield sphere is render's)
     add('dark', SG.cyl(.7, .62, .16, 24, 0, 0, 0)); add('trim', SG.torus(.7, .022, 48, 0, .06, 0)); add('armour', SG.cyl(.3, .36, .12, 16, 0, .14, 0));
     windows(.705, -.02, 30, .04, .012);
