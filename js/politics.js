@@ -3,7 +3,7 @@
 // the war leaves it and jumps with what you do; every number here can be explained, part by part. Each power passes
 // laws through its own body. Between the powers: opinions that remember, war goals, and peace bought item by item
 // with war score: worlds, prisoners, yards, alliances, tribute, a captured ruler.
-import { C, note, hostile, relOf, setRel, BLOC_NAME, CAPITAL, fleetsAt, fleetStr, declareWar, travel, chron, human } from './camp.js';
+import { C, note, hostile, relOf, setRel, BLOC_NAME, CAPITAL, fleetsAt, fleetStr, declareWar, travel, chron, human, nearDead } from './camp.js';
 import * as CM from './command.js';
 import * as EC from './economy.js';
 import * as RU from './rulers.js';
@@ -508,21 +508,52 @@ function aiDiplo() {
       const s = warScore(f, o), wf = C.weary[f] || 0, ck = f + '>' + o, op = opinionOf(f, o);
       // a power whose realm is broken, losing badly for six weeks running, capitulates: it cedes worlds, pays tribute and makes peace
       C.capStreak = C.capStreak || {}; C.capStreak[ck] = s <= -60 && C.turn >= 20 && broken(f) ? (C.capStreak[ck] || 0) + 1 : 0;
-      if (C.capStreak[ck] >= 6) { capitulate(f, o, s); C.capStreak[ck] = 0; continue; }
+      // a victor that is not tired of the war does not let a power on its last worlds off with a treaty: it finishes it
+      const finish = !human(o) && nearDead(f) && (C.weary[o] || 0) < 55 && RU.docOf(o).peace < 20;
+      if (C.capStreak[ck] >= 6 && !finish) { capitulate(f, o, s); C.capStreak[ck] = 0; continue; }
       const sue = s < -35 + D.peace * .6 || wf > 75 - D.peace * .3;
       if (human(o)) {
         const cool = !C.pendingOffer && !(C.lastOffer && C.turn - C.lastOffer < 10);
         if (sue && rnd() < .15 && cool) { const items = aiOfferItems(f, o, Math.max(0, -s - 8 + (wf - 40) / 3)); C.pendingOffer = { from: f, kind: 'deal', items }; C.lastOffer = C.turn; }
         else if (s > 45 - D.peace * .3 && rnd() < .06 && cool) { const items = aiOfferItems(o, f, s * .6); if (items.length) { C.pendingOffer = { from: f, kind: 'demand', items }; C.lastOffer = C.turn; } }
       }
-      else if ((s < -40 + D.peace * .6 + op / 10 || wf > 80) && rnd() < .08 && !(f === 'soc' && o === 'rep' && supportOf('soc') > 60)) { const items = aiOfferItems(f, o, Math.max(0, -s * .6)); applyDeal(f, o, items); }
+      else if (!finish && (s < -40 + D.peace * .6 + op / 10 || wf > 80) && rnd() < .08 && !(f === 'soc' && o === 'rep' && supportOf('soc') > 60)) { const items = aiOfferItems(f, o, Math.max(0, -s * .6)); applyDeal(f, o, items); }
     }
+    aiWar(f, D);
     // the Republic and the Remnant are enemies to the death: a truce between them holds only as long as it must
     for (const o of ['rep', 'soc']) if (o !== f && (f === 'rep' || f === 'soc') && C.fac[o].alive && relOf(f, o) === 'peace' && truceLeft(f, o) === 0 && rnd() < .15 * (D.truce > 0 ? 1 : .4)) declareWar(f, o);
     // a ruler who holds nothing sacred may break a truce with a power it hates
     for (const o of POW) if (o !== f && C.fac[o].alive && relOf(f, o) === 'peace' && truceLeft(f, o) > 0 && D.truce > 0 && opinionOf(f, o) < -50 && !(o === 'rim' || f === 'rim') && rnd() < .02 * D.truce) declareWar(f, o, true);
     // the AI captors free each other's officers now and then, as their opinion allows; rulers stay in chains
     for (const c of prisoners(f)) if (c.owner !== C.player && c.owner !== 'neu' && C.fac[c.owner].alive && !RU.isRoyal(c) && rnd() < .05 * (1 + opinionOf(f, c.owner) / 100)) { c.state = 'pool'; c.captor = null; addOpinion(c.owner, f, 'prisoners', 'Returned our prisoners', 6, .3); }
+  }
+}
+// the AI goes to war when it sees an edge worth the cost: a fleet stronger than all the enemy can spare (allies counted,
+// a fleet already fighting elsewhere counted at 60%), a prize within reach, a people not yet tired of war, and no second
+// front unless the edge is crushing. Hatred makes it readier. A patient ruler (Romulus of the Rim) waits for his chance:
+// he strikes only a power already at war, worn down or with its capital lost.
+// The Republic and the Remnant have their own feud, kept above.
+const FLEET = x => C.fleets.reduce((a, fl) => fl.owner === x ? a + fleetStr(fl) : a, 0);
+export function warEdge(f, o) {
+  const fronts = x => atWarWith(x).filter(y => y !== f).length, eff = x => FLEET(x) * (fronts(x) ? .6 : 1);
+  const theirs = eff(o) + POW.filter(p => p !== f && p !== o && C.fac[p].alive && relOf(o, p) === 'ally' && !hostile(f, p)).reduce((a, p) => a + eff(p) * .5, 0);
+  return FLEET(f) / Math.max(400, theirs);
+}
+function aiWar(f, D) {
+  const wf = C.weary[f] || 0; if (wf > 20 || C.turn < 6) return;
+  const fronts = atWarWith(f).length, mine = Object.values(C.worlds).filter(w => w.owner === f);
+  for (const o of POW) {
+    if (o === f || !C.fac[o].alive || relOf(f, o) !== 'peace' || truceLeft(f, o) > 0) continue;
+    if ((f === 'rep' && o === 'soc') || (f === 'soc' && o === 'rep')) continue;
+    if (human(o) && C.turn < [40, 26, 16][C.difficulty]) continue; // the player gets time to find their feet before a new enemy comes
+    const theirs = Object.values(C.worlds).filter(w => w.owner === o); if (!theirs.length) continue;
+    if (!theirs.some(w => mine.some(m => travel(m.id, w.id) <= 5))) continue; // nothing within reach worth a war
+    const edge = warEdge(f, o), hate = clamp(-opinionOf(f, o) / 100, 0, 1);
+    const chance = (atWarWith(o).length ? 1 : 0) + (capLostOf(o) ? 1 : 0) + ((C.weary[o] || 0) > 30 ? 1 : 0);
+    if (D.truce === 0 && !chance) continue; // a patient ruler waits for the moment
+    const need = D.sup * 1.15 * (fronts ? 1.7 : 1) * (1 - hate * .2) * (chance ? .9 : 1);
+    if (edge < need) continue;
+    if (rnd() < .05 * D.ops * (1 + hate) * (1 + chance * .6)) { declareWar(f, o); C.aiStats = C.aiStats || {}; C.aiStats.declared = (C.aiStats.declared || 0) + 1; return; }
   }
 }
 // the player answers an offer from an AI power

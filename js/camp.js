@@ -400,7 +400,7 @@ function contestedOrbits() {
 }
 function pinInOrbit(contested) {
   for (const fl of C.fleets) { const id = contested.get(fl.id); const t = fl.transit;
-    if (!id || !t || t.from !== id || t.left !== t.total || fl.engage || fl.run === 'dark' || fl.raid === id) continue;
+    if (!id || !t || t.from !== id || t.left !== t.total || t.retreat || fl.engage || fl.run === 'dark' || fl.raid === id) continue; // a beaten fleet falling back has already fought its way out
     if (![...contested].some(([oid, w]) => w === id && (o => o && o.owner !== fl.owner && hostile(o.owner, fl.owner) && o.ships.length && !(o.run === 'dark' && o.transit))(C.fleets.find(x => x.id === oid)))) continue; // only a dark-running enemy has slipped away
     fl.held = t; fl.at = id; fl.transit = null;
     if (fl.owner === C.player) note(`${fl.name} is held in orbit at ${bodyOf(id).name} by the enemy: it must fight its way out first. Its orders stand.`, 'bad', id);
@@ -442,13 +442,14 @@ export function conflicts() { // worlds where hostile fleets share orbit, or a f
   return out;
 }
 const shipCount = () => { const n = {}; for (const f of C.fleets) n[f.owner] = (n[f.owner] || 0) + f.ships.length; return n; };
-const ORDN = ['', 'Second ', 'Third ', 'Fourth ', 'Fifth ', 'Sixth ', 'Seventh ', 'Eighth ', 'Ninth ', 'Tenth '];
+// the n-th battle at a world: "the Second Battle of ...", in words to the twentieth and "22nd", "23rd" after
+const nth = n => n <= ORD.length ? ORD[n - 1] : n + (n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th');
 // a battle enters the chronicle: its name, who led, who won, what it cost
 function chronBattle(res, winner, loser, leads) {
   const now = shipCount(), was = C._shipN || now, lw = Math.max(0, (was[winner] || 0) - (now[winner] || 0)), ll = Math.max(0, (was[loser] || 0) - (now[loser] || 0)); C._shipN = now;
   const big = lw + ll >= 3 || ((winner === C.player || loser === C.player || leads.some(Boolean)) && lw + ll > 0); if (!big) return;
   C.battleN = C.battleN || {}; const key = (res.space ? 'off:' : '') + res.world, n = C.battleN[key] = (C.battleN[key] || 0) + 1;
-  const name = `${n > 1 ? 'the ' + (ORDN[n - 1] || n + 'th ') : ''}${res.space ? 'Battle off ' : 'Battle of '}${bodyOf(res.world).name}`, cap = name[0].toUpperCase() + name.slice(1);
+  const name = `${n > 1 ? 'the ' + nth(n) + ' ' : ''}${res.space ? 'Battle off ' : 'Battle of '}${bodyOf(res.world).name}`, cap = name[0].toUpperCase() + name.slice(1);
   const who = (o, c) => `${BLOC_NAME[o] || 'Independents'}${c ? ' under ' + c : ''}`;
   chron('battle', `${cap}: ${who(winner, leads[0])} ${res.withdrew ? 'drives off' : 'defeats'} ${who(loser, leads[1])}, losing ${lw} ship${lw === 1 ? '' : 's'} to their ${ll}.`, res.world, winner);
 }
@@ -585,7 +586,10 @@ export function afterBattle(res) {
   if (res.space) { afterSpace(res, winner, loser); chronBattle(res, winner, loser, leads); return; }
   if (res.withdrew) { C.withdrawn = C.withdrawn || {}; for (const o of loses) C.withdrawn[res.world + '|' + o] = C.turn; }
   /* every losing power falls back to a world of its own */
-  for (const f of here(loser)) { if (!f.ships.length) continue; const home = nearestOwned(f.owner, res.world); if (home) { f.at = null; const n = travel(res.world, home); f.transit = { from: res.world, to: home, left: n, total: n, retreat: true, bat: res.world + '|' + C.turn }; } else if (w.owner !== f.owner) f.ships = []; else f.bat = res.world + '|' + C.turn; } // nowhere to run: besieged in port
+  for (const f of here(loser)) { if (!f.ships.length) continue; const home = nearestOwned(f.owner, res.world); if (home) { f.at = null; const n = travel(res.world, home); f.transit = { from: res.world, to: home, left: n, total: n, retreat: true, bat: res.world + '|' + C.turn }; } else if (w.owner !== f.owner) f.ships = []; else { f.bat = res.world + '|' + C.turn; if (!bottled(f) && (f.owner === C.player || wins.includes(C.player))) note(`${f.name} is bottled up over ${bodyOf(res.world).name}: beaten, with nowhere to run, it cannot hold the orbit against the siege.`, f.owner === C.player ? 'bad' : 'gold', res.world); f.bottled = res.world; } }
+  // nowhere to run: besieged in port. A fleet beaten over its last world is bottled up there: it fights on each week, but
+  // it no longer holds the orbit, so the siege goes on and the Iron Rain can fall. Winning a battle frees it.
+  for (const f of here(winner)) delete f.bottled;
   C.fleets = C.fleets.filter(f => f.ships.length);
   const nm = bodyOf(res.world).name, me = C.player;
   const allies = L => L.length > 1 ? ` and ${L.length === 2 ? 'its ally' : 'its allies'}` : '';
@@ -595,7 +599,7 @@ export function afterBattle(res) {
   else if (loses.includes(me)) note(`Defeat at ${nm}: ${BLOC_NAME[loser]} is beaten, and our ships fall back with it.`, 'bad', res.world);
   else if (winner !== 'neu' && loser !== 'neu') note(`${BLOC_NAME[winner]} defeats ${BLOC_NAME[loser]} at ${nm}.`, '', res.world);
   CM.battleFate(Object.assign({}, res, { margin: res.margin })); if (!res.withdrew) { for (const o of wins) P.react(o, 'victory', (o === winner ? 1 : .5) * GR.react); for (const o of loses) P.react(o, 'defeat', (o === loser ? 1 : .5) * GR.defeat); for (const f of C.fleets) if (loses.includes(f.owner) && f.transit && f.transit.bat === res.world + '|' + C.turn) AG.battleLost(f); gradeSpoils(res, GR, winner, loser, here(winner)); }
-  chronBattle(res, winner, loser, leads);
+  chronBattle(res, winner, loser, leads); aiTally(res, w);
   if (hostile(winner, w.owner) && !w.siege) { newSiege(w, winner); if (w.owner === me) note(`${nm} is under siege!`, 'bad', res.world); else if (winner === me) note(`${nm} is under siege. Bring troops for an Iron Rain.`, 'gold', res.world); }
 }
 // after a battle in deep space: the intercepted fleet goes on (it won, or slipped past) or turns for home; the
@@ -624,6 +628,7 @@ function gradeSpoils(res, GR, winner, loser, fls) {
   if (GR.xp) for (const f of fls) { const c = CM.cmdrOf(f); if (c) CM.gainXp(c, GR.xp); }
   res.spoils = { inf: winner === 'neu' ? 0 : GR.inf, weary: loser === 'neu' ? 0 : GR.weary, xp: GR.xp };
 }
+export const bottled = fl => !!fl.bottled && fl.bottled === fl.at && !fl.transit;
 const nearestOwned = (f, from) => { let best = null, bd = 99; for (const id in C.worlds) if (C.worlds[id].owner === f && id !== from) { const d = travel(from, id); if (d < bd) { bd = d; best = id; } } return best; };
 
 const rainBonus = (fl, w) => TE.mod(fl.owner, 'rain') * AG.rainMul(fl) * (CM.has(fl, 'rain') ? 1.3 : 1) * (1 + .1 * ((w.siege && w.siege.staged) || 0));
@@ -639,7 +644,7 @@ export function assaultFailed(w, left, by) { w.garrison = Math.round(Math.max(20
 export function rainOdds(fl) {
   const w = fl.at && C.worlds[fl.at]; if (!w || !hostile(fl.owner, w.owner)) return { err: 'No hostile world here' };
   const troops = troopsOf(fl); if (troops < 50) return { err: 'No troops aboard: starShells and leechCraft take the beachhead, Storks land the legions' };
-  if (fleetsAt(fl.at).some(o => o.owner === w.owner)) return { err: 'Win the orbit first', troops };
+  if (fleetsAt(fl.at).some(o => o.owner === w.owner && !bottled(o))) return { err: 'Win the orbit first', troops };
   const storm = w.siege && w.siege.by === fl.owner && (w.siege.hold || 0) > 0, shot = clamp(w.gun * .12 + w.shield * .05, 0, .6), mul = 5 * (1 - shot) * rainBonus(fl, w) * (storm ? .5 : 1);
   const def = w.garrison * (1.25 + .2 * w.lv.fort) * (((w.cl ? w.cl.war : w.loyalty) + 8) / 70), att = troops * mul;
   const chance = clamp((1.25 - def / att) / .5, 0, 1), need = Math.max(0, Math.ceil(def / mul - troops));
@@ -657,7 +662,7 @@ export function senateDefied(f, wid) {
 export function ironRain(fl) { const out = ironRain0(fl); C.fleets = C.fleets.filter(f => f.ships.length); CM.tidy(); EC.govTick(); return out; }
 function ironRain0(fl) {
   const w = C.worlds[fl.at]; if (!w || !hostile(fl.owner, w.owner)) return { err: 'nothing to invade here' };
-  if (fleetsAt(fl.at).some(o => o.owner === w.owner)) return { err: 'win the orbit first' };
+  if (fleetsAt(fl.at).some(o => o.owner === w.owner && !bottled(o))) return { err: 'win the orbit first' };
   if (!w.siege || w.siege.by !== fl.owner || w.siege.turns < 1) return { err: 'lay siege for a week first: the bombardment softens the defences' };
   let troops = troopsOf(fl); if (troops < 50) return { err: 'this fleet carries no troops: load starShells and Storks' };
   senateDefied(fl.owner, w.id);
@@ -739,7 +744,7 @@ export function finishTurn() {
     const w = C.worlds[id], nm = bodyOf(id).name;
     if (w.siege) {
       const bes = fleetsAt(id, w.siege.by);
-      if (!bes.length || fleetsAt(id, w.owner).length) { w.siege = null; if (w.owner === C.player) note(`The siege of ${nm} is lifted.`, 'good', id); }
+      if (!bes.length || fleetsAt(id, w.owner).some(o => !bottled(o))) { w.siege = null; for (const o of fleetsAt(id, w.owner)) delete o.bottled; if (w.owner === C.player) note(`The siege of ${nm} is lifted.`, 'good', id); }
       else {
         // the siege stance: blockade starves the world, bombardment breaks its defences and its people, staging readies the Rain
         w.siege.turns++; const str = bes.reduce((a, f) => a + fleetStr(f), 0), mode = w.siege.mode || 'blockade', butcher = bes.some(f => CM.has(f, 'butcher'));
@@ -760,7 +765,7 @@ export function finishTurn() {
       if (w.bq.length && !w.siege) { const q = w.bq[0]; if (--q.left <= 0) { w.bq.shift(); w.lv[q.k]++; if (q.k === 'grid') w.gun++; if (q.k === 'array') w.shield++; if (w.owner === C.player) note(`${nm}: ${BUILD[q.k].name} ${w.lv[q.k] > 1 ? 'raised to level ' + w.lv[q.k] : 'completed'}.`, '', id); } }
       if (w.sq.length && !w.siege && !EC.yardsStalled(w)) { const q = w.sq[0]; if (--q.left <= 0) { w.sq.shift(); let fl = fleetsAt(id, w.owner).find(f => !f.orders && !f.garrison && f.ships.length < CM.capOf(f)); if (!fl) fl = fleet(w.owner, id, {}, null); const ns = newShip(q.t); if (q.cls && TE.classById(w.owner, q.cls)) ns.cls = q.cls; ns.crew = EC.crewOnLaunch(w); fl.ships.push(ns); if (w.owner === C.player) note(`${nm}: a new ${q.cls && TE.classById(w.owner, q.cls) ? TE.classById(w.owner, q.cls).name + '-class ' : ''}${defsOf(w.owner)[q.t].name} joins ${fl.name}.`, 'good', id); } }
     }
-    { const grow = Math.max(0, Math.min(garrisonCap(w) - w.garrison, 150 + 100 * w.lv.barracks + (!w.siege && w.owner !== 'neu' && fleetsAt(id, w.owner).length ? 300 : 0))), r = w.owner !== 'neu' && C.fac[w.owner].res, g = r ? Math.min(grow, Math.max(0, r.man)) : grow; w.garrison += g; if (r) r.man -= g; } // garrisons are raised from the realm's manpower
+    { const grow = Math.max(0, Math.min(garrisonCap(w) - w.garrison, 150 + 100 * w.lv.barracks + (!w.siege && w.owner !== 'neu' && fleetsAt(id, w.owner).length ? 300 : 0))), r = w.owner !== 'neu' && C.fac[w.owner].res, keep = r && C.fac[w.owner].ai && !frontier(w) && w.id !== CAPITAL[w.owner] && !w.siege ? 10000 : 0, g = r ? Math.min(grow, Math.max(0, r.man - keep)) : grow; w.garrison += g; if (r) r.man -= g; } // garrisons are raised from the realm's manpower; an AI keeps a reserve for its ships rather than fill quiet worlds' barracks
     w.gov = Math.min(1, w.gov + (w.siege ? 0 : .15));
     EC.tickWorld(w); // every estate moves toward where its loyalty settles; strikes, plots and risings
     if (w.owner !== 'neu' && w.loyalty < 12 && !(w.hostage > C.turn) && rnd() < .25) { const old = w.owner; w.owner = 'neu'; w.garrison = 1500; w.bq = []; w.sq = []; w.siege = null; P.seatLost(old, w.id); EC.onCapture(w, 'neu', 40); worldLost(old, w); note(`Revolt! ${nm} throws off ${BLOC_NAME[old]} and declares itself free.`, old === C.player ? 'bad' : 'gold', id, old === C.player ? { title: 'Revolt on ' + nm, kind: 'revolt' } : null); }
@@ -907,6 +912,24 @@ function checkEnd() {
   if (!C.fac[me].alive || (C.worlds[CAPITAL[me]].owner !== me && !Object.values(C.worlds).some(w => w.owner === me && w.lv.yard > 0))) C.over = { win: false };
 }
 
+// what the AI remembers of its attacks on a world: how many battles it has fought there since the world last changed
+// hands, and when it last lost one. Three battles without taking the world, and it brings troops or goes elsewhere.
+function aiTally(res, w) {
+  C.aiTries = C.aiTries || {}; C.aiLost = C.aiLost || {};
+  for (const a of res.atts || [res.att]) {
+    if (!a || a === 'neu' || !hostile(a, w.owner)) continue; const k = a + '>' + w.id, T = C.aiTries[k];
+    C.aiTries[k] = T && T.owner === w.owner && C.turn - T.t <= 15 ? { n: T.n + 1, t: C.turn, owner: w.owner } : { n: 1, t: C.turn, owner: w.owner };
+    if (!res.attWin) C.aiLost[k] = C.turn;
+  }
+}
+const aiStalled = (f, id) => { const T = (C.aiTries || {})[f + '>' + id]; return !!T && T.n >= 3 && T.owner === C.worlds[id].owner && C.turn - T.t <= 15; };
+// the troops an Iron Rain on a world wants for fair odds, as rainOdds reckons them (walls not yet broken)
+const rainNeed = (f, w) => { const shot = clamp(w.gun * .12 + w.shield * .05, 0, .6), def = w.garrison * (1.25 + .2 * (w.lv.fort || 0)) * (((w.cl ? w.cl.war : w.loyalty) + 8) / 70); return def / .95 / (5 * (1 - shot) * TE.mod(f, 'rain')); };
+const enoughTroops = (f, w, troops) => troops >= 60 && troops >= rainNeed(f, w) * 1.05;
+const aiLostAt = (f, id) => C.turn - ((C.aiLost || {})[f + '>' + id] ?? -99) <= 6;
+// a power on its last worlds: two or fewer, or a quarter of what it started with
+export const nearDead = f => { if (!C.fac[f] || !C.fac[f].alive || f === 'neu') return false; const n = Object.values(C.worlds).filter(w => w.owner === f).length; return n > 0 && n <= Math.max(2, Math.floor(((C.startN || {})[f] || 4) * .25)); };
+const stat = (k, v = 1) => { C.aiStats = C.aiStats || {}; C.aiStats[k] = (C.aiStats[k] || 0) + v; };
 // ---------------------------------------------------------------- the AI empires
 // Each power makes war the way its ruler would (rulers.js AI_DOC): how much of an edge it wants, when it drops the
 // Rain, how often it runs dark, what it builds in peace. It gathers its fleets into offensives: a strike force
@@ -915,38 +938,52 @@ const aiStr = o => C.fleets.filter(x => x.owner === o).reduce((a, x) => a + flee
 function targetVal(f, fl, id, D, agg) {
   const w = C.worlds[id], g = P.goalOf(f, w.owner), op = w.owner !== 'neu' ? P.opinionOf(f, w.owner) : 0;
   return 1 + (fl && w.siege && w.siege.by === f && troopsOf(fl) > 60 ? 4 : 0) + (id === CAPITAL[w.owner] ? 1.5 : 0) + (w.owner === C.player ? (C.turn < [8, 4, 2][C.difficulty] ? -.6 : .35 * agg) : 0) + (WORLDS.find(x => x.id === id).prod.he > 10 ? .4 : 0)
-    + (g && g.w === id ? 2.5 : 0) + D.revenge * Math.max(0, -op - 30) / 40 + (w.lv.yard >= 2 ? .3 * D.ops : 0);
+    + (g && g.w === id ? 2.5 : 0) + D.revenge * Math.max(0, -op - 30) / 40 + (w.lv.yard >= 2 ? .3 * D.ops : 0)
+    + (nearDead(w.owner) ? (id === CAPITAL[w.owner] ? 3.5 : 1.5) : 0) + (w.owner === 'neu' && w.home === f ? 1.5 : 0); /* the finishing blow; our own worlds in revolt */
 }
 // the offensive: pick a target worth the whole strike force, a muster world near it, and the fleets to send
 function aiOps(f, D, agg, avail) {
   C.ops = C.ops || {}; let op = C.ops[f];
   if (op && (!C.worlds[op.tgt] || !hostile(f, C.worlds[op.tgt].owner) || C.turn - op.t > 16 || C.worlds[op.muster].owner !== f || C.worlds[op.muster].siege)) op = C.ops[f] = null;
   if (!op) {
-    if (!avail.length || rnd() > .32 * D.ops) return null;
+    const kill = Object.values(C.worlds).some(w => hostile(f, w.owner) && nearDead(w.owner));
+    if (!avail.length || (!kill && rnd() > .6 * D.ops)) return null;
     const pool = avail.reduce((a, fl) => a + fleetStr(fl), 0), mine = Object.values(C.worlds).filter(w => w.owner === f && !w.siege); if (!mine.length) return null;
+    const lift = avail.reduce((a, fl) => a + troopsOf(fl), 0);
     let best = null, bs = 0;
     for (const id in C.worlds) {
       const w = C.worlds[id]; if (!hostile(f, w.owner) || (w.owner === 'neu' && w.home === 'neu' && !w.asco)) continue;
       if (w.owner === C.player && C.turn < [8, 4, 2][C.difficulty]) continue;
       const enemy = IN.knownStrAt(f, id, fleetStr) + defStr(w), need = Math.max(800, enemy * D.sup);
       if (pool * agg < need) continue;
+      if (aiStalled(f, id) && !enoughTroops(f, w, lift)) continue; // fought there before and the world still holds: not again without the troops to take it
+      if (aiLostAt(f, id) && pool * agg < need * 1.5) continue;
       const mu = mine.slice().sort((a, b) => travel(a.id, id) - travel(b.id, id) + (b.lv.yard - a.lv.yard) * .3)[0], t = travel(mu.id, id);
       const sc = targetVal(f, null, id, D, agg) / (t + 1) / (1 + enemy / pool); if (sc > bs) { bs = sc; best = { tgt: id, muster: mu.id, need, t: C.turn }; }
     }
     if (!best) return null;
-    let got = 0; best.ids = []; for (const fl of avail.slice().sort((a, b) => travel(a.at, best.muster) - travel(b.at, best.muster))) { if (got >= best.need * 1.2) break; best.ids.push(fl.id); got += fleetStr(fl); }
+    // gather half again what the target needs, and everything close to the muster up to twice it: an offensive goes in
+    // to win, not to trade blows. A world with a garrison needs troops with the strike force.
+    let got = 0, lifted = 0; best.ids = [];
+    for (const fl of avail.slice().sort((a, b) => travel(a.at, best.muster) - travel(b.at, best.muster))) {
+      if (got >= best.need * 1.5 && (got >= best.need * 2.2 || travel(fl.at, best.muster) > 2)) continue;
+      best.ids.push(fl.id); got += fleetStr(fl); lifted += troopsOf(fl);
+    }
+    const tw = C.worlds[best.tgt], want = tw.garrison > 0 ? rainNeed(f, tw) * 1.25 : 0;
+    for (const tf of avail.filter(fl => !best.ids.includes(fl.id) && troopsOf(fl) >= 50).sort((a, b) => travel(a.at, best.muster) - travel(b.at, best.muster))) { if (lifted >= want) break; best.ids.push(tf.id); lifted += troopsOf(tf); }
     op = C.ops[f] = best;
   }
   const fls = op.ids.map(id => C.fleets.find(x => x.id === id && x.owner === f)).filter(Boolean); op.ids = fls.map(x => x.id); if (!fls.length) { C.ops[f] = null; return null; }
   opIntel(f, op, fls);
   const at = fls.filter(x => !x.transit && x.at === op.muster), str = at.reduce((a, x) => a + fleetStr(x), 0);
   const enemy = IN.knownStrAt(f, op.tgt, fleetStr) + defStr(C.worlds[op.tgt]); op.need = Math.max(800, enemy * D.sup);
-  if (str * agg >= op.need || (C.turn - op.t >= 8 && str * agg >= op.need * .8 && at.length)) {
+  if (str * agg >= op.need * (aiLostAt(f, op.tgt) ? 1.5 : 1) || (C.turn - op.t >= 8 && str * agg >= op.need * .8 && at.length && !aiLostAt(f, op.tgt))) {
     // launch: every fleet at the muster sets out together, at the pace of the slowest
     const n = Math.max(...at.map(x => moveWeeks(x, op.tgt))); for (const x of at) { x.run = !globalThis.__FOG_OFF && n >= 3 && rnd() < D.dark ? 'dark' : null; if (!moveFleet(x, op.tgt)) { x.transit.left = x.transit.total = Math.max(x.transit.total, n); } }
     if (at[0] && at[0].transit) CQ.aiRising(f, at[0], op.tgt);
     for (const th of C.threats || []) if (th.f === f && th.tgt === op.tgt && !th.launched) { th.launched = C.turn; th.until = C.turn + n + 4; if (C.worlds[op.tgt].owner === C.player && at.some(x => IN.levelOf(C.player, x) >= 1)) note(`The offensive massed at ${bodyOf(op.muster).name} sets out: ${at.length} fleet${at.length > 1 ? 's' : ''} under way, ${n} week${n > 1 ? 's' : ''} from ${bodyOf(op.tgt).name}.`, 'bad', op.muster); }
-    C.opsLog = (C.opsLog || 0) + 1; if (at.length > 1) C.opsMulti = (C.opsMulti || 0) + 1; C.ops[f] = null; return new Set(at.map(x => x.id).concat(op.ids));
+    C.opsLog = (C.opsLog || 0) + 1; if (at.length > 1) C.opsMulti = (C.opsMulti || 0) + 1; stat('ops'); stat('fleets', at.length); if (at.length > 1) stat('multi');
+    C.ops[f] = null; return new Set(at.map(x => x.id).concat(op.ids));
   }
   for (const x of fls) if (!x.transit && x.at !== op.muster) moveFleet(x, op.muster);
   return new Set(op.ids);
@@ -966,21 +1003,23 @@ function aiTurn(f) {
   // build up: fill slots with what the economy lacks; yards and defences on the front, more of them under a cautious ruler
   for (const w of mine) {
     if (w.bq.length || w.siege) continue;
-    const fr = frontier(w), dk = D.def;
-    const need = [['skimmer', r.he < 600 ? 3 : 1], ['mine', r.ore < 500 ? 3 : 1], ['arsenal', r.ord < 800 ? 2 : .5], ['farms', r.food < 0 ? 3 : .2], ['barracks', r.man < 8000 ? 2 : .5], ['yard', r.he > 8000 ? 1 : w.id === CAPITAL[f] ? 1.2 : .25], ['grid', (fr ? 2 : .3) * dk], ['array', (fr ? 1.5 : .2) * dk], ['fort', (fr ? 1 : .2) * dk], ['foundry', r.alloy < 300 ? 3.2 : r.alloy < 900 ? 1.2 : .2], ['court', EC.overSprawl(f) > 0 ? 4 : EC.adminCap(f) - EC.sprawl(f) < 3 ? 1.6 : .1], ['lab', .2]]
+    const fr = frontier(w), rich = r.he > 8000 && r.ore > 2500, dk = D.def * (rich ? 1.6 : 1); // a full treasury buys walls
+    const need = [['skimmer', r.he < 600 ? 3 : 1], ['mine', r.ore < 500 ? 3 : 1], ['arsenal', r.ord < 800 ? 2 : .5], ['farms', r.food < 0 ? 3 : .2], ['barracks', r.man < 6000 ? 4 : r.man < 15000 ? 2.5 : .5], ['yard', r.he > 8000 ? 1.4 : w.id === CAPITAL[f] ? 1.2 : .25], ['grid', (fr ? 2 : rich ? .8 : .3) * dk], ['array', (fr ? 1.5 : rich ? .6 : .2) * dk], ['fort', (fr ? 1 : rich ? .6 : .2) * dk], ['foundry', r.alloy < 300 ? 3.2 : r.alloy < 900 ? 1.2 : .2], ['court', EC.overSprawl(f) > 0 ? 4 : EC.adminCap(f) - EC.sprawl(f) < 3 ? 1.6 : .1], ['lab', rich ? 1.2 : .2]]
       .filter(([k]) => !canBuild(f, w, k)).sort((a, b) => b[1] - a[1] + (rnd() - .5));
     if (need.length && rnd() < .7) startBuild(f, w, need[0][0]);
   }
   // shipbuilding: keep yards busy while the treasury allows. A power at peace with everyone only keeps a
   // fleet to match its neighbours (more of one under a hawk, less under a council); it does not arm for a war it is not fighting
   const atWar = ['rep', 'soc', 'rim'].some(o => o !== f && C.fac[o].alive && hostile(f, o));
-  const peaceCap = atWar ? Infinity : Math.max(...['rep', 'soc', 'rim'].filter(o => o !== f).map(aiStr)) * .9 * D.build;
+  const hoard = clamp((r.he - 6000) / 10000, 0, 1.5); // He-3 sitting in the vaults is a fleet not built: a rich power arms
+  const peaceCap = atWar || r.he > 15000 ? Infinity : Math.max(...['rep', 'soc', 'rim'].filter(o => o !== f).map(aiStr)) * .9 * D.build * (1 + hoard);
   if (aiStr(f) < peaceCap) for (const w of mine) {
     if (w.lv.yard < 1 || w.sq.length >= (r.he > 3000 ? 4 : 2) || w.siege) continue;
     const opts = roster(f).filter(t => !hullOK(f, w, t)); if (!opts.length) continue;
     const pods = C.fleets.filter(fl => fl.owner === f).reduce((a, fl) => a + fl.ships.filter(s => defsOf(f)[s.t].troops).length, 0);
     const sieges = Object.values(C.worlds).filter(x => x.siege && x.siege.by === f).length;
-    const pick = pods < 4 + sieges * 4 && opts.includes('boarder') && rnd() < .7 ? 'boarder' : opts.sort((a, b) => (defsOf(f)[b].value || 0) - (defsOf(f)[a].value || 0))[Math.floor(rnd() * Math.min(3, opts.length))];
+    const stalled = Object.keys(C.aiTries || {}).filter(k => k.startsWith(f + '>') && aiStalled(f, k.slice(f.length + 1))).length;
+    const pick = pods < 4 + (sieges + stalled) * 4 && opts.includes('boarder') && rnd() < .7 ? 'boarder' : opts.sort((a, b) => (defsOf(f)[b].value || 0) - (defsOf(f)[a].value || 0))[Math.floor(rnd() * Math.min(3, opts.length))];
     const cl = TE.classesOf(f).filter(c => c.hull === pick && TE.SLOTS.every(S => !TE.optWhy(f, defsOf(f)[pick], S.k, c.s[S.k]))), cls = cl.length && rnd() < .8 ? cl[Math.floor(rnd() * cl.length)].id : null;
     if (r.he > hullCost(f, pick, cls).he * 1.1 && navalUsed(f) + hullSize(f, pick) <= navalCap(f)) orderShip(f, w, pick, cls);
   }
@@ -997,7 +1036,7 @@ function aiTurn(f) {
   for (const fl of fls) {
     if (inOp.has(fl.id)) continue;
     const here = C.worlds[fl.at];
-    if (here && here.siege && here.siege.by === f && troopsOf(fl) > 60 && here.siege.turns >= 1) { const o = rainOdds(fl); if (!o.err && !o.storm && (o.chance >= D.rain || (o.chance >= D.rain - .25 && here.siege.turns >= 5))) { ironRain(fl); continue; } } // the AI waits for the walls to break
+    if (here && here.siege && here.siege.by === f && troopsOf(fl) > 60 && here.siege.turns >= 1) { const o = rainOdds(fl); if (!o.err && (o.storm ? o.chance >= Math.min(.95, D.rain + .2) : o.chance >= D.rain || (o.chance >= D.rain - .25 && here.siege.turns >= 5))) { ironRain(fl); continue; } } // the AI waits for the walls to break, unless it has the troops to storm them
     if (here && here.siege && here.siege.by === f) here.siege.mode = here.gun + here.shield > 0 ? 'bombard' : troopsOf(fl) > 60 ? 'stage' : 'blockade';
     if (fl.garrison && !fl.holdFast && !(here && here.owner === f && here.home !== f)) { fl.garrison = false; fl.stance = null; } // a detachment whose conquest is lost, or that fell back home, rejoins the war
     if (fl.garrison && fl.holdFast && !(here && here.owner === f && here.id === fl.holdFast)) { fl.garrison = false; fl.holdFast = null; fl.stance = null; } // a home garrison driven off its world, or whose world has fallen, joins the field fleets
@@ -1014,7 +1053,7 @@ function aiTurn(f) {
         if (str * agg + (w.id === CAPITAL[f] ? defStr(w) * .6 : 0) >= foe * (w.id === CAPITAL[f] ? .8 : 1) && sc > rs) { rs = sc; rel = w.id; } }
       if (rel && rel !== fl.at) { moveFleet(fl, rel); continue; } if (rel === fl.at) continue; }
     // hold a siege while troops come up, unless it has gone on hopelessly long
-    if (here && hostile(f, here.owner) && here.siege && here.siege.by === f && (here.siege.turns < 6 || troopsOf(fl) > 60)) { const o = rainOdds(fl); if (!(here.siege.turns > 12 && (o.err || o.chance < .25))) continue; }
+    if (here && hostile(f, here.owner) && here.siege && here.siege.by === f && (aiStalled(f, here.id) ? enoughTroops(f, here, troopsOf(fl)) : troopsOf(fl) > 60 || here.siege.turns < 6)) { const o = rainOdds(fl); if (!(here.siege.turns > 12 && (o.err || o.chance < .25))) continue; }
     const homeThreat = here && here.owner === f && IN.knownBoundFor(f, fl.at).length > 0;
     // intercept a tracked enemy bound for one of our worlds, when we can catch it and beat it
     if (here && here.owner === f && !fl.garrison && !globalThis.__FOG_OFF) { let pick = null;
@@ -1024,17 +1063,25 @@ function aiTurn(f) {
     if (homeThreat && here.id === CAPITAL[f]) continue;
     // a home guard stays at the capital while enemies are within four weeks of it
     if (here && here.id === CAPITAL[f] && fleetsAt(here.id, f).length === 1 && C.fleets.some(o => hostile(o.owner, f) && o.owner !== 'neu' && IN.levelOf(f, o) && ((o.at && travel(o.at, here.id) <= 4) || (o.transit && (IN.levelOf(f, o) === 2 || o.transit.to === here.id) && travel(o.transit.to, here.id) <= 3)))) { if (fl.ships.length > 6) { const keep = fl.ships.slice().sort((a, b) => shipVal(f, b) - shipVal(f, a)).filter((_, i) => i % 2).map(s => s.id); const nf = splitFleet(fl, keep); if (nf && f !== 'rim') nf.name = 'Home Fleet'; } else continue; }
+    // an offensive is gathering: a free fleet near its muster joins it rather than striking out alone
+    { const op = C.ops && C.ops[f]; if (op && !lastStand && avail.includes(fl) && !op.ids.includes(fl.id) && travel(fl.at, op.muster) <= 5) {
+        const got = op.ids.reduce((a, id) => { const x = C.fleets.find(y => y.id === id); return a + (x ? fleetStr(x) : 0); }, 0);
+        if (got < op.need * 2) { op.ids.push(fl.id); if (fl.at !== op.muster) moveFleet(fl, op.muster); stat('joined'); continue; } } }
     let best = null, bs = 0;
     for (const id in C.worlds) {
       const w = C.worlds[id]; if (!hostile(f, w.owner)) continue;
       if (w.owner === C.player && C.turn < [8, 4, 2][C.difficulty]) continue; // the player gets a few weeks before the counterattack
+      if (C.ops && C.ops[f] && C.ops[f].tgt === id) continue; // the offensive will take it
       const enemy = IN.knownStrAt(f, id, fleetStr) + defStr(w);
       const t = travel(fl.at, id), val = targetVal(f, fl, id, D, agg);
+      if (aiStalled(f, id) && !enoughTroops(f, w, troopsOf(fl))) continue; // three battles there and the world still holds: not without the troops to take it
+      if (aiLostAt(f, id) && str * agg < enemy * D.sup * 1.5) continue; // beaten there lately: no feeding fleets in one by one
       if (str * agg < enemy * D.sup * (lastStand ? 1.6 : 1) && !(w.siege && w.siege.by === f && !fleetsAt(id).some(o => o.owner === w.owner))) continue;
       if (lastStand && t > 3) continue;
       const sc = val / (t + 1) / (1 + enemy / str); if (sc > bs) { bs = sc; best = id; }
     }
     if (best) { fl.run = !globalThis.__FOG_OFF && travel(fl.at, best) >= 3 && rnd() < D.dark ? 'dark' : null; moveFleet(fl, best); } // some raids go in dark
+    else if (here && hostile(f, here.owner) && aiStalled(f, here.id) && !enoughTroops(f, here, troopsOf(fl))) { const home = nearestOwned(f, here.id); if (home) { moveFleet(fl, home); stat('cut'); } } // a siege that cannot end: home for troops
   }
 }
 // the AI keeps its court in hand: honours for the unhappiest group when it can spare the influence

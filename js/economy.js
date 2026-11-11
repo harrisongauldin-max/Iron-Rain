@@ -325,7 +325,8 @@ export function aiEconomy(f) {
   C.tax[f] = avg < 42 ? 0 : r.he < 600 && avg > 55 ? 2 : 1;
   for (const w of ws) if ((!w.desig || w.desig === 'none') && r.inf >= DESIG_COST + 10) {
     const W = WD(w.id), p = W.prod; let k = 'none';
-    if (w.lv.yard >= 2 || w.lv.foundry) k = 'forge'; else if (p.food > 15) k = 'granary'; else if (p.he + p.ore > 18 || RARE[w.id]) k = 'mine'; else if (p.man > 150) k = 'legion'; else if (mixOf(w.id).mid > .2) k = 'port';
+    if (r.man < 15000 && p.man > 80 && !w.lv.yard) k = 'legion'; /* short of men: the populous worlds raise legions */
+    else if (w.lv.yard >= 2 || w.lv.foundry) k = 'forge'; else if (p.food > 15) k = 'granary'; else if (p.he + p.ore > 18 || RARE[w.id]) k = 'mine'; else if (p.man > 150) k = 'legion'; else if (mixOf(w.id).mid > .2) k = 'port';
     if (k !== 'none') setDesig(f, w, k);
   }
   // surplus goes to work: patronage for influence, public works for unrest, charters for a capped navy
