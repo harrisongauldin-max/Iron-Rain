@@ -10,6 +10,7 @@ import { FACTIONS, NEUTRAL_C } from './data.js';
 import { S } from './state.js';
 import { sfx, initAudio, music } from './audio.js';
 import { figureGeo, figureMaterial, corpseGeo, storkGeo, lodGeo, KINDS, MUZZLE, cityGeo, staticMaterial } from './groundmodels.js';
+import * as GFX from './groundfx.js'; // textures and effects: the terrain surface, water, sky dome
 
 const PI = Math.PI, TAU = PI * 2, hyp = Math.hypot, clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const FK = { rep: 'rising', soc: 'core', rim: 'rim' };
@@ -92,31 +93,24 @@ function glowTex() {
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 function buildScene() {
-  const M = G.map, B = M.B, sc = new THREE.Scene(); V.scene = sc;
-  sc.background = hexC(B.sky); sc.fog = new THREE.Fog(hexC(B.fog), 5000, 19000);
+  const M = G.map, B = M.B, sc = new THREE.Scene(); V.scene = sc; GFX.dispose();
+  sc.background = hexC(B.sky); sc.fog = new THREE.Fog(hexC(B.fog), 5000, 19000); // replaced by the sky dome below
   sc.add(new THREE.HemisphereLight(hexC(B.sky), hexC(B.ground[1]), .85));
   const sun = new THREE.DirectionalLight(hexC(B.sun), 2.4); sun.position.set(MAP * .2, 1800, -MAP * .15); sun.target.position.set(M.city.x, 0, M.city.y); sc.add(sun.target);
   sun.castShadow = true; sun.shadow.mapSize.set(4096, 4096); const sh = sun.shadow.camera; sh.left = -3200; sh.right = 3200; sh.top = 3200; sh.bottom = -3200; sh.near = 100; sh.far = 12000; sun.shadow.bias = -.0005; sun.position.set(M.city.x - 2200, 4800, M.city.y - 3200);
   sc.add(sun); V.sun = sun;
-  // the ground: one mesh from the height grid, coloured by height, slope, growth and pavement
-  const W = NH + 1, pos = new Float32Array(W * W * 3), col = new Float32Array(W * W * 3), tmp = new THREE.Color(), vegC = hexC(B.veg_c), pave = hexC(B.ground[2]).lerp(new THREE.Color(.55, .52, .48), .55), sand = hexC(B.ground[3]);
-  for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) {
-    const k = j * W + i, h = M.H[k], x = i * CH, z = j * CH; pos[k * 3] = x; pos[k * 3 + 1] = h; pos[k * 3 + 2] = z;
-    rampColor(B, h / (M.relief || 1), tmp);
-    const ci = Math.min(NH - 1, j) * NH + Math.min(NH - 1, i);
-    if (M.veg[ci]) tmp.lerp(vegC, .7); if (M.urban[ci]) tmp.lerp(pave, .75);
-    if (M.seaH >= 0 && h < M.seaH + 6 && h >= M.seaH - 4) tmp.lerp(sand, .6);
-    const s = Math.abs((M.H[Math.min(W * W - 1, k + 1)] || h) - h) + Math.abs((M.H[Math.min(W * W - 1, k + W)] || h) - h); tmp.multiplyScalar(clamp(1.08 - s / 40, .55, 1.1));
-    const n = ((i * 73856093 ^ j * 19349663) >>> 0) % 1000 / 1000; tmp.multiplyScalar(.94 + n * .1);
-    col[k * 3] = tmp.r; col[k * 3 + 1] = tmp.g; col[k * 3 + 2] = tmp.b;
-  }
+  GFX.skyDome(sc, B, V.spec ? V.spec.world : null, sun); // the sky dome, the Sun's glare, clouds or stars, the parent world overhead; sets the fog
+  // the ground: one mesh from the height grid; its colours and masks (growth, pavement, shore) come from groundfx,
+  // whose material paints the grain, stones, rock and pavement on top of them
+  const W = NH + 1, pos = new Float32Array(W * W * 3), { col, mask } = GFX.terrainArrays(M, B);
+  for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) { const k = j * W + i; pos[k * 3] = i * CH; pos[k * 3 + 1] = M.H[k]; pos[k * 3 + 2] = j * CH; }
   const idx = new Uint32Array(NH * NH * 6); let q = 0;
   for (let j = 0; j < NH; j++) for (let i = 0; i < NH; i++) { const a = j * W + i, b = a + 1, c = a + W, d = c + 1; idx[q++] = a; idx[q++] = c; idx[q++] = b; idx[q++] = b; idx[q++] = c; idx[q++] = d; }
-  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeVertexNormals();
-  const ter = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .95, metalness: 0 })); ter.receiveShadow = true; sc.add(ter);
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setAttribute('mask', new THREE.BufferAttribute(mask, 4)); g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeVertexNormals();
+  const ter = new THREE.Mesh(g, GFX.terrainMaterial(M, B)); ter.receiveShadow = true; sc.add(ter);
   // a skirt so the field does not end in a knife-edge
-  const skirt = new THREE.Mesh(new THREE.PlaneGeometry(MAP * 6, MAP * 6), new THREE.MeshStandardMaterial({ color: hexC(B.ground[0]), roughness: 1 })); skirt.rotation.x = -PI / 2; skirt.position.set(MAP / 2, -8, MAP / 2); sc.add(skirt);
-  if (M.seaH >= 0) { const wm = new THREE.Mesh(new THREE.PlaneGeometry(MAP * 6, MAP * 6), new THREE.MeshStandardMaterial({ color: hexC(B.water), roughness: .12, metalness: .2, transparent: true, opacity: .88 })); wm.rotation.x = -PI / 2; wm.position.set(MAP / 2, M.seaH, MAP / 2); sc.add(wm); skirt.position.y = M.seaH - 30; }
+  const skirt = new THREE.Mesh(new THREE.PlaneGeometry(MAP * 6, MAP * 6), GFX.skirtMaterial(B)); skirt.rotation.x = -PI / 2; skirt.position.set(MAP / 2, -8, MAP / 2); sc.add(skirt);
+  if (M.seaH >= 0) { const wm = new THREE.Mesh(new THREE.PlaneGeometry(MAP * 6, MAP * 6, 1, 1), GFX.waterMaterial(M, B)); wm.rotation.x = -PI / 2; wm.position.set(MAP / 2, M.seaH, MAP / 2); wm.renderOrder = 2; sc.add(wm); skirt.position.y = M.seaH - 30; }
   // the city: a kit of towers, domes, hab stacks and blocks placed per block and merged into one static mesh (groundmodels.cityGeo)
   const m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), sv = new THREE.Vector3(), pv = new THREE.Vector3();
   if (M.blocks.length) { const cityM = new THREE.Mesh(cityGeo(M.blocks, CH, heightAt, hexC(B.ground[3]).lerp(new THREE.Color(.85, .84, .8), .5)), staticMaterial()); cityM.castShadow = cityM.receiveShadow = true; sc.add(cityM); }
@@ -163,7 +157,7 @@ const figsFor = (t, men) => Math.ceil(men / perFig(t, men));
 export function groundFrame(dt) {
   if (!V || !V.on) return;
   if (!G.over && G.phase === 'battle' && !G.paused) GR.step(dt * G.speed);
-  camUpdate(dt);
+  camUpdate(dt); GFX.tick(dt, V.camera);
   drawUnits(dt); drawFx(dt); drawSites();
   if (V.ready) V.R.render(V.scene, V.camera); // the renderer starts asynchronously; the first frame or two wait for it
   overlay();
