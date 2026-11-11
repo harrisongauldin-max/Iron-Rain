@@ -21,4 +21,5 @@ This repository is the master copy of Iron Rain. The claude.ai artifact (slug `f
 ## Publishing
 - Publish only from `main`, only the files that changed since the last publish, with `base_version` set to the artifact's live version.
 - If the live artifact has files newer than `main` (someone published outside the repository), bring them into a branch and merge them first. Never overwrite live files from a stale copy.
-- Note the published artifact version in the merge commit or a tag (`published-<version>`).
+- Record each publish in `PUBLISHED.md` (artifact version, date, commit, what changed) and commit it to `main`. Tag pushes are refused from Claude sessions, so use the file, not tags.
+- Check what actually reached GitHub with `git ls-remote origin` rather than trusting push output: a refused tag can make a successful branch push look like a failure.
