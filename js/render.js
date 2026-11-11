@@ -537,7 +537,7 @@ export async function initRender() {
   for (const b of Object.values(B)) scene.add(b.mesh);
   buildPost();
   setBloom(S.bloom);
-  window.__BODIES = BODIES; window.__CAM = { projectTo, toWorld, footprint }; window.__R = { scene, B, orbitL, PUNCH, rocksG, shipsG, bodiesG, turretM, debrisM, bgMesh, get renderer() { return renderer; }, get bloom() { return bloomPass; }, get gen() { return GEN; } };
+  window.__BODIES = BODIES; window.__CAM = { projectTo, toWorld, footprint }; window.__R = { scene, B, orbitL, PUNCH, rocksG, shipsG, bodiesG, turretM, debrisM, bgMesh, get renderer() { return renderer; }, get bloom() { return bloomPass; }, get gen() { return GEN; }, get shipVis() { return shipVis; } };
   return renderer;
 }
 function sizeOverlay() { ov.width = Math.round(S.W * ODPR); ov.height = Math.round(S.H * ODPR); ov.style.width = S.W + 'px'; ov.style.height = S.H + 'px'; }
@@ -969,14 +969,10 @@ function sceneFrame() {
     s._ia = vz < HAND0 ? 1 : vz < HAND1 ? 1 - (vz - HAND0) / (HAND1 - HAND0) : 0;
     if (s._ia > 0) icons.push(s);
     if (iconMode) continue;
-    // she banks into her turns and settles out of them: the roll follows the turn rate, deeper on the small fast hulls
-    const trMax = s.def.turn * Math.max(s.hf || 1, .15) || 1, bankT = clamp((s.av || 0) / trMax, -1, 1) * (s.def.fighter ? .7 : vr > 30 ? .12 : .3); if (!inPip) v.bank = (v.bank || 0) + (bankT - (v.bank || 0)) * (1 - Math.exp(-4.4 * GDT)); /* eased in game time, once a frame (the action window shares the hull) */
-    if (v.kr === undefined) fxInit(v); if (!inPip) shipFx(s, v, vr, vz, dark);
-    v.g.position.set(s.x - O.x, 0, s.y - O.y); v.g.rotation.order = 'YXZ'; v.g.rotation.set(v.bank + v.kr, -s.a + v.ky, v.kp); v.g.scale.setScalar(vr);
+    // banking, attitude and side thrusters, recoil, hits and damage: shipFx, once a frame (the action window shares the hull)
+    if (v.kr === undefined) fxInit(v); if (!inPip) { shipFx(s, v, vr, vz, dark); thrusters(s, v, vr, vz, dark); }
+    v.g.position.set(s.x - O.x, 0, s.y - O.y); v.g.rotation.order = 'YXZ'; v.g.rotation.set(v.bank + v.kr, -s.a + v.ky, v.pitch + v.kp); v.g.scale.setScalar(vr);
     shipFxDraw(s, v, vr, z);
-    if (!S.paused && !inPip && Math.abs(s.av || 0) > trMax * .5 && vz > 8 && Math.random() < 21 * GDT && !dark) { // the attitude thrusters at bow and stern, puffing against the turn
-      const sg = Math.sign(s.av), ca2 = Math.cos(s.a), sa2 = Math.sin(s.a), nx = -sa2 * sg, ny = ca2 * sg; /* the side the bow swings toward */
-      for (const [px0, side] of [[.8, -1], [-.7, 1]]) { const bxx = s.x + ca2 * vr * px0 + nx * side * vr * .3, byy = s.y + sa2 * vr * px0 + ny * side * vr * .3; S.parts.push({ x: bxx, y: byy, vx: s.vx - nx * side * 90, vy: s.vy - ny * side * 90, life: .22, max: .22, size: vr * .08 + .4, col: 0xdfe6ee, drag: 3 }); } }
     const st = RCLK < v.hvT ? 'f' : dark || s.cold || RCLK < v.ltT ? 'd' : 'n'; /* the hull flashes only on a heavy blow; running cold, or with her power failing, she shows no lights */ if (v.st !== st) { v.st = st; v.hull.material = v.mats[st]; for (const m of v.sup) m.material = v.mats[st]; }
     const thr = clamp(s.throttle, 0, 1), burn = s.throttle > 1 ? 1 + .5 * Math.log1p(s.throttle - 1) : 1; // a transit burn runs the drive past its battle rating
     v.mats.bell.emissiveIntensity = dark ? 0 : thr * 1.6;
@@ -989,7 +985,6 @@ function sceneFrame() {
         B.plume.add(bx + ox, by + oy, 1, pl * .42 * fl, pw * .55, s.a, 0xffffff, al, 2.2); /* the white throat */
         if (vz > 20) B.glow.add(bx + ox - ca * pw * .3, by + oy - sa * pw * .3, 1, pw * 1.2, pw * 1.2, 0, pc, thr * .35, 1.4); } /* and its glare on the stern */
     }
-    if (!S.paused && !inPip && Math.hypot(s.rx, s.ry) > s.def.thrust * .05 && Math.random() < 30 * GDT && vz > 6) { const a = Math.atan2(s.ry, s.rx); S.parts.push({ x: s.x - Math.cos(a) * vr * .7, y: s.y - Math.sin(a) * vr * .7, vx: s.vx - Math.cos(a) * 120, vy: s.vy - Math.sin(a) * 120, life: .18, max: .18, size: vr * .15 + .3, col: 0xcfd8e0, drag: 3 }); }
     turrets(s, z, v.T * vr / 2, vr, v);
   }
   drawWrecks(z, seen);
@@ -1174,7 +1169,50 @@ const recoilK = w => { const t = S.time - (w.fT ?? -9); return t < 0 || t > .7 ?
 function scarAt(v, th, out) { // a point on the hull's skin toward local bearing th
   const cx = Math.cos(th), sy = Math.sin(th), lx = clamp(cx, -.85, .85) * .85, hw = v.hw ? v.hw(lx) : .22;
   out.lx = lx; out.ly = (sy < 0 ? -1 : 1) * hw * Math.min(1, Math.abs(sy) * 1.6); return out; }
-function fxInit(v) { v.kr = v.ky = v.kp = v.krv = v.kyv = v.kpv = 0; v.hits = []; v.scars = []; v.hvT = v.ltT = v.cutT = 0; v.sput = 1; }
+// ---------------------------------------------------------------- how she leans, and where her thrusters fire
+// The hull leans into its acceleration, as a pilot would read it: into the curve of her path when she is under way
+// (a burning turn), into a sideways shove from her side thrusters when she is slow. A capital turning in place on her
+// axis does not roll at all. Fighters keep some roll from the turn itself, and dip the nose when they brake.
+// Attitude jets fire when her turn speeds up or slows down, not all through a steady turn, at bow and stern on the
+// skin, blowing outward; side thrusters fire on the flank (or the bow, braking) opposite the push. Nothing fires off
+// the hull, nothing blows inward through it.
+function hullX(v) { if (v.xmax === undefined) { const g = v.hull && v.hull.geometry; if (g) { if (!g.boundingBox) g.computeBoundingBox(); v.xmax = g.boundingBox.max.x; v.xlo = g.boundingBox.min.x; } else { v.xmax = 1; v.xlo = v.xmin ?? -1; } } }
+const skinW = (v, lx) => Math.max(.03, v.hw ? v.hw(lx) : .18);
+function jet(s, v, vr, lx, ly, dx, dy, k) { // a cold-gas puff from the hull's skin at (lx, ly), blowing along local (dx, dy)
+  const ca = Math.cos(s.a), sa = Math.sin(s.a), sp = 30 + vr * 1.6 * (.7 + .3 * k);
+  S.parts.push({ x: s.x + (lx * ca - ly * sa) * vr, y: s.y + (lx * sa + ly * ca) * vr, vx: s.vx + (dx * ca - dy * sa) * sp + rand(-8, 8), vy: s.vy + (dx * sa + dy * ca) * sp + rand(-8, 8), life: rand(.16, .26), max: .26, size: vr * (.03 + .025 * k) + .4, col: 0xdfe6ee, drag: 3.5 });
+}
+function thrusters(s, v, vr, vz, dark) {
+  const dt = GDT; if (!(dt > 0)) return; hullX(v);
+  const stale = RCLK - (v.thT ?? -1) > .25; v.thT = RCLK;
+  if (stale || v.vxP === undefined) { v.vxP = s.vx; v.vyP = s.vy; v.avP = s.av || 0; v.aa = 0; v.alx = v.aly = 0; return; }
+  const T = Math.max(1, s.def.thrust * Math.max(s.hf || 1, .15) * (s.transit || 1)), fast = s.def.fighter || s.def.shell, big = vr > 30;
+  // her acceleration, read from her velocity, smoothed (a frame may hold no sim step, the next two); a blast's shove is clipped
+  let ax = (s.vx - v.vxP) / dt, ay = (s.vy - v.vyP) / dt; v.vxP = s.vx; v.vyP = s.vy; const am = Math.hypot(ax, ay); if (am > T * 2) { ax *= T * 2 / am; ay *= T * 2 / am; }
+  const ks = 1 - Math.exp(-dt / .12); v.alx += (ax - v.alx) * ks; v.aly += (ay - v.aly) * ks;
+  const aa = ((s.av || 0) - v.avP) / dt; v.avP = s.av || 0; v.aa += (aa - v.aa) * (1 - Math.exp(-dt / .08));
+  // the lean: across her path when under way, across her hull when slow
+  const ca = Math.cos(s.a), sa = Math.sin(s.a), sp = Math.hypot(s.vx, s.vy), wv = clamp(sp / (T * 2.5), 0, 1);
+  const perpV = sp > 1 ? (s.vx * v.aly - s.vy * v.alx) / sp : 0, perpH = -v.alx * sa + v.aly * ca, along = sp > 1 ? (s.vx * v.alx + s.vy * v.aly) / sp : 0;
+  const trMax = s.def.turn * Math.max(s.hf || 1, .15) || 1, maxB = fast ? .7 : big ? .1 : .28;
+  let bankT = clamp((perpV * wv + perpH * (1 - wv)) / T, -1, 1) * maxB;
+  if (fast) bankT = bankT * .55 + clamp((s.av || 0) / trMax, -1, 1) * maxB * .45;
+  v.bank += (bankT - v.bank) * (1 - Math.exp(-4.4 * dt));
+  const pitchT = fast ? clamp(along / T, -1, 1) * .12 : big ? 0 : clamp(along / T, -1, 1) * .035; // she dips her nose to brake, squats a little to burn
+  v.pitch += (pitchT - v.pitch) * (1 - Math.exp(-5 * dt));
+  if (S.paused || dark || s.cold || vz < 7 || s.def.static) return;
+  // attitude jets: only while her turn is changing speed
+  const acc = trMax * 2.2, ka = Math.abs(v.aa) / acc;
+  if (ka > .25) { const sg = Math.sign(v.aa), k = Math.min(1, ka), bx = v.xmax * .82, sx = v.xlo * .82, r = (12 + 18 * k) * dt;
+    if (Math.random() < r) jet(s, v, vr, bx, -sg * skinW(v, bx), 0, -sg, k); // bow pushed one way...
+    if (Math.random() < r) jet(s, v, vr, sx, sg * skinW(v, sx), 0, sg, k); } // ...stern the other: a couple
+  // side thrusters: on the skin opposite the push, a pair along the flank so she slides without turning
+  const rx = s.rx || 0, ry = s.ry || 0, rm = Math.hypot(rx, ry), rmax = T * (s.def.rcs || .2);
+  if (rm > rmax * .25) { const k = Math.min(1, rm / rmax), fx = (rx * ca + ry * sa) / rm, fy = (-rx * sa + ry * ca) / rm, r = (10 + 16 * k) * dt;
+    if (Math.abs(fy) > .3) { const sd = -Math.sign(fy); for (const lx of [v.xmax * .5, v.xlo * .5]) if (Math.random() < r * Math.abs(fy)) jet(s, v, vr, lx, sd * skinW(v, lx), 0, sd, k); }
+    if (fx < -.3) { const bx = v.xmax * .9; for (const sd of [-1, 1]) if (Math.random() < r * -fx) jet(s, v, vr, bx, sd * skinW(v, bx) * .6, 1, sd * .25, k); } } // braking: retro jets at the bow, blowing forward
+}
+function fxInit(v) { v.kr = v.ky = v.kp = v.krv = v.kyv = v.kpv = 0; v.bank = v.pitch = v.alx = v.aly = 0; v.vxP = v.vyP = v.avP = v.aa = undefined; v.hits = []; v.scars = []; v.hvT = v.ltT = v.cutT = 0; v.sput = 1; }
 function shipFx(s, v, vr, vz, dark) {
   const stale = RCLK - (v.fxT ?? -1) > .25; v.fxT = RCLK; // back from off screen or the icon view: take the books as they stand, no backlog of effects
   const dt = Math.min(GDT, .05), big = vr > 30, w0 = s.def.fighter || s.def.shell ? 24 : big ? 6.5 : 11, ca = Math.cos(s.a), sa = Math.sin(s.a), parts = !S.paused && vz > 6;
@@ -1204,6 +1242,10 @@ function shipFx(s, v, vr, vz, dark) {
     const q = v.scars[i], sg = q.ly < 0 ? -1 : 1, wx = s.x + (q.lx * ca - q.ly * sa) * vr, wy = s.y + (q.lx * sa + q.ly * ca) * vr, nx = -sa * sg, ny = ca * sg, sp = rand(40, 110);
     S.parts.push({ x: wx, y: wy, vx: s.vx + nx * sp + rand(-15, 15), vy: s.vy + ny * sp + rand(-15, 15), life: rand(.4, .7), max: .7, size: vr * .022 + .5, col: 0xd2d8de, smoke: 1, drag: 1.6 });
     if (hp < .35 && Math.random() < .3) for (let j = 0; j < 3; j++) { const a = Math.atan2(ny, nx) + rand(-.8, .8), v2 = rand(120, 380); S.parts.push({ x: wx, y: wy, vx: s.vx + Math.cos(a) * v2, vy: s.vy + Math.sin(a) * v2, life: rand(.1, .3), max: .3, size: 2, col: 0xffb060, spark: 1, drag: 3 }); } }
+  if (s.sub && parts && dt > 0) { hullX(v); const sb = s.sub; // a wrecked compartment smokes where it is: the drive aft, the bridge amidships, a gun deck on its own flank
+    for (const [down, lx, side] of [[sb.eng <= 0, v.xlo * .85, 0], [sb.bridge <= 0, v.xmax * .15, 0], [sb.gunsP <= 0, 0, -1], [sb.gunsS <= 0, 0, 1]]) if (down && Math.random() < 2 * dt) {
+      const ly = side * skinW(v, lx) * (.8 + Math.random() * .2), lx2 = lx + rand(-.12, .12), wx = s.x + (lx2 * ca - ly * sa) * vr, wy = s.y + (lx2 * sa + ly * ca) * vr;
+      S.parts.push({ x: wx, y: wy, vx: s.vx + (-sa * side) * rand(5, 20) + rand(-10, 10), vy: s.vy + (ca * side) * rand(5, 20) + rand(-10, 10), life: rand(1.2, 2.4), max: 2.4, size: vr * .05 + 2, col: 0x3a3430, smoke: 1, drag: .5 }); } }
   if (hp < .35 && !dark && dt > 0 && RCLK > v.ltT + .15 && Math.random() < 1.6 * dt) v.ltT = RCLK + rand(.04, .12); // her lights stutter
   if (hp < .2 && dt > 0 && RCLK > v.cutT + .3 && Math.random() < .8 * dt) v.cutT = RCLK + rand(.06, .14); // and her drive coughs
   v.sput = hp >= .2 ? 1 : RCLK < v.cutT ? .2 : .82 + .18 * Math.sin(RCLK * 23 + s.id) * Math.sin(RCLK * 7.3 + s.id * .4);

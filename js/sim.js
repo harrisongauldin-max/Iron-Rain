@@ -1257,7 +1257,7 @@ export function update(dt) {
     }
     if (d.static && s.team < 2 && !s.derelict && S.time - s.lastHit > 10 && s.hp < d.hp) s.hp = Math.min(d.hp, s.hp + d.hp * .003 * dt);
     s.moraleT -= dt; if (s.moraleT <= 0) { s.moraleT = 1; moraleTick(s); }
-    if (s.sub && Math.random() < .06 && (s.sub.eng <= 0 || s.sub.bridge <= 0 || s.sub.gunsP <= 0 || s.sub.gunsS <= 0)) S.parts.push({ x: s.x + rand(-s.r, s.r) * .5, y: s.y + rand(-s.r, s.r) * .3, vx: s.vx + rand(-10, 10), vy: s.vy + rand(-10, 10), life: rand(1.5, 3), max: 3, size: s.r * .25 + 4, col: 0x3a3430, smoke: 1, drag: .5 });
+    // (the smoke from a wrecked engine room, bridge or gun deck is drawn by the renderer, where that compartment sits on the hull)
     if (s.h) { s.hangT -= dt; if (s.hangT <= 0) { s.hangT = .5; carrierTick(s); } }
     if (s.docked) {
       const t = s.docked.t; if (t.dead || t.team === s.team) { s.docked = null; setIdle(s); continue; }
