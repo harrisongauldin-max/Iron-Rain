@@ -4,6 +4,7 @@ Each publish of `main` to the claude.ai artifact (slug `fc8b77cf-d69b-4cca-9154-
 
 | Artifact version | Date | Commit | What changed |
 |---|---|---|---|
+| 1794414731-d612 | 2026-11-11 | f694ff5 | `js/render.js`: battle punch — shield halves/bubble shatter into hex cells under an arc of glow (from `downP`/`downS`/`shDown`), hull-flip pulse in the new team colour, impact flash on slug hits, tracer tails on gun rounds and hot flak dashes, camera shake on big blasts and shield collapses (`gx.shake=false` to disable); softer lance-charge glow; `TEX.dot` restored. |
 | 1794413296-e276 | 2026-11-11 | 5dbd8f9 | new `js/interp.js`, `js/main.js`, `js/render.js`: ship motion drawn between sim steps (no judder at 144/240 Hz or slow speed); bank easing, thruster puffs, missile smoke, plume shimmer and wreck fires run on a game-time render clock instead of per-frame constants. |
 | 1794413063-d029 | 2026-11-11 | 7bfa971 | `js/hulls.js`: Pandora re-lined — long blade-section hull, raked ram prow, low swept armour curtains, lean citadel. |
 | 1794412905-7a3a | 2026-11-11 | 491050a | `js/hulls.js`, `js/render.js`: the named dreadnoughts — Pax/Vanguard, Invictus, Pandora as hull variants beside the Annihilo, chosen by the commanding officer. |
