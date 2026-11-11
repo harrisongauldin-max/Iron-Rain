@@ -975,7 +975,7 @@ export function recallCommander(c) { if (c.state !== 'aboard' || !c.ship) return
 function shock(team, x, y, R, amt) { for (const o of S.ships) if (o.team === team && !o.dead && o.def.crew > 2 && !o.def.static && hyp(o.x - x, o.y - y) < R) o.loy = Math.max(loyFloor(o), o.loy - amt * resist(o)); }
 function commanderLost(c, ship, cause) {
   ship.cmdr = null; c.ship = null;
-  if (cause === 'ship' && Math.random() < .4) { c.state = 'pod'; c.timer = 90; if (c.team === 0) toast(c.name + "'s escape pod got clear · back in service in 90 s", ''); else toast('Enemy commander ' + c.name + ' escaped in a pod', ''); }
+  if (cause === 'ship' && Math.random() < .4) { c.state = 'pod'; c.timer = 90; if (c.team === 0) toast(c.name + "'s escape pod got clear · back in service in 90 s", ''); else toast('Enemy commander ' + c.name + ' escaped in a pod', ''); if (S.hooks && S.hooks.banner) S.hooks.banner(c.team === 0 ? 'gold' : 'bad', 'Escape pod', c.name, c.team === 0 ? 'got clear of the wreck: back in service in 90 seconds' : 'got clear of the wreck: their commander lives to fight again'); }
   else { c.state = 'dead'; toast((c.team === 0 ? '' : 'Enemy commander ') + c.name + ' has fallen', c.team === 0 ? 'bad' : 'good'); }
   shock(c.team, ship.x, ship.y, 2000, .12);
   if (!ship.dead) ship.loy = Math.max(0, ship.loy - .3 * resist(ship));

@@ -108,6 +108,7 @@ export function rout(team, why) {
   // fighters go home with their carriers, or with whatever is still running
   const text = team === 1 ? (why || (orderly ? `${M.lead ? M.lead.name : 'The enemy'} breaks off and withdraws in good order. Run them down before they clear the field` : `The enemy line breaks! ${M.lead ? M.lead.name + ' sounds the retreat. ' : ''}Run them down before they clear the field`)) : why;
   note(text, team === 1 ? 0xffd27a : 0xff8a7a); toast(text, team === 1 ? 'good' : 'bad', null, true);
+  if (S.hooks && S.hooks.banner) S.hooks.banner(team === 1 ? 'gold' : 'bad', team === 1 ? (orderly ? 'They withdraw' : 'The enemy breaks') : 'Our line breaks', team === 1 ? (orderly ? 'In good order' : 'Rout') : 'The crews are running', team === 1 ? 'Run them down before they clear the field: every hull caught is a prize or a kill' : 'Withdraw what you can, or rally the flagship');
   if (S.hooks && S.hooks.voice) { if (team === 1) { S.hooks.voice('rout', null); S.hooks.voice('rout', null, { enemy: true }); } }
 }
 

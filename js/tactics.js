@@ -7,6 +7,7 @@ import { projectTo } from './cam.js';
 import { groupList, groupOrder, shMax } from './sim.js';
 import { bodyOf } from './solar.js';
 import * as MO from './morale.js';
+import { COUNTER } from './data.js';
 import * as TRN from './terrain.js';
 import * as SNS from './sensors.js';
 import * as CO from './comms.js';
@@ -18,8 +19,8 @@ const armedShip = s => !s.dead && !s.def.static && !s.surrendered && !s.derelict
 export const T = { feed: [], callouts: [], hits: [], tac: false, ff: false, prev: 1, contact: false, rain: [] };
 
 export function setup() {
-  Object.assign(T, { dmg: [{}, {}], kills: [], rain: [], feed: [], callouts: [], hits: [], beams: [], ff: false, ffOff: false, stall: false, stallG: null, stallM: null, stallT: 0, prev: S.speed || 1, contact: false, lastCheck: 0, engaged: false, foe0: str(1), real: 0, slowUntil: 0, slowPrev: 1, lastSlow: -99 });
-  S.hooks = { kill: onKill, shDown: onShDown, hit: onHit, absorb: onAbsorb, halfDown: onHalfDown, note: (t, c) => push(t, c), board: onBoard, beam: onBeam, wrecked: onWrecked, nuke: onNuke, voice, capture: onCapture, ripple: onRipple, bombFx }; T.rip = []; T.bombs = []; T.decks = new Map(); CO.reset(); T.hullTold = new Set(); T.nukes = [0, 0]; S.wash = [];
+  Object.assign(T, { framed: false, glide: null, tags: null, tagT: 0, dmg: [{}, {}], kills: [], rain: [], feed: [], callouts: [], hits: [], beams: [], ff: false, ffOff: false, stall: false, stallG: null, stallM: null, stallT: 0, prev: S.speed || 1, contact: false, lastCheck: 0, engaged: false, foe0: str(1), real: 0, slowUntil: 0, slowPrev: 1, lastSlow: -99 });
+  S.hooks = { kill: onKill, shDown: onShDown, hit: onHit, absorb: onAbsorb, halfDown: onHalfDown, note: (t, c) => push(t, c), board: onBoard, beam: onBeam, wrecked: onWrecked, nuke: onNuke, voice, capture: onCapture, ripple: onRipple, bombFx, banner }; T.rip = []; T.bombs = []; T.decks = new Map(); CO.reset(); T.hullTold = new Set(); T.nukes = [0, 0]; S.wash = [];
   S.battleOverlay = draw; SNS.setup(); S.decksFn = decks; S.boardAim0 = null; DIR.cur = null; DIR.heat = new Map(); DIR.lastCut = -99; S.pip = null;
 }
 // ---------------------------------------------------------------- comms: who speaks for what happened
@@ -39,6 +40,24 @@ export function cut(kind, o, score, hold, text) {
   const ship = o.def ? o : null;
   DIR.cur = { kind, ship, x: o.x, y: o.y, vx: o.vx || 0, vy: o.vy || 0, score, until: now + hold, t0: now, text, az: (Math.random() - .5) * 1.6, R: o.R || null }; DIR.lastCut = now;
   if (typeof document !== 'undefined') { const c = document.querySelector('#pip .pcap'); if (c) { c.textContent = text; c.parentNode.classList.remove('cutin'); void c.parentNode.offsetWidth; c.parentNode.classList.add('cutin'); } }
+  // the biggest moments take the main view for a few seconds, with the clock slowed to watch them
+  if (score >= 80 && !DIR.off && T.real - (DIR.takeT || -99) > 12 && !T.ff) { DIR.takeT = T.real; DIR.takeUntil = T.real + 2.8;
+    if (!T.slowUntil && S.speed >= 1) { T.slowPrev = S.speed; S.speed = .35; T.slowUntil = T.real + 2.4; T.lastSlow = T.real; speedLabel(); } }
+}
+// at the first shots the main camera glides in close enough to see the hulls, if the player is looking at the fight
+function frameFight() {
+  const a = S.ships.filter(s => s.team === 0 && armedShip(s)), b = S.ships.filter(s => s.team === 1 && armedShip(s)); if (!a.length || !b.length || S.follow) return;
+  let best = null, bd = 1e18; for (const x of a) for (const y of b) { const e = hyp(x.x - y.x, x.y - y.y); if (e < bd) { bd = e; best = [x, y]; } }
+  const [x, y] = best, cx = (x.x + y.x) / 2, cy = (x.y + y.y) / 2;
+  projectTo(Q, cx, cy); if (Q.ok && (Q.x < 0 || Q.y < 0 || Q.x > S.W || Q.y > S.H)) return; /* the fight is off screen: the player is looking elsewhere */
+  const z = clamp(Math.min(S.W, S.H) / (bd * 1.9 + 1200), S.cam.z, .12); if (z < S.cam.z * 1.4) return;
+  T.glide = { x0: S.cam.x, y0: S.cam.y, z0: S.cam.z, x: cx, y: cy, z, t: T.real };
+}
+// every frame: the glide, and the action camera taking the main view
+export function camFrame() {
+  const G = T.glide; if (G) { const k = Math.min(1, (T.real - G.t) / 1.4), e = k * k * (3 - 2 * k), lz = Math.log(G.z0) + (Math.log(G.z) - Math.log(G.z0)) * e;
+    S.cam.x = G.x0 + (G.x - G.x0) * e; S.cam.y = G.y0 + (G.y - G.y0) * e; S.cam.z = Math.exp(lz); if (k >= 1) T.glide = null; }
+  if (typeof document !== 'undefined') { const el = document.getElementById('pip'); if (el) el.classList.toggle('take', !!(DIR.takeUntil && T.real < DIR.takeUntil && DIR.cur && !DIR.off)); }
 }
 const vrOf = s => s.def.vr0 && !s.def.static ? s.def.vr0 * (S.hullX || 30) / 30 : s.r;
 export function pipFrame(dt) {
@@ -115,7 +134,7 @@ function duelTick() {
   }
 }
 export const decks = () => [...T.decks.values()].filter(D => !D.t.dead && D.t.team !== D.team && (D.team === 0 || D.t.team === 0));
-export function teardown() { S.stepCap = 10; S.pip = null; DIR.cur = null; { const el = typeof document !== 'undefined' && document.getElementById('pip'); if (el) el.classList.remove('show'); } S.hooks = null; S.battleOverlay = null; S.bzone = null; if (T.slowUntil) { S.speed = T.slowPrev; T.slowUntil = 0; } if (T.ff) { S.speed = T.prev; T.ff = false; } S.ffStep = null; speedLabel(); }
+export function teardown() { S.stepCap = 10; S.pip = null; DIR.cur = null; DIR.takeUntil = 0; T.glide = null; { const el = typeof document !== 'undefined' && document.getElementById('pip'); if (el) el.classList.remove('take'); } { const el = typeof document !== 'undefined' && document.getElementById('pip'); if (el) el.classList.remove('show'); } S.hooks = null; S.battleOverlay = null; S.bzone = null; if (T.slowUntil) { S.speed = T.slowPrev; T.slowUntil = 0; } if (T.ff) { S.speed = T.prev; T.ff = false; } S.ffStep = null; speedLabel(); }
 
 // ---------------------------------------------------------------- the clock
 const speedLabel = () => { const b = typeof document !== 'undefined' && document.getElementById('bSpd'); if (b) b.textContent = T.ff ? `Closing · ${S.speed}×` : T.slowUntil ? 'Slow time' : 'Speed ' + speedTxt(S.speed); };
@@ -158,6 +177,7 @@ export function tick(dt, paused) {
   if (!T.saidPicket && SNS.SN.contacts[0].length) { const pk = S.ships.find(s => s.team === 0 && s.picket && !s.dead); if (pk) { T.saidPicket = true; voice('picket', pk, { N: SNS.SN.contacts[0].length }); } }
   if (S.env && S.env.sun && T.saidContact && !T.saidGlare && S.time - T.saidContact > 12) { T.saidGlare = true; voice('glare', null); }
   for (const s of S.ships) if (s.team === 0 && !s.dead && !s.def.static && !s.def.fighter && !s.def.shell && s.hp < s.def.hp * .33 && !T.hullTold.has(s.id) && s.def.hp >= 600) { T.hullTold.add(s.id); voice('hull', s); break; }
+  if (!T.framed && T.contact && (gunsTalking() || d < 8000)) { T.framed = true; frameFight(); }
   T.contact = contact; T.gap = d; if (contact) T.engaged = true; duelTick();
   if (S.bzone) { const b = bodyOf(S.bzone.world); S.bzone.x = b.x; S.bzone.y = b.y; }
   const now = S.time; T.rip = T.rip.filter(r => now - r.t < .45 && !r.s.dead); T.bombs = T.bombs.filter(b => now - b.t < 1.6); T.feed = T.feed.filter(e => now - e.t < 14); T.callouts = T.callouts.filter(e => now - e.t < (e.long ? 4 : 2.2)); T.hits = T.hits.filter(e => now - e.t < .5); T.beams = T.beams.filter(e => now - e.t < .45);
@@ -263,6 +283,12 @@ function onAbsorb(s, amt, team, src, kind) { if (s.team !== team) ledger(team, k
 function onHalfDown(s, side, team, src) {
   if (s.def.fighter || s.def.shell || (s.vis && !s.vis[0] && s.team !== 0) || !s.def.cmd) return;
   T.callouts.push({ t: S.time, x: s.x, y: s.y, s, kind: 'half', team: s.team, text: (side > 0 ? 'STARBOARD' : 'PORT') + ' SHIELD DOWN', col: s.team === 0 ? 0xff9a7a : 0x8fd3ff });
+  // the moment a capital ship's flank opens: say it big, once a ship every 20 seconds, and say what to do about it
+  if (s.team > 1 || S.time - (s.halfSaid || -99) < 20 || S.time - (T.halfBan || -99) < 6) return; s.halfSaid = T.halfBan = S.time;
+  const nm = s.title || 'The ' + s.def.name, sd = side > 0 ? 'starboard' : 'port', other = side > 0 ? 'port' : 'starboard';
+  if (s.team === 0) banner('bad', `${sd[0].toUpperCase() + sd.slice(1)} shield down`, nm, `Her ${sd} side is open: turn her ${other} side to them (Helm), or Brace (B)`);
+  else banner('gold', `Their ${sd} shield breaks`, nm, `Her ${sd} side is open: every hit on it goes to the hull`);
+  cut('half', s, s.def.hp >= 2000 ? 50 : 30, 4, `${nm}: ${sd} shield down`);
 }
 function onHit(s, amt, team, src, kind) {
   heat(s, Math.min(8, amt / 60));
@@ -289,13 +315,16 @@ function draw(g, label, z, px) {
   if (T.tac) drawTac(g, label, z, px);
   // the ship you have selected, as Battlefleet Gothic shows her: her shield halves as arcs (bright when strong,
   // red when down) and, off the tactical overlay, her broadside arcs out to effective range
-  { const L = S.selection.filter(o => o.team === 0 && !o.dead && !o.def.static && !o.def.fighter);
-    for (const o of L.length <= 3 ? L : []) {
+  // the same arcs on an enemy ship under the cursor or in the inspector, and on any of ours that has just lost a half
+  { const L0 = S.selection.filter(o => o.team === 0 && !o.dead && !o.def.static && !o.def.fighter), L = L0.length <= 3 ? L0.slice() : [];
+    for (const o of [S.hover, S.inspect]) if (o && !o.dead && o.sub && o.def.shield && !o.def.static && !L.includes(o) && (o.team === 0 || !o.vis || o.vis[0])) L.push(o);
+    for (const o of S.ships) if (o.team === 0 && o.sub && o.def.cmd && !o.dead && !L.includes(o) && L.length < 6 && Math.max(o.downP || -99, o.downS || -99) > S.time - 8 && o.sh > .5) L.push(o);
+    for (const o of L) {
       g.ground();
       if (o.def.shield && o.sub) { const mx = shMax(o) / 2 || 1, Rr = Math.max(o.r * 2.3, 34 * px);
         for (const [side, v] of [[1, o.shS || 0], [-1, o.shP || 0]]) { const f = Math.max(0, Math.min(1, v / mx)), a0 = o.a + side * .18, a1 = o.a + side * (Math.PI - .18), lo = Math.min(a0, a1), hi = Math.max(a0, a1);
           g.moveTo(o.x + Math.cos(lo) * Rr, o.y + Math.sin(lo) * Rr); g.arc(o.x, o.y, Rr, lo, hi); g.stroke({ width: 3 * px, color: f <= .02 ? 0xff4b3e : f < .35 ? 0xff9a3c : 0x5ab8ff, alpha: f <= .02 ? .75 : .35 + .5 * f }); } }
-      if (!T.tac && o.def.broadside && L.length === 1) { const BR = batteryRange(o) || mainRange(o), bw = o.weapons.find(w => w.def.battery), half = bw ? bw.def.arc : .87;
+      if (!T.tac && o.def.broadside && L.length === 1 && o.team === 0) { const BR = batteryRange(o) || mainRange(o), bw = o.weapons.find(w => w.def.battery), half = bw ? bw.def.arc : .87;
         for (const side of [1, -1]) { const a0 = o.a + side * Math.PI / 2 - half, a1 = o.a + side * Math.PI / 2 + half;
           g.moveTo(o.x, o.y); g.arc(o.x, o.y, BR, a0, a1); g.lineTo(o.x, o.y); g.fill({ color: 0x3ddc84, alpha: .035 }); g.moveTo(o.x + Math.cos(a0) * BR, o.y + Math.sin(a0) * BR); g.arc(o.x, o.y, BR, a0, a1); g.stroke({ width: 1.1 * px, color: 0x3ddc84, alpha: .3 }); } }
     } }
@@ -311,8 +340,23 @@ function draw(g, label, z, px) {
   g.screen();
   for (const h of T.hits) { projectTo(Q, h.x, h.y); if (!Q.ok) continue; const k = 1 - (S.time - h.t) / .5, r = (h.big ? 6 : 4) * (1 + (1 - k) * .6);
     g.moveTo(Q.x - r, Q.y - r).lineTo(Q.x + r, Q.y + r).moveTo(Q.x + r, Q.y - r).lineTo(Q.x - r, Q.y + r).stroke({ width: h.big ? 2 : 1.4, color: 0xffe0a0, alpha: k }); }
+  enemyTags(label, z, px);
   // callouts float up over the ship they belong to
   for (const c of T.callouts) { const s = c.s && !c.s.dead ? c.s : c; projectTo(Q, s.x, s.y); if (!Q.ok) continue; const k = (S.time - c.t) / 2.2; label(c.text, Q.x, Q.y - 26 - k * 22, c.col, false, true); }
+}
+// enemy groups, tagged where they are: what is in them and what beats them (COUNTER, as the ship cards have it)
+const plural = (n, d) => n > 1 ? (d.name.endsWith('s') ? d.name : d.name + 's') : d.name;
+const shortC = t => t.split(/[:·]/)[0].trim();
+function enemyTags(label, z, px) {
+  if (z < .0035 || S.mode !== 'battle') return;
+  if (!T.tagT || S.time - T.tagT > .5 || T.tagZ !== z) { T.tagT = S.time; T.tagZ = z;
+    const L = S.ships.filter(s => s.team === 1 && armedShip(s) && s.vis && s.vis[0]), R = Math.max(4000, 120 / z), cl = [];
+    for (const s of L) { let c = cl.find(c => hyp(c.x / c.n - s.x, c.y / c.n - s.y) < R); if (!c) cl.push(c = { x: 0, y: 0, n: 0, by: {}, v: {}, L: [] }); c.x += s.x; c.y += s.y; c.n++; c.L.push(s); c.by[s.type] = (c.by[s.type] || 0) + 1; c.v[s.type] = (c.v[s.type] || 0) + (s.def.value || 50); }
+    T.tags = cl.filter(c => c.n > 1 || c.L.some(s => s.def.cmd)).sort((a, b) => b.n - a.n).slice(0, 4).map(c => { const ts = Object.keys(c.by).sort((a, b) => c.v[b] - c.v[a]), top = ts[0];
+      const what = ts.slice(0, 2).map(t => `${c.by[t]} ${plural(c.by[t], c.L.find(s => s.type === t).def)}`).join(' · ') + (ts.length > 2 ? ' +' + ts.slice(2).reduce((a, t) => a + c.by[t], 0) : '');
+      let maxY = -1e18; for (const s of c.L) maxY = Math.max(maxY, s.y + s.r); return { x: c.x / c.n, y: maxY, L: c.L, what: what.toUpperCase(), weak: COUNTER[top] ? 'Weak to ' + shortC(COUNTER[top][1]).replace(/^[A-Z]/, m => m.toLowerCase()) : '' }; }); }
+  for (const t of T.tags || []) { if (t.L.every(s => s.dead)) continue; projectTo(Q, t.x, t.y); if (!Q.ok || Q.x < -60 || Q.y < -60 || Q.x > S.W + 60 || Q.y > S.H + 60) continue;
+    if (label(t.what, Q.x, Q.y + 22, 0xffb6ad, false, true) && t.weak && z < .2) label(t.weak, Q.x, Q.y + 36, 0xd8c8a8, false, true); }
 }
 function drawTac(g, label, z, px) {
   const sel = S.selection.filter(s => !s.dead && !s.def.static), flags = groupList().map(g => g.flag).filter(f => f && !f.dead && !f.offField && f.team === 0);

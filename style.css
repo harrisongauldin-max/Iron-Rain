@@ -1438,3 +1438,26 @@ body.strat:has(#sfeed.open) #srail{display:none}
 .vgrade.g-decisive{border-color:#e8c87e}
 .vgrade.g-pyrrhic{border-color:#c9785a;background:rgba(201,120,90,.08)}
 .vgrade.theirs{border-color:#c25a4a;background:rgba(194,90,74,.08)}
+
+/* ---------------------------------------------------------------- space battle HUD pass (panel review, Punch 1/3, Fight 5) */
+/* deployment: battlefield and enemy side by side; the rules folded under one line */
+#bobj .dduo{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+#bobj .dmore{margin-top:8px}
+#bobj .dmore summary{cursor:pointer;font:600 10px var(--serif);letter-spacing:.16em;text-transform:uppercase;color:var(--gold);list-style:none}
+#bobj .dmore summary::-webkit-details-marker{display:none}
+#bobj .dmore summary::before{content:'▸ '}#bobj .dmore[open] summary::before{content:'▾ '}
+#bobj .dmore .dsens p{margin:0 0 5px}#bobj .dmore .dsens b{color:var(--ivory)}
+/* the calm HUD: with nothing selected, the ship panel and the order rows fold away */
+#bcmd .bunfold,#bcmd .bfold{display:none}
+body.battle:not(.bcalm):not(.bdep) #bcmd .bfold{display:inline-flex}
+#bcmd .bfold{position:absolute;right:10px;top:-21px;padding:2px 10px 1px!important;font-size:9.5px!important;border-bottom:0;background:linear-gradient(180deg,rgba(26,14,14,.96),rgba(12,10,12,.96))}
+body.bcalm #bcmd .bunfold{display:inline-flex;border-color:rgba(232,200,126,.45);color:var(--gold-hi)}
+body.bcalm #bcmd .bcrow:not(:last-child),body.bcalm #bcmd #bhelm{display:none}
+body.battle.bcalm #selp{display:none}
+/* comms as a two-line ticker */
+body.battle #log:not(.open) .lg{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.battle #log:not(.open) .lg.vc .vbody > span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* the action camera taking the main view for a big moment */
+#pip{transition:right .35s ease,bottom .35s ease,width .35s ease,height .35s ease}
+#pip.take{right:calc(50% - 34vw);bottom:18vh;width:68vw;height:38.25vw;max-height:62vh;z-index:12;box-shadow:0 0 0 1px rgba(0,0,0,.8),0 20px 80px rgba(0,0,0,.85)}
+#pip.take .pcap{font-size:15px;padding:24px 18px 10px}

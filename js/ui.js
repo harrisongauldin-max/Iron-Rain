@@ -195,7 +195,7 @@ function worldStrip() {
 let logOpen = false;
 export function toggleLog() { logOpen = !logOpen; $('log').classList.toggle('open', logOpen); uiT = 0; }
 function updLog() {
-  const L0 = S.log || [], L = S.mode === 'battle' && !logOpen ? L0.filter(e => e.voice || /bad|gold|nuke/.test(e.cls)) : L0, n = logOpen ? 40 : S.mode === 'battle' ? 7 : 5, f = t => Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0');
+  const L0 = S.log || [], L = S.mode === 'battle' && !logOpen ? L0.filter(e => e.voice || /bad|gold|nuke/.test(e.cls)) : L0, n = logOpen ? 40 : S.mode === 'battle' ? 2 : 5, f = t => Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0');
   setHTML($('log'), `<h4 data-log="toggle">${S.mode === 'battle' ? 'Comms' : 'Dispatches'} <span>${L.length ? (logOpen ? '▴ fewer' : L.length + ' ▾') : ''}</span></h4>` + (L.length ? L.slice(0, n).map((e, i) => e.voice ? voiceRow(e, i, f) : `<div class="lg ${e.cls}${e.at ? ' at' : ''}${S.time - e.t > 12 ? ' old' : ''}" ${e.at ? `data-log="${i}"` : ''}><i>${f(e.t)}</i><span>${esc(e.msg)}</span></div>`).join('') : '<div class="hint">Reports from across the Core land here. Click one with ⌖ to jump to it. Backspace jumps to the latest.</div>'));
 }
 // a line from a person: the Color chip, the name and the ship, then what was said
