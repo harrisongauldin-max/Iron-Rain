@@ -930,6 +930,7 @@ function fire(s, w, mx, my, ang, D, resetCd) {
   S.shots.push({ x: mx, y: my, px: mx, py: my, vx: s.vx + c * D.speed, vy: s.vy + sn * D.speed, team: s.team, D, life: D.life, owner: s, d0: w ? w.td || 0 : 0 });
   if (D.recoil && !s.def.static) { s.vx -= c * D.recoil / s.mass; s.vy -= sn * D.recoil / s.mass; }
   if (resetCd) w.cd = D.reload * (.9 + Math.random() * .2);
+  if (w) w.fT = S.time; // when the gun last fired: the renderer recoils its barrels and kicks the hull
   if (!(s.def.static && s.team < 2)) { w.ammo--; S.bstat.ord[s.team] += D.supply / Math.max(1, w.mag); S.bstat.rounds[s.team]++; } s.lastFire = S.time; s.glare = 0;
   if (D.kind === 'slug') {
     const n = D.huge ? 26 : D.big ? 14 : 4;
@@ -1009,7 +1010,7 @@ export function damage(s, amt, team, x, y, kind, src) {
     if (absorb > 0 && s.sh <= .5) { s.sh = 0; s.shP = s.shS = 0; s.shDown = S.time; if (S.alert && s.team === 0 && (s.cmdr || (s.group && s.group.flag === s))) S.alert('flagSh', s); if (S.hooks && S.hooks.shDown) S.hooks.shDown(s, team, src); burst(s.x, s.y, s.vx, s.vy, 24, 0x8fd3ff, s.r * 6 + 80, .6); S.rings.push({ x: s.x, y: s.y, vx: s.vx, vy: s.vy, r: s.r, max: s.r * 2.4, life: .5, maxl: .5, col: 0x8fd3ff }); sfx('shdown', s.x, s.y); }
     if (amt <= 0) return;
   }
-  const before = s.hp; s.hp -= amt; s.flash = .12; if (S.hooks && S.hooks.hit) S.hooks.hit(s, amt, team, src, kind);
+  const before = s.hp; s.hp -= amt; s.flash = .12; s.hitSum = (s.hitSum || 0) + amt; if (x != null) { s.hitX = x; s.hitY = y; } /* for the renderer: where she was struck and how hard */ if (S.hooks && S.hooks.hit) S.hooks.hit(s, amt, team, src, kind);
   if (src && src.team !== s.team && !src.dead) { const dealt = Math.min(amt, before); addXp(src, dealt * .02); if (src.cmdr) addRenown(src.cmdr, dealt * .005); }
   if (s.sub && kind !== 'internal' && s.hp > 0) hitSubsystem(s, amt, x, y, src);
   if (s.def.crew > 2) {

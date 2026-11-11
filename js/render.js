@@ -13,7 +13,7 @@ import { mergeGeometries } from '../vendor/three/utils/BufferGeometryUtils.js';
 import { buildSlip, ganymedeDocks, phobosTraffic } from './yards.js';
 import { S } from './state.js';
 import { SHAPES, BODIES, ICON_SCALE, DEFS, fshape, HULL_REF } from './data.js';
-import { TAU, PI, rand, clamp, hyp, hex } from './util.js';
+import { TAU, PI, rand, clamp, hyp, hex, angDiff } from './util.js';
 import { grav } from './physics.js';
 import { disabled, mainAmmo, needsService, groupList, defaultRally, worldUnderAttack, nukesOf } from './sim.js';
 import { generate, HI } from './planetgen.js';
@@ -968,16 +968,18 @@ function sceneFrame() {
     if (iconMode) continue;
     // she banks into her turns and settles out of them: the roll follows the turn rate, deeper on the small fast hulls
     const trMax = s.def.turn * Math.max(s.hf || 1, .15) || 1, bankT = clamp((s.av || 0) / trMax, -1, 1) * (s.def.fighter ? .7 : vr > 30 ? .12 : .3); if (!inPip) v.bank = (v.bank || 0) + (bankT - (v.bank || 0)) * (1 - Math.exp(-4.4 * GDT)); /* eased in game time, once a frame (the action window shares the hull) */
-    v.g.position.set(s.x - O.x, 0, s.y - O.y); v.g.rotation.order = 'YXZ'; v.g.rotation.set(v.bank, -s.a, 0); v.g.scale.setScalar(vr);
+    if (v.kr === undefined) fxInit(v); if (!inPip) shipFx(s, v, vr, vz, dark);
+    v.g.position.set(s.x - O.x, 0, s.y - O.y); v.g.rotation.order = 'YXZ'; v.g.rotation.set(v.bank + v.kr, -s.a + v.ky, v.kp); v.g.scale.setScalar(vr);
+    shipFxDraw(s, v, vr, z);
     if (!S.paused && !inPip && Math.abs(s.av || 0) > trMax * .5 && vz > 8 && Math.random() < 21 * GDT && !dark) { // the attitude thrusters at bow and stern, puffing against the turn
       const sg = Math.sign(s.av), ca2 = Math.cos(s.a), sa2 = Math.sin(s.a), nx = -sa2 * sg, ny = ca2 * sg; /* the side the bow swings toward */
       for (const [px0, side] of [[.8, -1], [-.7, 1]]) { const bxx = s.x + ca2 * vr * px0 + nx * side * vr * .3, byy = s.y + sa2 * vr * px0 + ny * side * vr * .3; S.parts.push({ x: bxx, y: byy, vx: s.vx - nx * side * 90, vy: s.vy - ny * side * 90, life: .22, max: .22, size: vr * .08 + .4, col: 0xdfe6ee, drag: 3 }); } }
-    const st = s.flash > 0 ? 'f' : dark || s.cold ? 'd' : 'n'; /* running cold, she shows no lights */ if (v.st !== st) { v.st = st; v.hull.material = v.mats[st]; for (const m of v.sup) m.material = v.mats[st]; }
+    const st = RCLK < v.hvT ? 'f' : dark || s.cold || RCLK < v.ltT ? 'd' : 'n'; /* the hull flashes only on a heavy blow; running cold, or with her power failing, she shows no lights */ if (v.st !== st) { v.st = st; v.hull.material = v.mats[st]; for (const m of v.sup) m.material = v.mats[st]; }
     const thr = clamp(s.throttle, 0, 1), burn = s.throttle > 1 ? 1 + .5 * Math.log1p(s.throttle - 1) : 1; // a transit burn runs the drive past its battle rating
     v.mats.bell.emissiveIntensity = dark ? 0 : thr * 1.6;
     if (thr > .04 && !dark && !(S.gx && S.gx.plumes === false)) {
       // a fusion torch: a long narrow tail whose length follows the throttle (and a transit burn), a white-hot throat, glare on the stern
-      const L = vr * (1.1 + 3.2 * thr) * burn * (1 + .028 * Math.sin(RCLK * 71 + s.id * 1.9) + .012 * Math.sin(RCLK * 157 + s.id * .7)) /* a steady shimmer, not per-frame noise */, W = vr * (s.def.fighter ? .3 : .38), ca = Math.cos(s.a), sa = Math.sin(s.a), bx = s.x - ca * vr * (-v.xmin + .05), by = s.y - sa * vr * (-v.xmin + .05);
+      const L = vr * (1.1 + 3.2 * thr) * burn * v.sput * (1 + .028 * Math.sin(RCLK * 71 + s.id * 1.9) + .012 * Math.sin(RCLK * 157 + s.id * .7)) /* a steady shimmer, not per-frame noise */, W = vr * (s.def.fighter ? .3 : .38), ca = Math.cos(s.a), sa = Math.sin(s.a), bx = s.x - ca * vr * (-v.xmin + .05), by = s.y - sa * vr * (-v.xmin + .05);
       const pc = s.team === 0 ? 0xffb080 : 0xffd0a0, al = Math.min(1, .5 + thr * .5), fl = .93 + .07 * Math.sin(S.time * 41 + s.id) + .03 * Math.sin(S.time * 97 + s.id * 3), nb = Math.max(1, v.bells.length);
       for (const yy of v.bells) { const ox = -sa * yy * vr, oy = ca * yy * vr, pl = L / Math.max(1, nb * .55), pw = W / Math.max(1, nb * .6);
         B.plume.add(bx + ox, by + oy, 0, pl * fl, pw, s.a, pc, al * .9, 1.4); /* the tail */
@@ -1160,6 +1162,57 @@ function makeShip(s) {
   return { g, hull, sup, mats, team: s.team, st: 'n', xmin: geo.xmin, bells: geo.bells, T: geo.T };
 }
 
+// ---------------------------------------------------------------- how a hull answers her guns and the enemy's
+// Render-only: the sim records when each gun fired (w.fT) and where and how hard she was struck (s.hitX/Y, s.hitSum).
+// Recoil and hits kick a damped spring in roll, yaw and pitch: quick and light on small hulls, slow and heavy on capitals.
+// A hit lights where it landed and throws sparks; only a heavy blow flashes the whole hull. Hits that bite leave scars,
+// and as her hull fails the scars vent atmosphere, then burn, her lights stutter and her drive coughs.
+const recoilK = w => { const t = S.time - (w.fT ?? -9); return t < 0 || t > .7 ? 0 : t < .025 ? t / .025 : Math.exp(-(t - .025) * 7); };
+function scarAt(v, th, out) { // a point on the hull's skin toward local bearing th
+  const cx = Math.cos(th), sy = Math.sin(th), lx = clamp(cx, -.85, .85) * .85, hw = v.hw ? v.hw(lx) : .22;
+  out.lx = lx; out.ly = (sy < 0 ? -1 : 1) * hw * Math.min(1, Math.abs(sy) * 1.6); return out; }
+function fxInit(v) { v.kr = v.ky = v.kp = v.krv = v.kyv = v.kpv = 0; v.hits = []; v.scars = []; v.hvT = v.ltT = v.cutT = 0; v.sput = 1; }
+function shipFx(s, v, vr, vz, dark) {
+  const stale = RCLK - (v.fxT ?? -1) > .25; v.fxT = RCLK; // back from off screen or the icon view: take the books as they stand, no backlog of effects
+  const dt = Math.min(GDT, .05), big = vr > 30, w0 = s.def.fighter || s.def.shell ? 24 : big ? 6.5 : 11, ca = Math.cos(s.a), sa = Math.sin(s.a), parts = !S.paused && vz > 6;
+  // her own guns
+  for (const w of s.weapons) { if (w.fT == null || w.fT === w._fT) continue; const fresh = w._fT !== undefined && !stale && S.time - w.fT < .3; w._fT = w.fT;
+    if (!fresh || !w.def.recoil || s.def.static) continue;
+    const J = Math.min(1, Math.sqrt(w.def.recoil / Math.max(.5, s.mass || s.def.mass || 1) / 60)), rel = angDiff(s.a, w.ang ?? s.a + (w.dir || 0));
+    v.krv -= Math.sin(rel) * J * .05 * w0; /* she heels away from a broadside */ v.kpv += Math.max(0, Math.cos(rel)) * J * .035 * w0; /* and her bow lifts to a spinal gun */ v.kyv -= Math.sin(rel) * J * .008 * w0; }
+  // the enemy's
+  const hs = s.hitSum || 0, dH = v._hs === undefined || stale ? 0 : hs - v._hs; v._hs = hs;
+  if (dH > 0) { const f = dH / s.def.hp, k = Math.min(1, f * 12), th = s.hitX != null ? Math.atan2(s.hitY - s.y, s.hitX - s.x) - s.a : Math.random() * TAU, h = scarAt(v, th, { t: RCLK, k });
+    v.hits.push(h); if (v.hits.length > 6) v.hits.shift();
+    const sg = Math.random() < .5 ? -1 : 1; v.krv += sg * .05 * k * w0; v.kyv += (Math.random() - .5) * .03 * k * w0; v.kpv += (Math.random() - .5) * .02 * k * w0;
+    if (f > .06) v.hvT = RCLK + .09;
+    if (f > .015) { const sc = { lx: h.lx, ly: h.ly, p: Math.random() * TAU, f: 6 + Math.random() * 6 }; if (v.scars.length < 5) v.scars.push(sc); else v.scars[(Math.random() * 5) | 0] = sc; }
+    if (parts) { const wx = s.x + (h.lx * ca - h.ly * sa) * vr, wy = s.y + (h.lx * sa + h.ly * ca) * vr, a0 = th + s.a, n = 2 + Math.round(k * 10);
+      for (let i = 0; i < n; i++) { const a = a0 + rand(-.9, .9), sp = rand(150, 500) * (.6 + k); S.parts.push({ x: wx, y: wy, vx: s.vx + Math.cos(a) * sp, vy: s.vy + Math.sin(a) * sp, life: rand(.15, .4), max: .4, size: 2, col: i & 1 ? 0xffc27a : 0xfff0d0, spark: 1, drag: 3 }); } } }
+  while (v.hits.length && RCLK - v.hits[0].t > .35) v.hits.shift();
+  // the springs (substepped: a quick small hull would ring itself apart in one long frame)
+  if (dt > 0) { const n = Math.ceil(dt * w0 / .25), h = dt / n, d2 = 2 * .32 * w0, k2 = w0 * w0;
+    for (let i = 0; i < n; i++) { v.krv += (-k2 * v.kr - d2 * v.krv) * h; v.kyv += (-k2 * v.ky - d2 * v.kyv) * h; v.kpv += (-k2 * v.kp - d2 * v.kpv) * h; v.kr += v.krv * h; v.ky += v.kyv * h; v.kp += v.kpv * h; }
+    v.kr = clamp(v.kr, -.14, .14); v.ky = clamp(v.ky, -.05, .05); v.kp = clamp(v.kp, -.06, .06); }
+  // how badly she is hurt
+  const hp = s.hp / s.def.hp, want = hp < .35 ? 3 : hp < .6 ? 2 : 0;
+  while (v.scars.length < want) { const sc = scarAt(v, Math.random() * TAU, { p: Math.random() * TAU, f: 6 + Math.random() * 6 }); v.scars.push(sc); }
+  if (hp < .6 && parts && dt > 0) for (let i = 0; i < v.scars.length && i < (hp < .35 ? 5 : 2); i++) if (Math.random() < (hp < .35 ? 6 : 3.5) * dt) { // venting atmosphere, out of the breach
+    const q = v.scars[i], sg = q.ly < 0 ? -1 : 1, wx = s.x + (q.lx * ca - q.ly * sa) * vr, wy = s.y + (q.lx * sa + q.ly * ca) * vr, nx = -sa * sg, ny = ca * sg, sp = rand(40, 110);
+    S.parts.push({ x: wx, y: wy, vx: s.vx + nx * sp + rand(-15, 15), vy: s.vy + ny * sp + rand(-15, 15), life: rand(.4, .7), max: .7, size: vr * .022 + .5, col: 0xd2d8de, smoke: 1, drag: 1.6 });
+    if (hp < .35 && Math.random() < .3) for (let j = 0; j < 3; j++) { const a = Math.atan2(ny, nx) + rand(-.8, .8), v2 = rand(120, 380); S.parts.push({ x: wx, y: wy, vx: s.vx + Math.cos(a) * v2, vy: s.vy + Math.sin(a) * v2, life: rand(.1, .3), max: .3, size: 2, col: 0xffb060, spark: 1, drag: 3 }); } }
+  if (hp < .35 && !dark && dt > 0 && RCLK > v.ltT + .15 && Math.random() < 1.6 * dt) v.ltT = RCLK + rand(.04, .12); // her lights stutter
+  if (hp < .2 && dt > 0 && RCLK > v.cutT + .3 && Math.random() < .8 * dt) v.cutT = RCLK + rand(.06, .14); // and her drive coughs
+  v.sput = hp >= .2 ? 1 : RCLK < v.cutT ? .2 : .82 + .18 * Math.sin(RCLK * 23 + s.id) * Math.sin(RCLK * 7.3 + s.id * .4);
+}
+function shipFxDraw(s, v, vr, z) {
+  if (!v.hits) return; const ca = Math.cos(s.a), sa = Math.sin(s.a), mn = 3 / Math.max(z, 1e-9);
+  for (const h of v.hits) { const k = 1 - (RCLK - h.t) / .35; if (k <= 0) continue; const wx = s.x + (h.lx * ca - h.ly * sa) * vr, wy = s.y + (h.lx * sa + h.ly * ca) * vr, gs = Math.max(mn * (1 + h.k * 2), vr * (.07 + .2 * h.k)) * (1.5 - k * .5);
+    B.glow.add(wx, wy, vr * .12, gs, gs, 0, k > .6 ? 0xfff0dc : 0xffa860, k * k * (.55 + .45 * h.k), 1.9); }
+  if (s.hp / s.def.hp < .35) for (const q of v.scars) { const wx = s.x + (q.lx * ca - q.ly * sa) * vr, wy = s.y + (q.lx * sa + q.ly * ca) * vr, fl = Math.sin(RCLK * q.f + q.p), gs = Math.max(mn, vr * (.13 + .03 * fl + .015 * Math.sin(RCLK * q.f * 2.3 + q.p)));
+    B.glow.add(wx, wy, vr * .14, gs, gs, 0, fl > .3 ? 0xffc070 : 0xff8a3c, .45 + .15 * fl, 1.4); } // fires burning in the breaches
+}
+
 // a capital ship in her death throes, and the hulk she leaves: one mesh each, reusing the ship's own hull and its dark
 // materials; the throes add fires along the hull and a flicker of the flash material. Nothing is drawn off screen.
 function drawWrecks(z, seen) {
@@ -1197,12 +1250,13 @@ function turrets(s, z, top, R = s.r, v = null) {
       const half = R * .14, tr = Math.max(s.def.static ? 2 : 0, R * .045), n = Math.min(w.guns, 5);
       turretM.box.add(WX(w), WY(w), top, -s.a, half * 2, tr * .9, tr * 2.2, 0x26262c);
       const ca = Math.cos(s.a), sa = Math.sin(s.a);
-      for (let i = 0; i < n; i++) { const k = (i / Math.max(1, n - 1) - .5) * 2 * half; turretM.barrel.add(WX(w) + ca * k, WY(w) + sa * k, top + tr * .5, -w.ang, tr * 2.6, tr * .45, tr * .45, w.ammo <= 0 ? 0x5a4a40 : 0x8f8a80); }
+      const rb = recoilK(w) * tr * .8, rx = -Math.cos(w.ang) * rb, ry = -Math.sin(w.ang) * rb;
+      for (let i = 0; i < n; i++) { const k = (i / Math.max(1, n - 1) - .5) * 2 * half; turretM.barrel.add(WX(w) + ca * k + rx, WY(w) + sa * k + ry, top + tr * .5, -w.ang, tr * 2.6, tr * .45, tr * .45, w.ammo <= 0 ? 0x5a4a40 : 0x8f8a80); }
       continue;
     }
-    const tr = s.def.static ? (D.pd ? (s.type === 'station' ? 6 : 5) : (s.type === 'station' ? 11 : 9)) : D.pd ? R * .045 : R * .075, h = TOP(w), x = WX(w), y = WY(w);
-    turretM.base.add(x, y, h - tr * .08, -w.ang, tr, tr * (D.pd && v && v.is3d ? .35 : .8), tr, dead ? 0x3a3a3a : D.pd ? 0x3a3a40 : 0x4a4844);
-    const bc = dead ? 0x555555 : w.ammo <= 0 ? 0x5a4a40 : 0x6e6a64, ca = Math.cos(w.ang), sa = Math.sin(w.ang);
+    const tr = s.def.static ? (D.pd ? (s.type === 'station' ? 6 : 5) : (s.type === 'station' ? 11 : 9)) : D.pd ? R * .045 : R * .075, h = TOP(w), x0 = WX(w), y0 = WY(w);
+    turretM.base.add(x0, y0, h - tr * .08, -w.ang, tr, tr * (D.pd && v && v.is3d ? .35 : .8), tr, dead ? 0x3a3a3a : D.pd ? 0x3a3a40 : 0x4a4844);
+    const bc = dead ? 0x555555 : w.ammo <= 0 ? 0x5a4a40 : 0x6e6a64, ca = Math.cos(w.ang), sa = Math.sin(w.ang), rb = recoilK(w) * tr * (D.pd ? .25 : .55), x = x0 - ca * rb, y = y0 - sa * rb; // the barrels slam back and run out again
     if (D.pd && v && v.is3d) { turretM.barrel.add(x, y, h + tr * .05, -w.ang, tr * 1.1, tr * .18, tr * .18, bc); continue; } // a low flak blister with a stubby gun
     if (D.pd) turretM.barrel.add(x, y, h + tr * .2, -w.ang, tr * 1.7, tr * .2, tr * .2, bc);
     else for (const k of [-.3, .3]) turretM.barrel.add(x - sa * tr * k, y + ca * tr * k, h + tr * .18, -w.ang, tr * 2, tr * .26, tr * .26, bc); // twin barrels
