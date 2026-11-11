@@ -810,6 +810,7 @@ const fp = (x, y) => { const p = G.p(x, y); return [p[0], p[1]]; };
 export function render() {
   if (!renderer) return;
   if (S.orrery) return renderOrrery(S.orrery);
+  { const n = performance.now(), d = RLAST ? Math.min(.1, (n - RLAST) / 1000) : 1 / 60; RLAST = n; GDT = S.paused ? 0 : d * (S.speed || 1); RCLK += GDT; }
   const { z, px, icons } = sceneFrame();
   renderer.info.reset();
   if (composer && (S.bloom || preset().post)) composer.render(); else renderer.render(scene, camera);
@@ -843,6 +844,9 @@ function pipPass(P) {
   }
 }
 let inPip = false, FLARE_C = null;
+// the render clock: game time as the screen sees it (real frame time × game speed, still while paused). Smoothing and
+// effects spawned from the renderer run on it, so they look the same at 60 Hz, 144 Hz or 240 Hz
+let GDT = 0, RCLK = 0, RLAST = 0;
 function sceneFrame() {
   shipsG.visible = true; rocksG.visible = true;
   const c = S.cam, z = c.z, px = 1 / z, d = camDist();
@@ -917,9 +921,9 @@ function sceneFrame() {
     if (s._ia > 0) icons.push(s);
     if (iconMode) continue;
     // she banks into her turns and settles out of them: the roll follows the turn rate, deeper on the small fast hulls
-    const trMax = s.def.turn * Math.max(s.hf || 1, .15) || 1, bankT = clamp((s.av || 0) / trMax, -1, 1) * (s.def.fighter ? .7 : vr > 30 ? .12 : .3); v.bank = (v.bank || 0) + (bankT - (v.bank || 0)) * (S.paused ? 0 : .07);
+    const trMax = s.def.turn * Math.max(s.hf || 1, .15) || 1, bankT = clamp((s.av || 0) / trMax, -1, 1) * (s.def.fighter ? .7 : vr > 30 ? .12 : .3); if (!inPip) v.bank = (v.bank || 0) + (bankT - (v.bank || 0)) * (1 - Math.exp(-4.4 * GDT)); /* eased in game time, once a frame (the action window shares the hull) */
     v.g.position.set(s.x - O.x, 0, s.y - O.y); v.g.rotation.order = 'YXZ'; v.g.rotation.set(v.bank, -s.a, 0); v.g.scale.setScalar(vr);
-    if (!S.paused && !inPip && Math.abs(s.av || 0) > trMax * .5 && vz > 8 && Math.random() < .35 && !dark) { // the attitude thrusters at bow and stern, puffing against the turn
+    if (!S.paused && !inPip && Math.abs(s.av || 0) > trMax * .5 && vz > 8 && Math.random() < 21 * GDT && !dark) { // the attitude thrusters at bow and stern, puffing against the turn
       const sg = Math.sign(s.av), ca2 = Math.cos(s.a), sa2 = Math.sin(s.a), nx = -sa2 * sg, ny = ca2 * sg; /* the side the bow swings toward */
       for (const [px0, side] of [[.8, -1], [-.7, 1]]) { const bxx = s.x + ca2 * vr * px0 + nx * side * vr * .3, byy = s.y + sa2 * vr * px0 + ny * side * vr * .3; S.parts.push({ x: bxx, y: byy, vx: s.vx - nx * side * 90, vy: s.vy - ny * side * 90, life: .22, max: .22, size: vr * .08 + .4, col: 0xdfe6ee, drag: 3 }); } }
     const st = s.flash > 0 ? 'f' : dark || s.cold ? 'd' : 'n'; /* running cold, she shows no lights */ if (v.st !== st) { v.st = st; v.hull.material = v.mats[st]; for (const m of v.sup) m.material = v.mats[st]; }
@@ -927,14 +931,14 @@ function sceneFrame() {
     v.mats.bell.emissiveIntensity = dark ? 0 : thr * 1.6;
     if (thr > .04 && !dark && !(S.gx && S.gx.plumes === false)) {
       // a fusion torch: a long narrow tail whose length follows the throttle (and a transit burn), a white-hot throat, glare on the stern
-      const L = vr * (1.1 + 3.2 * thr) * burn * (.96 + Math.random() * .08), W = vr * (s.def.fighter ? .3 : .38), ca = Math.cos(s.a), sa = Math.sin(s.a), bx = s.x - ca * vr * (-v.xmin + .05), by = s.y - sa * vr * (-v.xmin + .05);
+      const L = vr * (1.1 + 3.2 * thr) * burn * (1 + .028 * Math.sin(RCLK * 71 + s.id * 1.9) + .012 * Math.sin(RCLK * 157 + s.id * .7)) /* a steady shimmer, not per-frame noise */, W = vr * (s.def.fighter ? .3 : .38), ca = Math.cos(s.a), sa = Math.sin(s.a), bx = s.x - ca * vr * (-v.xmin + .05), by = s.y - sa * vr * (-v.xmin + .05);
       const pc = s.team === 0 ? 0xffb080 : 0xffd0a0, al = Math.min(1, .5 + thr * .5), fl = .93 + .07 * Math.sin(S.time * 41 + s.id) + .03 * Math.sin(S.time * 97 + s.id * 3), nb = Math.max(1, v.bells.length);
       for (const yy of v.bells) { const ox = -sa * yy * vr, oy = ca * yy * vr, pl = L / Math.max(1, nb * .55), pw = W / Math.max(1, nb * .6);
         B.plume.add(bx + ox, by + oy, 0, pl * fl, pw, s.a, pc, al * .9, 1.4); /* the tail */
         B.plume.add(bx + ox, by + oy, 1, pl * .42 * fl, pw * .55, s.a, 0xffffff, al, 2.2); /* the white throat */
         if (vz > 20) B.glow.add(bx + ox - ca * pw * .3, by + oy - sa * pw * .3, 1, pw * 1.2, pw * 1.2, 0, pc, thr * .35, 1.4); } /* and its glare on the stern */
     }
-    if (!S.paused && !inPip && Math.hypot(s.rx, s.ry) > s.def.thrust * .05 && Math.random() < .5 && vz > 6) { const a = Math.atan2(s.ry, s.rx); S.parts.push({ x: s.x - Math.cos(a) * vr * .7, y: s.y - Math.sin(a) * vr * .7, vx: s.vx - Math.cos(a) * 120, vy: s.vy - Math.sin(a) * 120, life: .18, max: .18, size: vr * .15 + .3, col: 0xcfd8e0, drag: 3 }); }
+    if (!S.paused && !inPip && Math.hypot(s.rx, s.ry) > s.def.thrust * .05 && Math.random() < 30 * GDT && vz > 6) { const a = Math.atan2(s.ry, s.rx); S.parts.push({ x: s.x - Math.cos(a) * vr * .7, y: s.y - Math.sin(a) * vr * .7, vx: s.vx - Math.cos(a) * 120, vy: s.vy - Math.sin(a) * 120, life: .18, max: .18, size: vr * .15 + .3, col: 0xcfd8e0, drag: 3 }); }
     turrets(s, z, v.T * vr / 2, vr, v);
   }
   drawWrecks(z, seen);
@@ -977,7 +981,7 @@ function sceneFrame() {
     if (m.thrusting) { const ex = m.emp ? 0x8fd3ff : 0xffc8a0, fl = .9 + .1 * Math.sin(S.time * 53 + m.x), nx = m.x - ca * L * .5, ny = m.y - sa * L * .5, pl = Math.max(44, 30 * px) * (m.nuke ? 1.6 : 1) * fl;
       B.glow.add(nx, ny, 3, Wd * 1.5, Wd * 1.5, 0, ex, .8, 1.8); // glare at the nozzle
       B.plume.add(nx, ny, 2, pl, Math.max(Wd * 1.3, 4), m.a, ex, .95, 1.6); /* the tail */ B.plume.add(nx, ny, 2.01, pl * .45, Math.max(Wd * .7, 2.5), m.a, 0xffffff, 1, 2.4); /* the white throat */
-      if (!S.paused && !inPip && Math.random() < .6 && px < 40) S.parts.push({ x: m.x - Math.cos(m.a) * 8, y: m.y - Math.sin(m.a) * 8, vx: m.vx * .15 + rand(-6, 6), vy: m.vy * .15 + rand(-6, 6), life: m.nuke ? 2.2 : 1.1, max: m.nuke ? 2.2 : 1.1, size: (m.nuke ? 9 : 4) + px * .6, col: 0x9a948c, smoke: 1, drag: 1.5 }); }
+      if (!S.paused && !inPip && Math.random() < 36 * GDT && px < 40) S.parts.push({ x: m.x - Math.cos(m.a) * 8, y: m.y - Math.sin(m.a) * 8, vx: m.vx * .15 + rand(-6, 6), vy: m.vy * .15 + rand(-6, 6), life: m.nuke ? 2.2 : 1.1, max: m.nuke ? 2.2 : 1.1, size: (m.nuke ? 9 : 4) + px * .6, col: 0x9a948c, smoke: 1, drag: 1.5 }); }
   }
   for (const f of S.flashes) { const k = f.life / f.max, g = 1 - k, e = 1 - (1 - g) * (1 - g), R = Math.max(f.r * 2, (f.px || 0) * px) * (f.fire ? .6 + e * .6 : 1); if (f._rot == null) f._rot = (f.x * 5.3 + f.y * 2.9) % TAU;
     B.sglow.add(f.x, f.y, 6, R * (f.fire ? .8 : 1.2), R * (f.fire ? .8 : 1.2), 0, f.blue ? 0xb0dcff : f.col || 0xffd7a0, f.fire ? k * .9 : k * k, 2);
@@ -1118,10 +1122,11 @@ function drawWrecks(z, seen) {
     if (!on) { if (v) v.g.visible = false; continue; }
     if (!v) { v = makeShip({ type: w.type, team: w.origTeam ?? w.team, cmdr: w.cmdr, vt: w.vt, def: w.def }); v.g.rotation.order = 'YXZ'; shipVis.set(key, v); }
     v.g.visible = true; v.g.position.set(w.x - O.x, 0, w.y - O.y); v.g.rotation.set(w.roll, -w.a, 0); v.g.scale.setScalar(vr);
-    const st = !w.hulk && Math.random() < .07 ? 'f' : 'd'; if (v.st !== st) { v.st = st; v.hull.material = v.mats[st]; for (const m of v.sup) m.material = v.mats[st]; }
+    if (!w.hulk && !inPip && RCLK > (v.fT || 0) + .05 && Math.random() < 4.2 * GDT) v.fT = RCLK + 1 / 45; const st = !w.hulk && RCLK < (v.fT || 0) ? 'f' : 'd'; /* a flicker that lasts a beat at any refresh rate */ if (v.st !== st) { v.st = st; v.hull.material = v.mats[st]; for (const m of v.sup) m.material = v.mats[st]; }
     if (v.mats.bell) v.mats.bell.emissiveIntensity = 0;
     if (!w.hulk) { const k = (S.time - w.t0) / w.T, ca = Math.cos(w.a), sa = Math.sin(w.a);
-      for (let i = 0; i < 3; i++) { const lx = (Math.random() * 1.8 - .9) * vr, gx = w.x + ca * lx, gy = w.y + sa * lx, gs = vr * (.25 + Math.random() * .3) * (1 + k); B.glow.add(gx, gy, vr * .2, gs, gs, 0, Math.random() < .5 ? 0xff8a3c : 0xffc070, .35 + .4 * k, 1.4); }
+      if (!v.fires) v.fires = [0, 1, 2, 3].map(() => ({ x: Math.random() * 1.8 - .9, y: (Math.random() - .5) * .3, p: Math.random() * TAU, f: 5 + Math.random() * 7, c: Math.random() < .5 ? 0xff8a3c : 0xffc070 })); // fires that stay where they broke out, and flicker
+      for (const F of v.fires) { const lx = F.x * vr, ly = F.y * vr, gx = w.x + ca * lx - sa * ly, gy = w.y + sa * lx + ca * ly, gs = vr * (.4 + .1 * Math.sin(RCLK * F.f + F.p) + .05 * Math.sin(RCLK * F.f * 2.3 + F.p * 1.7)) * (1 + k); B.glow.add(gx, gy, vr * .2, gs, gs, 0, F.c, .35 + .4 * k, 1.4); }
       if (k > .85) { const gs = vr * 3 * (k - .85) / .15; B.glow.add(w.x, w.y, vr * .3, gs, gs, 0, 0xfff0d0, .8, 1.8); } } // the reactor going
   }
 }

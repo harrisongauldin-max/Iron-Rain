@@ -15,8 +15,10 @@ import { battleTick } from './battle.js';
 import { ffStop } from './tactics.js';
 import { initGfxMenu, toggleGfx } from './gfxmenu.js';
 import { groundFrame } from './groundview.js';
+import { snap, lerpIn, lerpOut } from './interp.js';
 
 const STEP = 1 / 60;
+let lastSt = STEP; // the length of the last sim step, for drawing between steps (interp.js)
 let last = performance.now(), acc = 0, fpsAcc = 0, fpsN = 0;
 
 async function boot() {
@@ -132,13 +134,13 @@ function frame(now) {
   fpsAcc += dt; fpsN++; if (fpsAcc > 1) { S.fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
   try {
     if (S.gameState === 'ground') { groundFrame(dt); requestAnimationFrame(frame); return; } // the ground war draws itself (groundview.js)
-    if (S.gameState === 'play' && !S.paused) { acc += dt * S.speed; let n = 0; const cap = S.mode === 'battle' ? (S.stepCap || 16) : 10; const st = S.mode === 'battle' && S.ffStep || STEP, t0 = performance.now(); while (acc >= st && n < cap) { update(st); acc -= st; n++; if (S.ffStep && performance.now() - t0 > 11) { acc = 0; break; } } if (n >= cap) acc = 0; } // closing speed gets a time budget: the view stays smooth, the clock runs as fast as the machine allows
+    if (S.gameState === 'play' && !S.paused) { acc += dt * S.speed; let n = 0; const cap = S.mode === 'battle' ? (S.stepCap || 16) : 10; const st = S.mode === 'battle' && S.ffStep || STEP, t0 = performance.now(); lastSt = st; while (acc >= st && n < cap) { snap(); update(st); acc -= st; n++; if (S.ffStep && performance.now() - t0 > 11) { acc = 0; break; } } if (n >= cap) acc = 0; } // closing speed gets a time budget: the view stays smooth, the clock runs as fast as the machine allows
     if (S.gameState === 'play') { updUI(dt); if (S.mode === 'battle') battleTick(dt); }
     else if (S.gameState === 'strat') { stratFrame(dt); render(); requestAnimationFrame(frame); return; }
-    else if (S.gameState === 'menu') { acc += dt; let n = 0; while (acc >= STEP && n < 4) { update(STEP); acc -= STEP; n++; } if (n >= 4) acc = 0; if (S.ships.length < 8 || S.time > 80) attract();
-      camUpdate(dt); if (now >= MR.next) { render(); MR.after = true; MR.next = MR.cost > 120 ? now + 1500 : 0; } requestAnimationFrame(frame); return; }
-    else if (S.gameState === 'over') { acc += dt * .5; let n = 0; while (acc >= STEP && n < 4) { update(STEP); acc -= STEP; n++; } }
-    camUpdate(dt); render(); fitMini(); drawMini($('mini'), MMS);
+    else if (S.gameState === 'menu') { acc += dt; let n = 0; lastSt = STEP; while (acc >= STEP && n < 4) { snap(); update(STEP); acc -= STEP; n++; } if (n >= 4) acc = 0; if (S.ships.length < 8 || S.time > 80) attract();
+      lerpIn(acc / lastSt, lastSt); try { camUpdate(dt); if (now >= MR.next) { render(); MR.after = true; MR.next = MR.cost > 120 ? now + 1500 : 0; } } finally { lerpOut(); } requestAnimationFrame(frame); return; }
+    else if (S.gameState === 'over') { acc += dt * .5; let n = 0; lastSt = STEP; while (acc >= STEP && n < 4) { snap(); update(STEP); acc -= STEP; n++; } }
+    lerpIn(acc / lastSt, lastSt); try { camUpdate(dt); render(); fitMini(); drawMini($('mini'), MMS); } finally { lerpOut(); } // drawn between sim steps, so motion is smooth at any refresh rate
   } catch (err) { console.error(err); }
   requestAnimationFrame(frame);
 }
