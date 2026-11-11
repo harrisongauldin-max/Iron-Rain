@@ -209,22 +209,24 @@ const BUILD = {
     if (st.patches) patches(K, R, -.9, .9, body, .11, 12);
     K.top = top; return [x0, x1];
   },
-  pandora(K, st, R) { // the Julii flagship: "a black, hulking monster", a heavy dreadnought deeper than it is wide, crescent-walled flanks over the gun decks, a brutal ram prow, a high citadel bridge
-    const s = st.slim, x0 = -1.12, x1 = 1.3, P = 'oct';
-    K.loft(SLOT.hull, [{ x: x0, w: .24 * s, h: .19, b: .2 }, { x: -.8, w: .3 * s, h: .24, b: .2 }, { x: -.1, w: .32 * s, h: .26, b: .2 }, { x: .55, w: .3 * s, h: .24, b: .2 }, { x: .95, w: .22 * s, h: .18, b: .25 }, { x: 1.18, w: .1 * s, h: .09, b: .3 }, { x: 1.28, w: .03, h: .03 }], x0, x1);
+  pandora(K, st, R) { // the Julii flagship: "a black, hulking monster" — heavy, but a predator's lines: a long low hull with a knife-edged flank, a raked ram prow, swept armour curtains over the gun decks, a lean citadel aft
+    const s = st.slim, x0 = -1.12, x1 = 1.34, P = 'blade';
+    K.loft(SLOT.hull, [{ x: x0, w: .22 * s, h: .13, p: P }, { x: -.8, w: .3 * s, h: .16, p: P }, { x: -.2, w: .31 * s, h: .165, p: P }, { x: .4, w: .27 * s, h: .15, p: P }, { x: .85, w: .18 * s, h: .11, p: P }, { x: 1.15, w: .08 * s, h: .06, p: P }, { x: 1.3, w: .015, h: .015, p: P }], x0, x1);
     const body = K.body;
-    // the crescent walls: tall armour curtains along each flank, convex outward, standing proud of the gun decks
-    for (const side of [-1, 1]) for (let i = 0; i < 5; i++) { const x = -.75 + i * .33, sx = at(body, x); K.add(SLOT.armour, loft(smooth([{ x: x - .14, w: .02, h: sx.h * .55, b: .45 }, { x: x, w: .045, h: sx.h * .62, b: .45 }, { x: x + .14, w: .02, h: sx.h * .55, b: .45 }]), x0, x1).translate(0, .02, side * (sx.w + .03))); }
-    K.loft(SLOT.armour, [{ x: -.95, w: .2 * s, h: .05, y: .24, b: .2 }, { x: .3, w: .22 * s, h: .05, y: .25, b: .2 }, { x: .85, w: .1 * s, h: .03, y: .2, b: .2 }], x0, x1);   // deck armour
-    K.loft(SLOT.dark, [{ x: .8, w: .14 * s, h: .12, b: .1 }, { x: 1.1, w: .09 * s, h: .07, b: .1 }, { x: 1.32, w: .01, h: .01 }], x0, x1);                                        // the ram prow, black
-    gunDecks(K, body, -.85, .6, .06, 16, 2, .5, .5); gunDecks(K, body, -.85, .6, -.08, 16, 2, .5, .5);                                                                                // 32 houses of 2 a side in two tiers
-    for (const side of [-1, 1]) { const sx = at(body, .3); K.add(SLOT.dark, box(.3, -.16, side * sx.w * .99, .22, .06, .01)); }                                                   // hangar mouths, low
-    const top = bridge(K, -.5, .29, .14, .12, 4);                                                                                                                                 // a high citadel
-    for (let i = 0; i < 8; i++) { const x = -.9 + i * .22, sx = at(body, x); K.add(SLOT.armour, box(x, sx.h + .004, 0, .012, .008, sx.w * 1.1)); }
-    engines(K, x0, 0, [[.07, .13 * s], [.07, -.13 * s], [-.07, .13 * s], [-.07, -.13 * s], [0, 0]], .08, .17);
-    for (const side of [-1, 1]) stripe(K, body, .6, 1.05, side, .4);
-    navLights(K, -1.0, .3 * s, .1);
-    if (st.patches) patches(K, R, -.9, .7, body, .2, 10);
+    // the armour curtains: low swept blades along each flank, each raked forward, standing just proud of the gun decks
+    for (const side of [-1, 1]) for (let i = 0; i < 4; i++) { const x = -.7 + i * .36, sx = at(body, x); K.add(SLOT.armour, loft(smooth([{ x: x - .2, w: .012, h: sx.h * .3, b: .45 }, { x: x + .02, w: .03, h: sx.h * .5, b: .45 }, { x: x + .22, w: .008, h: sx.h * .25, b: .45 }]), x0, x1).translate(0, .01, side * (sx.w + .02))); }
+    K.loft(SLOT.armour, [{ x: -.95, w: .17 * s, h: .03, y: .155, p: P }, { x: .2, w: .18 * s, h: .032, y: .16, p: P }, { x: .8, w: .08 * s, h: .02, y: .12, p: P }], x0, x1);        // a long low spine of deck armour
+    K.loft(SLOT.dark, [{ x: .7, w: .1 * s, h: .07, p: P }, { x: 1.1, w: .06 * s, h: .04, p: P }, { x: 1.34, w: .006, h: .006, p: P }], x0, x1);                                     // the ram prow, black, drawn out to a point
+    K.loft(SLOT.armour, [{ x: .3, w: .14 * s, h: .04, y: -.12, p: P }, { x: .9, w: .1 * s, h: .04, y: -.08, p: P }, { x: 1.2, w: .03, h: .015, y: -.04, p: P }], x0, x1, false);   // keel blade under the prow
+    gunDecks(K, body, -.85, .5, .035, 16, 2, .42, .5); gunDecks(K, body, -.85, .5, -.055, 16, 2, .42, .5);                                                                          // two tiers of small houses
+    for (const side of [-1, 1]) { const sx = at(body, .1); K.add(SLOT.dark, box(.1, -.1, side * sx.w * .99, .24, .045, .01)); }                                                      // hangar mouths, low
+    const top = bridge(K, -.62, .185, .1, .07, 3);                                                                                                                                  // a lean citadel
+    for (let i = 0; i < 9; i++) { const x = -.95 + i * .2, sx = at(body, x); K.add(SLOT.armour, box(x, sx.h + .003, 0, .01, .006, sx.w * 1.0)); }
+    for (const side of [-1, 1]) K.add(SLOT.hull, fin(-.78, -1.02, .0, .18 * s, .36, .012, side));                                                                                    // short swept fins aft
+    engines(K, x0, 0, [[.05, .12 * s], [.05, -.12 * s], [-.05, .12 * s], [-.05, -.12 * s], [0, 0]], .07, .16);
+    for (const side of [-1, 1]) stripe(K, body, -.6, .9, side, .25);
+    navLights(K, -1.0, .28 * s, .08);
+    if (st.patches) patches(K, R, -.9, .6, body, .14, 8);
     K.top = top; return [x0, x1];
   },
   invictus(K, st, R) { // the Augustus flagship: the heaviest ship of its fleet, a broad slab a size up from the Pax, gilt-lined, a lion's crest of armour over the bridge, ten engines
