@@ -549,10 +549,14 @@ function aiWar(f, D) {
     const theirs = Object.values(C.worlds).filter(w => w.owner === o); if (!theirs.length) continue;
     if (!theirs.some(w => mine.some(m => travel(m.id, w.id) <= 5))) continue; // nothing within reach worth a war
     const edge = warEdge(f, o), hate = clamp(-opinionOf(f, o) / 100, 0, 1);
-    const chance = (atWarWith(o).length ? 1 : 0) + (capLostOf(o) ? 1 : 0) + ((C.weary[o] || 0) > 30 ? 1 : 0);
+    // the chance a patient ruler waits for: a power at war elsewhere, its capital lost, its people tired. The Republic's
+    // war with the Remnant is the given of the campaign, so against the player it counts only once that war tells
+    const tired = (C.weary[o] || 0) > (human(o) ? 40 : 30), chance = (atWarWith(o).length && (!human(o) || tired) ? 1 : 0) + (capLostOf(o) ? 1 : 0) + (tired ? 1 : 0);
     if (D.truce === 0 && !chance) continue; // a patient ruler waits for the moment
     const need = D.sup * 1.15 * (fronts ? 1.7 : 1) * (1 - hate * .2) * (chance ? .9 : 1);
     if (edge < need) continue;
+    // the player hears of it first: once, when a power at peace begins to look for its chance
+    C.warWarn = C.warWarn || {}; if (human(o) && !C.warWarn[f]) { C.warWarn[f] = C.turn; note(`Our agents report that ${(RU.actingOf(f) || { name: 'the ruler of ' + BLOC_NAME[f] }).name.split(',')[0]} is counting our fleets. ${BLOC_NAME[f]} may not keep the peace much longer.`, 'bad', CAPITAL[f], { title: 'A peace in doubt', kind: 'war' }); continue; }
     if (rnd() < .05 * D.ops * (1 + hate) * (1 + chance * .6)) { declareWar(f, o); C.aiStats = C.aiStats || {}; C.aiStats.declared = (C.aiStats.declared || 0) + 1; return; }
   }
 }
