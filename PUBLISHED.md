@@ -4,6 +4,7 @@ Each publish of `main` to the claude.ai artifact (slug `fc8b77cf-d69b-4cca-9154-
 
 | Artifact version | Date | Commit | What changed |
 |---|---|---|---|
+| 1794413296-e276 | 2026-11-11 | 5dbd8f9 | new `js/interp.js`, `js/main.js`, `js/render.js`: ship motion drawn between sim steps (no judder at 144/240 Hz or slow speed); bank easing, thruster puffs, missile smoke, plume shimmer and wreck fires run on a game-time render clock instead of per-frame constants. |
 | 1794413063-d029 | 2026-11-11 | 7bfa971 | `js/hulls.js`: Pandora re-lined — long blade-section hull, raked ram prow, low swept armour curtains, lean citadel. |
 | 1794412905-7a3a | 2026-11-11 | 491050a | `js/hulls.js`, `js/render.js`: the named dreadnoughts — Pax/Vanguard, Invictus, Pandora as hull variants beside the Annihilo, chosen by the commanding officer. |
 | 1794412173-3298 | 2026-11-11 | 0d2ef39 | `js/hulls.js`: no city blocks on ships — the moonBreaker's back is layered armour decks with hangar tiers; the city() kit removed. |
