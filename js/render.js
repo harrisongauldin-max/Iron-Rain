@@ -430,6 +430,11 @@ class Inst {
     e[o + 12] = x - O.x; e[o + 13] = h; e[o + 14] = y - O.y; e[o + 15] = 1;
     if (col != null && this.m.instanceColor) { const v = lin(col), a = this.m.instanceColor.array; a[i * 3] = v[0]; a[i * 3 + 1] = v[1]; a[i * 3 + 2] = v[2]; }
   }
+  addM(f, x, y, h, col) { // f: a THREE.Matrix4 holding the whole basis (rotation × scale); x, y world, h height
+    if (this.n >= this.cap) return; const i = this.n++, e = this.m.instanceMatrix.array, o = i * 16, q = f.elements;
+    for (let k = 0; k < 12; k++) e[o + k] = q[k]; e[o + 12] = x - O.x; e[o + 13] = h; e[o + 14] = y - O.y; e[o + 15] = 1;
+    if (col != null && this.m.instanceColor) { const v = lin(col), a = this.m.instanceColor.array; a[i * 3] = v[0]; a[i * 3 + 1] = v[1]; a[i * 3 + 2] = v[2]; }
+  }
   end() { this.m.count = this.n; this.m.instanceMatrix.needsUpdate = true; if (this.m.instanceColor) this.m.instanceColor.needsUpdate = true; this.n = 0; }
 }
 
@@ -538,7 +543,7 @@ export async function initRender() {
   for (const b of Object.values(B)) scene.add(b.mesh);
   buildPost();
   setBloom(S.bloom);
-  window.__BODIES = BODIES; window.__CAM = { projectTo, toWorld, footprint }; window.__R = { scene, B, orbitL, PUNCH, rocksG, shipsG, bodiesG, turretM, debrisM, bgMesh, get renderer() { return renderer; }, get bloom() { return bloomPass; }, get gen() { return GEN; }, get shipVis() { return shipVis; } };
+  window.__BODIES = BODIES; window.__CAM = { projectTo, toWorld, footprint }; window.__R = { scene, B, orbitL, PUNCH, rocksG, shipsG, bodiesG, turretM, debrisM, bgMesh, get renderer() { return renderer; }, get bloom() { return bloomPass; }, get gen() { return GEN; }, get shipVis() { return shipVis; }, mountClear, clearAt };
   return renderer;
 }
 function sizeOverlay() { ov.width = Math.round(S.W * ODPR); ov.height = Math.round(S.H * ODPR); ov.style.width = S.W + 'px'; ov.style.height = S.H + 'px'; }
@@ -971,7 +976,7 @@ function sceneFrame() {
     if (s._ia > 0) icons.push(s);
     if (iconMode) continue;
     // banking, attitude and side thrusters, recoil, hits and damage: shipFx, once a frame (the action window shares the hull)
-    if (v.kr === undefined) fxInit(v); if (!inPip) { shipFx(s, v, vr, vz, dark); thrusters(s, v, vr, vz, dark); }
+    if (v.hits === undefined) fxInit(v); if (!inPip) { shipFx(s, v, vr, vz, dark); thrusters(s, v, vr, vz, dark); }
     v.g.position.set(s.x - O.x, 0, s.y - O.y); v.g.rotation.order = 'YXZ'; v.g.rotation.set(v.bank + v.kr, -s.a + v.ky, v.pitch + v.kp); v.g.scale.setScalar(vr);
     shipFxDraw(s, v, vr, z);
     const st = RCLK < v.hvT ? 'f' : dark || s.cold || RCLK < v.ltT ? 'd' : 'n'; /* the hull flashes only on a heavy blow; running cold, or with her power failing, she shows no lights */ if (v.st !== st) { v.st = st; v.hull.material = v.mats[st]; for (const m of v.sup) m.material = v.mats[st]; }
@@ -1179,6 +1184,21 @@ function scarAt(v, th, out) { // a point on the hull's skin toward local bearing
 // Attitude jets fire when her turn speeds up or slows down, not all through a steady turn, at bow and stern on the
 // skin, blowing outward; side thrusters fire on the flank (or the bow, braking) opposite the push. Nothing fires off
 // the hull, nothing blows inward through it.
+// where a round's line meets the hull AS DRAWN, for the sim's hit effects (it judges hits on a circle; a long thin hull
+// fills little of it). (x, y) is the sim's hit point, (dx, dy) the round's path relative to the hull. Returns [x, y] on
+// the skin, or null when the hull isn't drawn (off screen, a station) and the sim keeps its own point.
+S.skinAt = (o, x, y, dx, dy) => {
+  const v = shipVis.get(o.id); if (!v || !v.g || o.def.static) return null; hullX(v);
+  const R = vrOf(o), ca = Math.cos(o.a), sa = Math.sin(o.a), hx = ((x - o.x) * ca + (y - o.y) * sa) / R, hy = (-(x - o.x) * sa + (y - o.y) * ca) / R;
+  const inside = (lx, ly) => lx >= v.xlo && lx <= v.xmax && Math.abs(ly) <= skinW(v, lx), W = (lx, ly) => [o.x + (lx * ca - ly * sa) * R, o.y + (lx * sa + ly * ca) * R];
+  const d = Math.hypot(dx, dy); let ux = 1, uy = 0; if (d > 0) { ux = (dx * ca + dy * sa) / d; uy = (-dx * sa + dy * ca) / d; }
+  if (d > 0) { const span = Math.max(v.xmax - v.xlo, .5) * 1.4, N = 72, st = 2 * span / N;
+    for (let i = 0; i <= N; i++) { const t = -span + st * i; if (!inside(hx + ux * t, hy + uy * t)) continue; // the first point of her inside, coming along the round's path
+      let a = t - st, b = t; for (let k = 0; k < 7; k++) { const m = (a + b) / 2; if (inside(hx + ux * m, hy + uy * m)) b = m; else a = m; } return W(hx + ux * b, hy + uy * b); } }
+  // the path misses the hull as drawn (the circle caught it): the round lands on the skin nearest its closest approach
+  const tc = -(hx * ux + hy * uy), cx = hx + ux * tc, cy = hy + uy * tc, lx = clamp(cx, v.xlo * .92, v.xmax * .92);
+  return W(lx, (cy < 0 ? -1 : 1) * skinW(v, lx));
+};
 function hullX(v) { if (v.xmax === undefined) { const g = v.hull && v.hull.geometry; if (g) { if (!g.boundingBox) g.computeBoundingBox(); v.xmax = g.boundingBox.max.x; v.xlo = g.boundingBox.min.x; } else { v.xmax = 1; v.xlo = v.xmin ?? -1; } } }
 const skinW = (v, lx) => Math.max(.03, v.hw ? v.hw(lx) : .18);
 function jet(s, v, vr, lx, ly, dx, dy, k) { // a cold-gas puff from the hull's skin at (lx, ly), blowing along local (dx, dy)
@@ -1226,9 +1246,14 @@ function shipFx(s, v, vr, vz, dark) {
     v.krv -= Math.sin(rel) * J * .05 * w0; /* she heels away from a broadside */ v.kpv += Math.max(0, Math.cos(rel)) * J * .035 * w0; /* and her bow lifts to a spinal gun */ v.kyv -= Math.sin(rel) * J * .008 * w0; }
   // the enemy's
   const hs = s.hitSum || 0, dH = v._hs === undefined || stale ? 0 : hs - v._hs; v._hs = hs;
-  if (dH > 0) { const f = dH / s.def.hp, k = Math.min(1, f * 12), th = s.hitX != null ? Math.atan2(s.hitY - s.y, s.hitX - s.x) - s.a : Math.random() * TAU, h = scarAt(v, th, { t: RCLK, k });
+  if (dH > 0) { const f = dH / s.def.hp, k = Math.min(1, f * 12), th = s.hitX != null ? Math.atan2(s.hitY - s.y, s.hitX - s.x) - s.a : Math.random() * TAU, h = { t: RCLK, k };
+    if (s.hitX != null) { hullX(v); const dx = s.hitX - s.x, dy = s.hitY - s.y, lx = (dx * ca + dy * sa) / vr, ly = (-dx * sa + dy * ca) / vr; // where it landed, on her skin as drawn (S.skinAt)
+      if (lx >= v.xlo - .05 && lx <= v.xmax + .05 && Math.abs(ly) <= skinW(v, lx) * 1.2 + .02) { h.lx = lx; h.ly = ly; } else scarAt(v, th, h); } else scarAt(v, th, h);
+    h.hz = v.deck ? Math.max(.02, v.deck(clamp(h.lx, v.xlo ?? -1, v.xmax ?? 1), h.ly * .9) * .6) : .12; // up her side, not on the waterline of the plane
     v.hits.push(h); if (v.hits.length > 6) v.hits.shift();
-    const sg = Math.random() < .5 ? -1 : 1; v.krv += sg * .05 * k * w0; v.kyv += (Math.random() - .5) * .03 * k * w0; v.kpv += (Math.random() - .5) * .02 * k * w0;
+    // she is knocked away from the blow: a hit on one flank rolls her off it, and one forward or aft of her middle slews her
+    const sd = h.ly < 0 ? -1 : 1, lever = clamp(h.lx, -1, 1);
+    v.krv -= sd * (.035 + .02 * Math.random()) * k * w0; v.kyv += sd * lever * .03 * k * w0; v.kpv += (h.lx > 0 ? -1 : 1) * .008 * k * w0 * (Math.abs(lever) > .5 ? 1 : 0);
     if (f > .06) v.hvT = RCLK + .09;
     if (f > .015) { const sc = { lx: h.lx, ly: h.ly, p: Math.random() * TAU, f: 6 + Math.random() * 6 }; if (v.scars.length < 5) v.scars.push(sc); else v.scars[(Math.random() * 5) | 0] = sc; }
     if (parts) { const wx = s.x + (h.lx * ca - h.ly * sa) * vr, wy = s.y + (h.lx * sa + h.ly * ca) * vr, a0 = th + s.a, n = 2 + Math.round(k * 10);
@@ -1256,7 +1281,7 @@ function shipFx(s, v, vr, vz, dark) {
 function shipFxDraw(s, v, vr, z) {
   if (!v.hits) return; const ca = Math.cos(s.a), sa = Math.sin(s.a), mn = 3 / Math.max(z, 1e-9);
   for (const h of v.hits) { const k = 1 - (RCLK - h.t) / .35; if (k <= 0) continue; const wx = s.x + (h.lx * ca - h.ly * sa) * vr, wy = s.y + (h.lx * sa + h.ly * ca) * vr, gs = Math.max(mn * (1 + h.k * 2), vr * (.07 + .2 * h.k)) * (1.5 - k * .5);
-    B.glow.add(wx, wy, vr * .12, gs, gs, 0, k > .6 ? 0xffd8b0 : 0xff9a50, k * k * (.35 + .4 * h.k), 1.7); } // the scorch on her skin (the strike's own flash is the ring's, in the fx pass)
+    B.glow.add(wx, wy, vr * (h.hz ?? .12), gs, gs, 0, k > .6 ? 0xffd8b0 : 0xff9a50, k * k * (.35 + .4 * h.k), 1.7); } // the scorch on her skin (the strike's own flash is the ring's, in the fx pass)
   if (s.hp / s.def.hp < .35) for (const q of v.scars) { const wx = s.x + (q.lx * ca - q.ly * sa) * vr, wy = s.y + (q.lx * sa + q.ly * ca) * vr, fl = Math.sin(RCLK * q.f + q.p), gs = Math.max(mn, vr * (.13 + .03 * fl + .015 * Math.sin(RCLK * q.f * 2.3 + q.p)));
     B.glow.add(wx, wy, vr * .14, gs, gs, 0, fl > .3 ? 0xffc070 : 0xff8a3c, .45 + .15 * fl, 1.4); } // fires burning in the breaches
 }
@@ -1280,7 +1305,63 @@ function drawWrecks(z, seen) {
   }
 }
 // turrets, batteries and missile tubes on top of a hull
+// ---------------------------------------------------------------- turrets on a hull that rolls, pitches and kicks
+// A ship's guns ride her hull: each mount is placed in the hull's own frame, so when she banks, heels to a broadside
+// or shudders from a hit, her turrets go with her. The barbette sits on the highest deck under it and reaches down to
+// the lowest, so it never floats off a chamfer or sinks into a raised deck; and each barrel lifts as it trains over
+// the hull, by a clearance table worked out once per hull shape and mount (72 bearings), so it never passes through
+// the superstructure, the deck, or a tower: the way a ship's guns elevate to fire across her own deck.
+const _TM = new THREE.Matrix4(), _TT = new THREE.Matrix4(), _TZ = new THREE.Matrix4(), _TF = new THREE.Matrix4(), _TP = new THREE.Vector3(), _TS = new THREE.Vector3();
+const CLR = new WeakMap(), CLR_N = 72;
+function mountClear(v, lx, ly, trU, lenU, axU, lat) {
+  const k0 = v.hw || v; let M = CLR.get(k0); if (!M) CLR.set(k0, M = new Map());
+  const key = lx.toFixed(3) + ',' + ly.toFixed(3) + ',' + trU.toFixed(4) + ',' + lenU.toFixed(4) + ',' + axU.toFixed(4); let c = M.get(key); if (c) return c;
+  const deck = (x, y) => v.deck(x, y);
+  let hi = deck(lx, ly), lo = hi; for (let i = 0; i < 8; i++) { const a = i / 8 * TAU, d = deck(lx + Math.cos(a) * trU * 1.05, ly + Math.sin(a) * trU * 1.05); if (d > hi) hi = d; if (d < lo) lo = d; }
+  lo = Math.max(lo, hi - trU * 1.5);
+  const ha = hi + axU, el = new Float32Array(CLR_N);
+  for (let i = 0; i < CLR_N; i++) { const f = i / CLR_N * TAU, dx = Math.cos(f), dy = -Math.sin(f), px0 = Math.sin(f), py0 = Math.cos(f); let e = 0;
+    for (const off of lat) for (let j = 1; j <= 8; j++) { const t = trU * .9 + (lenU * 1.1 - trU * .9) * j / 8, top = deck(lx + dx * t + px0 * off, ly + dy * t + py0 * off) + trU * .14;
+      if (top > ha) e = Math.max(e, Math.atan2(top - ha, t)); }
+    el[i] = e > 0 ? Math.min(1.15, e * 1.08 + .03) : 0; }
+  const w = new Float32Array(CLR_N); for (let i = 0; i < CLR_N; i++) w[i] = Math.max(el[(i + CLR_N - 1) % CLR_N], el[i], el[(i + 1) % CLR_N]); // a barrel between bearings clears both
+  M.set(key, c = { hi, lo, el: w }); return c;
+}
+const clearAt = (c, yaw) => { if (!c.el) return 0; let f = (yaw % TAU + TAU) % TAU / TAU * CLR_N; const i = Math.floor(f) % CLR_N, j = (i + 1) % CLR_N; f -= Math.floor(f); return c.el[i] * (1 - f) + c.el[j] * f; };
 function turrets(s, z, top, R = s.r, v = null) {
+  if (R * z < 7 || !onScr(s.x, s.y, R * z * 2)) return;
+  if (!v || !v.g || s.def.static) return turretsFlat(s, z, top, R, v);
+  const mk = s.def.vr0 ? R / s.def.vr0 : 1, c0 = Math.cos(s.a), s0 = Math.sin(s.a), hw = v.hw, is3d = !!v.is3d;
+  const loc = w => { let lx = ((w.mx - s.x) * c0 + (w.my - s.y) * s0) * mk / R, ly = (-(w.mx - s.x) * s0 + (w.my - s.y) * c0) * mk / R; if (hw) { const h = hw(lx), [lo, hi] = v.band || [0, .62], sg = ly < 0 ? -1 : 1, a = Math.abs(ly); ly = sg * Math.max(lo * h, Math.min(hi * h, a)); } return [lx, ly]; };
+  _TM.makeRotationFromEuler(v.g.rotation); const hy = v.g.rotation.y, topU = top / R;
+  const put = (inst, lx, lh, ly, yaw, elev, sx, sy, sz, col) => { _TP.set(lx * R, lh * R, ly * R).applyMatrix4(_TM); _TT.makeRotationY(yaw); if (elev) _TT.multiply(_TZ.makeRotationZ(elev)); _TT.scale(_TS.set(sx, sy, sz)); _TF.multiplyMatrices(_TM, _TT); inst.addM(_TF, s.x + _TP.x, s.y + _TP.z, _TP.y, col); };
+  const col = hex(S.teamc[s.team].main), dead = disabled(s);
+  for (const w of s.weapons) {
+    const D = w.def;
+    if (D.kind === 'missile') { const sz = R * .08, [lx, ly] = loc(w), h = v.deck ? v.deck(lx, ly) : topU; put(turretM.box, lx, h - sz * .1 / R, ly, 0, 0, sz, sz * .32, sz * .8, D.nuke ? 0x5a1a14 : D.emp ? 0x1a3a5a : 0x1a1a1e); continue; } // a flush silo hatch
+    if (D.turn === 0) continue;
+    if (D.battery && is3d) continue; // broadside rail guns: they are the gun houses built along the hull's flanks
+    const yaw = -w.ang - hy; // her bearing on the hull: she keeps her aim while the hull kicks under her
+    if (D.battery) {
+      const half = R * .14, tr = R * .045, n = Math.min(w.guns, 5), [lx, ly] = loc(w), rb = recoilK(w) * tr * .8;
+      put(turretM.box, lx, topU, ly, 0, 0, half * 2, tr * .9, tr * 2.2, 0x26262c);
+      for (let i = 0; i < n; i++) { const k = (i / Math.max(1, n - 1) - .5) * 2 * half / R; put(turretM.barrel, lx + k - Math.cos(yaw) * rb / R, topU + tr * .5 / R, ly + Math.sin(yaw) * rb / R, yaw, 0, tr * 2.6, tr * .45, tr * .45, w.ammo <= 0 ? 0x5a4a40 : 0x8f8a80); }
+      continue;
+    }
+    const tr = D.pd ? R * .045 : R * .075, trU = tr / R, [lx, ly] = loc(w), flak = D.pd && is3d;
+    const lenM = D.pd ? (flak ? 1.1 : 1.7) : 2, pivM = D.pd ? (flak ? .05 : .2) : .18, thM = D.pd ? (flak ? .18 : .2) : .26;
+    const C = v.deck ? mountClear(v, lx, ly, trU, lenM * trU, (pivM + thM * .5) * trU, D.pd ? [0] : [-.3 * trU, .3 * trU]) : { hi: topU, lo: topU, el: null };
+    const sy0 = tr * (flak ? .35 : .8); // the barbette, from the lowest deck under it to its own height above the highest
+    put(turretM.base, lx, C.lo - trU * .08, ly, yaw, 0, tr, sy0 + (C.hi - C.lo) * R / .64, tr, dead ? 0x3a3a3a : D.pd ? 0x3a3a40 : 0x4a4844);
+    const eT = clearAt(C, yaw); if (w._elT !== RCLK) { w._elT = RCLK; const e0 = w._el ?? eT; w._el = Math.max(eT - .04, e0 + (eT - e0) * (1 - Math.exp(-(eT > e0 ? 14 : 5) * GDT))); } // lift quickly, settle slowly
+    const e = Math.max(0, w._el), ce = Math.cos(e), se = Math.sin(e), cy = Math.cos(yaw), sy = Math.sin(yaw);
+    const bc = dead ? 0x555555 : w.ammo <= 0 ? 0x5a4a40 : 0x6e6a64, rb = recoilK(w) * trU * (D.pd ? .25 : .55); // the barrels slam back along their own line and run out again
+    const bx = lx - cy * ce * rb, bh = C.hi + pivM * trU - se * rb, by = ly + sy * ce * rb;
+    if (D.pd) { put(turretM.barrel, bx, bh, by, yaw, e, tr * lenM, tr * thM, tr * thM, bc); continue; }
+    for (const k of [-.3, .3]) put(turretM.barrel, bx + sy * trU * k, bh, by + cy * trU * k, yaw, e, tr * lenM, tr * thM, tr * thM, bc); // twin barrels
+  }
+}
+function turretsFlat(s, z, top, R = s.r, v = null) { // stations and platforms: they do not roll
   if (R * z < 7 || !onScr(s.x, s.y, R * z * 2)) return;
   const mk = s.def.vr0 && !s.def.static ? R / s.def.vr0 : 1; // the sim places mounts at the reference hull size
   const c0 = Math.cos(s.a), s0 = Math.sin(s.a), hw = v && v.hw;

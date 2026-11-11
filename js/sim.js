@@ -1456,17 +1456,23 @@ function updShots(dt) {
     if (hit) {
       const rvx = p.vx - hit.vx, rvy = p.vy - hit.vy, rs = hyp(rvx, rvy) || 1;
       const k = clamp((rs / p.D.speed) ** 2, .35, 1.3);
-      const hx = p.px + (p.x - p.px) * ht, hy = p.py + (p.y - p.py) * ht;
+      const hx = p.px + (p.x - p.px) * ht, hy = p.py + (p.y - p.py) * ht, hx0 = hx, hy0 = hy;
       const shielded = hit.sh > 0;
       if (p.D.kind === 'slug' && !hit.def.static) { const J = p.D.dmg * 1.5 * k * (shielded ? .4 : 1); hit.vx += rvx / rs * J / hit.mass; hit.vy += rvy / rs * J / hit.mass; }
       damage(hit, p.D.dmg * k, p.team, hx, hy, p.D.bow ? 'lance' : p.D.kind, p.owner);
+      // the hit is judged on the hit circle, but it is SEEN where the round's line meets the hull as drawn (S.skinAt, from
+      // the renderer): a long thin hull struck on the beam no longer sparks in empty space beside her. Shield hits stay on
+      // the bubble, and a fused round bursting beside a small hull stays where it burst. Nothing here changes the battle.
+      const vis = !shielded && !(fuse && (hit.def.len || 0) < 700) && S.skinAt ? S.skinAt(hit, hx, hy, rvx, rvy) : null;
+      if (vis) { hit.hitX = vis[0]; hit.hitY = vis[1]; }
+      { const hx = vis ? vis[0] : hx0, hy = vis ? vis[1] : hy0;
       const c = shielded ? 0x8fd3ff : (p.D.kind === 'slug' ? 0xdff4ff : 0xffcf8a);
       burst(hx, hy, hit.vx, hit.vy, p.D.kind === 'slug' ? (p.D.huge ? 60 : p.D.big ? 40 : 12) : 3, c, p.D.kind === 'slug' ? (p.D.big ? 500 : 260) : 120, p.D.kind === 'slug' ? .6 : .25);
       if (shielded) { if (S.hooks && S.hooks.ripple) S.hooks.ripple(hit, hx, hy, p.D.big || p.D.huge); if (S.ripples && S.ripples.length < 160) S.ripples.push({ s: hit, a: Math.atan2(hy - hit.y, hx - hit.x), t: S.time, big: p.D.big || p.D.huge }); }
       else if (p.D.kind === 'slug') { const n = p.D.huge ? 40 : p.D.big ? 24 : 7, ha = Math.atan2(p.vy, p.vx); /* sparks off the armour, thrown back along the shot */
         for (let i = 0; i < n * (S.fxK || 1); i++) { const a = ha + PI + rand(-1.1, 1.1), v = rand(120, p.D.big ? 700 : 420); S.parts.push({ x: hx, y: hy, vx: hit.vx + Math.cos(a) * v, vy: hit.vy + Math.sin(a) * v, life: rand(.25, .7), max: .7, size: 2, col: Math.random() < .6 ? 0xffd080 : 0xfff4e0, spark: 1, drag: 1.2 }); }
         if (p.D.big || p.D.huge) S.flashes.push({ x: hx, y: hy, vx: hit.vx, vy: hit.vy, r: p.D.huge ? 30 : 16, life: .35, max: .35, fire: 1, col: 0xffc080 }); }
-      if (p.D.kind === 'slug') { S.rings.push({ x: hx, y: hy, vx: hit.vx, vy: hit.vy, r: 3, max: p.D.huge ? 180 : p.D.big ? 90 : 26, life: .3, maxl: .3, col: shielded ? 0x8fd3ff : 0xffe0b0, soft: !p.D.big && !p.D.huge }); sfx('hit', hx, hy); }
+      if (p.D.kind === 'slug') { S.rings.push({ x: hx, y: hy, vx: hit.vx, vy: hit.vy, r: 3, max: p.D.huge ? 180 : p.D.big ? 90 : 26, life: .3, maxl: .3, col: shielded ? 0x8fd3ff : 0xffe0b0, soft: !p.D.big && !p.D.huge }); sfx('hit', hx, hy); } }
       p.dead = true; continue;
     }
     const b = bodyHit(p.x, p.y, 0); if (b) { p.dead = true; if (p.D.kind === 'slug') burst(p.x, p.y, b.vx, b.vy, 8, 0xff9a6a, 120, .6); }
@@ -1508,7 +1514,9 @@ function updMissiles(dt) {
       query(m.x, m.y, 30 + fuse, o => { if (o.team === m.team || o.dead || (o.team === 2 && o !== m.t)) return; if (hyp(o.x - m.x, o.y - m.y) < (o.sh > 0 ? o.r * 1.25 : o.r * .85) + fuse) { hit = o; return true; } });
       if (hit) {
         if (m.nuke || m.emp) { if (m.emp) damage(hit, m.dmg, m.team, m.x, m.y, 'missile', m.src); killMissile(m, false); continue; }
-        killMissile(m, false); damage(hit, m.breach && !bigHull(hit) ? m.dmg * .25 : m.dmg, m.team, m.x, m.y, 'missile', m.src);
+        { const vis = !(hit.sh > 0) && S.skinAt ? S.skinAt(hit, m.x, m.y, m.vx - hit.vx, m.vy - hit.vy) : null, mx0 = m.x, my0 = m.y; // it bursts on her skin as drawn, not on the hit circle
+          if (vis) { m.x = vis[0]; m.y = vis[1]; } killMissile(m, false); m.x = mx0; m.y = my0;
+          damage(hit, m.breach && !bigHull(hit) ? m.dmg * .25 : m.dmg, m.team, m.x, m.y, 'missile', m.src); if (vis) { hit.hitX = vis[0]; hit.hitY = vis[1]; } }
         query(m.x, m.y, 60, o => { if (o !== hit && o.team !== m.team && !o.dead && hyp(o.x - m.x, o.y - m.y) < o.r + 50) damage(o, m.dmg * .3, m.team, m.x, m.y, 'missile', m.src); });
         S.rings.push({ x: m.x, y: m.y, vx: hit.vx, vy: hit.vy, r: 4, max: 60, life: .35, maxl: .35, col: 0xffcf8a }); sfx('boom', m.x, m.y, 6); continue;
       }
