@@ -487,7 +487,7 @@ export async function initRender() {
   ov = document.createElement('canvas'); ov.id = 'ov'; cv.after(ov); ctx = ov.getContext('2d'); sizeOverlay();
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(FOV, S.W / S.H, 1, 1e6);
-  TEX.glow = tex(radial(64, [[0, 1], [.2, .62], [.5, .2], [1, 0]])); // a glow, not a disc TEX.dot = tex(radial(32, [[0, 1], [.25, .7], [.6, .2], [1, 0]])); /* a soft mote, so a trail puff close up is a glow and not a ball */ TEX.smoke = tex(smokeC());
+  TEX.glow = tex(radial(64, [[0, 1], [.2, .62], [.5, .2], [1, 0]])); /* a glow, not a disc */ TEX.dot = tex(radial(32, [[0, 1], [.25, .7], [.6, .2], [1, 0]])); /* a soft mote, so a trail puff close up is a glow and not a ball */ TEX.smoke = tex(smokeC());
   TEX.streak = tex(streakC()); TEX.plume = tex(plumeC()); TEX.missile = tex(missileC()); TEX.fins = tex(finsC()); TEX.ring = tex(ringTexC());
   TEX.anam = tex(radial(128, [[0, 1], [.2, .5], [.5, .12], [1, 0]])); // stretched sideways: the anamorphic streak of a big flash
   FLARE_C = flareC(); TEX.fire = tex(fireC()); TEX.shock = tex(shockC()); TEX.hex = tex(hexC()); TEX.spark = tex(sparkC()); TEX.flare = tex(flareC()); TEX.corona = tex(coronaC());
@@ -534,7 +534,7 @@ export async function initRender() {
   for (const b of Object.values(B)) scene.add(b.mesh);
   buildPost();
   setBloom(S.bloom);
-  window.__BODIES = BODIES; window.__CAM = { projectTo, toWorld, footprint }; window.__R = { scene, B, orbitL, rocksG, shipsG, bodiesG, turretM, debrisM, bgMesh, get renderer() { return renderer; }, get bloom() { return bloomPass; }, get gen() { return GEN; } };
+  window.__BODIES = BODIES; window.__CAM = { projectTo, toWorld, footprint }; window.__R = { scene, B, orbitL, PUNCH, rocksG, shipsG, bodiesG, turretM, debrisM, bgMesh, get renderer() { return renderer; }, get bloom() { return bloomPass; }, get gen() { return GEN; } };
   return renderer;
 }
 function sizeOverlay() { ov.width = Math.round(S.W * ODPR); ov.height = Math.round(S.H * ODPR); ov.style.width = S.W + 'px'; ov.style.height = S.H + 'px'; }
@@ -811,6 +811,9 @@ export function render() {
   if (!renderer) return;
   if (S.orrery) return renderOrrery(S.orrery);
   { const n = performance.now(), d = RLAST ? Math.min(.1, (n - RLAST) / 1000) : 1 / 60; RLAST = n; GDT = S.paused ? 0 : d * (S.speed || 1); RCLK += GDT; }
+  const cx0 = S.cam.x, cy0 = S.cam.y; // the shake moves the view, never the camera the player steers
+  if (PUNCH.shake > 0) { const a = Math.random() * TAU, m = PUNCH.shake * (.6 + .4 * Math.random()) / S.cam.z; PUNCH.shx = Math.cos(a) * m; PUNCH.shy = Math.sin(a) * m; S.cam.x += PUNCH.shx; S.cam.y += PUNCH.shy; } else PUNCH.shx = PUNCH.shy = 0;
+  try {
   const { z, px, icons } = sceneFrame();
   renderer.info.reset();
   if (composer && (S.bloom || preset().post)) composer.render(); else renderer.render(scene, camera);
@@ -826,6 +829,7 @@ export function render() {
   if (S.meter) drawMeter();
   ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   if (P) pipPass(P);
+  } finally { S.cam.x = cx0; S.cam.y = cy0; }
 }
 // the action camera: the same scene again, from a low cinematic angle, into a window in the corner
 function pipPass(P) {
@@ -847,6 +851,47 @@ let inPip = false, FLARE_C = null;
 // the render clock: game time as the screen sees it (real frame time × game speed, still while paused). Smoothing and
 // effects spawned from the renderer run on it, so they look the same at 60 Hz, 144 Hz or 240 Hz
 let GDT = 0, RCLK = 0, RLAST = 0;
+// renderer-side battle punch: shield shatters, hull-flip pulses and the camera shake, all driven from state the sim
+// already keeps (downP/downS/shDown, team changes, big fire flashes) — the sim is never touched for them
+const PUNCH = { shards: [], pulses: [], seen: new Map(), shake: 0, shx: 0, shy: 0 };
+function shatter(s, side, R) { // a shield half (or the whole bubble, side 0) breaks into hex cells that fly outward, spin and fade
+  const a0 = side ? s.a + side * PI / 2 : s.a, span = side ? 1.3 : PI, n = side ? 22 : 40, vx = s.vx || 0, vy = s.vy || 0;
+  for (let i = 0; i < n; i++) { const a = a0 + (i / (n - 1) - .5) * 2 * span + rand(-.05, .05), sp = rand(90, 240) * Math.max(.5, R / 40), x = s.x + Math.cos(a) * R, y = s.y + Math.sin(a) * R;
+    PUNCH.shards.push({ x, y, vx: vx + Math.cos(a) * sp, vy: vy + Math.sin(a) * sp, a: rand(0, TAU), av: rand(-6, 6), sz: R * rand(.14, .24), life: rand(.9, 1.5), max: 1.5, col: 0x9fdcff }); }
+  PUNCH.pulses.push({ x: s.x, y: s.y, vx, vy, r: R, a0, span, life: .45, max: .45, col: 0xcfefff, kind: 'arc' });
+  if (!side) PUNCH.pulses.push({ x: s.x, y: s.y, vx, vy, r: R, life: .7, max: .7, col: 0x8fd3ff, kind: 'ring' });
+}
+function punchKick(x, y, amp) { // the camera shakes for a hard blow near the screen centre, less the further off it is
+  if (S.gx && S.gx.shake === false) return; const d = hyp(x - S.cam.x, y - S.cam.y) * S.cam.z; PUNCH.shake = Math.min(14, PUNCH.shake + amp * clamp(1 - d / (S.W * .8), 0, 1));
+}
+function punchTick(z, px) {
+  // shields: a half (or the bubble) that fell this frame shatters once
+  for (const s of S.ships) {
+    if (s.dead || (!s.seen && s.team !== 0) || !s.def.shield || s.def.static) continue;
+    const R = Math.max(s.r * 1.25, vrOf(s) * 1.5);
+    for (const [side, t] of [[-1, s.downP], [1, s.downS], [0, s.shDown]]) {
+      if (t == null || t < 0 || S.time - t > .25 || t > 1e8) continue; const key = s.id + ':' + side + ':' + t.toFixed(2); if (PUNCH.seen.has(key)) continue; PUNCH.seen.set(key, S.time);
+      if (side === 0 && [s.downP, s.downS].some(u => u != null && Math.abs(u - t) < .05)) continue; // the bubble went with its last half: that half's shatter is the event
+      if (onScr(s.x, s.y, R * z + 80)) { shatter(s, side, R); punchKick(s.x, s.y, side ? 2.5 : 4); }
+    }
+  }
+  if (PUNCH.seen.size > 400) for (const [k, t] of PUNCH.seen) if (S.time - t > 5) PUNCH.seen.delete(k);
+  // big fire flashes just born: kills and heavy hits rock the camera
+  for (const f of S.flashes) if (f.fire && f.r >= 50 && !f._kick) { f._kick = 1; punchKick(f.x, f.y, Math.min(10, f.r / 25)); }
+  // shards and pulses live on the render clock, so they pause with the game
+  const dt = GDT; if (dt > 0) {
+    for (const d of PUNCH.shards) { d.x += d.vx * dt; d.y += d.vy * dt; d.a += d.av * dt; d.life -= dt; d.vx *= 1 - dt * .9; d.vy *= 1 - dt * .9; }
+    for (const p of PUNCH.pulses) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
+    PUNCH.shards = PUNCH.shards.filter(d => d.life > 0); PUNCH.pulses = PUNCH.pulses.filter(p => p.life > 0);
+    PUNCH.shake *= Math.exp(-dt * 7); if (PUNCH.shake < .05) PUNCH.shake = 0;
+  }
+  for (const d of PUNCH.shards) { if (!onScr(d.x, d.y, 40)) continue; const k = d.life / d.max, sz = Math.max(d.sz, px * 3); B.hex.add(d.x, d.y, 3.2, sz, sz, d.a, d.col, k * k * .9, 1.6); if (k > .6) B.glow.add(d.x, d.y, 3.2, sz * .9, sz * .9, 0, 0xcfefff, (k - .6) * 1.2, 1.5); }
+  for (const p of PUNCH.pulses) { if (!onScr(p.x, p.y, p.r * z * 2 + 60)) continue; const k = p.life / p.max, g = 1 - k;
+    if (p.kind === 'arc') { const n = 6; for (let i = 0; i < n; i++) { const a = p.a0 + (i / (n - 1) - .5) * 2 * p.span * .9, rr = p.r * (1 + g * .3), sz = p.r * (.9 + g * .5); B.sglow.add(p.x + Math.cos(a) * rr, p.y + Math.sin(a) * rr, 3.1, sz, sz, 0, p.col, k * k * .3, 2); } }
+    else { const dd = p.r * 2 * (1 + g * 1.6); B.shock.add(p.x, p.y, 2, dd, dd, 0, p.col, k * k * .6, 1.6); } }
+}
+// a hull that just changed hands (capture, mutiny, a turncoat) pulses in its new colour
+function flipPulse(s) { const R = Math.max(s.r * 1.3, vrOf(s) * 1.6), c = parseInt((S.teamc[s.team] || { light: '#ffffff' }).light.slice(1), 16); PUNCH.pulses.push({ x: s.x, y: s.y, vx: s.vx || 0, vy: s.vy || 0, r: R, life: 1.1, max: 1.1, col: c, kind: 'ring' }); PUNCH.pulses.push({ x: s.x, y: s.y, vx: s.vx || 0, vy: s.vy || 0, r: R * .6, life: .5, max: .5, col: 0xffffff, kind: 'ring' }); }
 function sceneFrame() {
   shipsG.visible = true; rocksG.visible = true;
   const c = S.cam, z = c.z, px = 1 / z, d = camDist();
@@ -910,6 +955,7 @@ function sceneFrame() {
     if (!s.seen && s.team !== 0) continue;
     seen.add(s.id);
     let v = shipVis.get(s.id);
+    if (v && v.team !== s.team && !inPip) flipPulse(s);
     if (!v || v.team !== s.team || (v.is3d && v.vt !== variantOf(s))) { if (v) shipsG.remove(v.g); v = makeShip(s); shipVis.set(s.id, v); }
     // the hull is drawn at its book length times the Hull size setting; below a few pixels its icon takes over,
     // and through a short hand-off band both show, the icon fading as the hull grows
@@ -943,7 +989,7 @@ function sceneFrame() {
   }
   drawWrecks(z, seen);
   for (const s of S.ships) if (!s.dead && s.def.bow !== false) for (const w of s.weapons) if (w.chg && w.def.bow && onScr(w.mx, w.my, 120)) { // the muzzle of a charging lance glows
-    const k = clamp((S.time - (w.chg0 ?? S.time)) / Math.max(.1, w.chg - (w.chg0 ?? S.time)), 0, 1), gs = Math.max(20 + 60 * k, (8 + 14 * k) * px) * (w.def.huge ? 2 : 1); B.glow.add(w.mx, w.my, 4, gs, gs, 0, w.def.col || 0xff6a3d, .4 + .6 * k, 1.6); }
+    const k = clamp((S.time - (w.chg0 ?? S.time)) / Math.max(.1, w.chg - (w.chg0 ?? S.time)), 0, 1), gs = Math.max(14 + 40 * k, (6 + 10 * k) * px) * (w.def.huge ? 2 : 1); B.glow.add(w.mx, w.my, 4, gs, gs, 0, w.def.col || 0xff6a3d, .3 + .5 * k, 1.8); }
   for (const [id, v] of shipVis) if (!seen.has(id)) { shipsG.remove(v.g); shipVis.delete(id); }
   for (const [id, v] of structVis) if (!seen.has(id)) { shipsG.remove(v.g); structVis.delete(id); }
   for (const t of Object.values(turretM)) t.end();
@@ -961,7 +1007,8 @@ function sceneFrame() {
     else { const sz = Math.max(p.size * f, px * 1.6) * 1.6; B.dot.add(p.x, p.y, 4, sz, sz, 0, p.col, Math.min(1, f * 1.5), 1); }
   }
   // shockwaves: rings in the scene itself, so the action window sees them too
-  for (const r of S.rings) { if (!onScr(r.x, r.y, r.r * z + 40)) continue; const k = r.life / r.maxl, d = r.r * 2; B.shock.add(r.x, r.y, 2, d, d, 0, r.col, k * k * (r.soft ? .2 : .5), 1.3); }
+  if (!inPip) punchTick(z, px);
+  for (const r of S.rings) { if (!onScr(r.x, r.y, r.r * z + 40)) continue; const k = r.life / r.maxl, d = r.r * 2; if (!r.soft && k > .55 && r.max < 300) { const gs = Math.max(r.max * .45, px * 10); B.sglow.add(r.x, r.y, 2.5, gs, gs, 0, r.col, (k - .55) / .45 * .85, 2.2); } /* the strike itself: a hot flash before the ring spreads */ B.shock.add(r.x, r.y, 2, d, d, 0, r.col, k * k * (r.soft ? .2 : .5), 1.3); }
   // shield cells lighting up where a shot landed
   if (!(S.gx && S.gx.ripples === false)) for (const q of S.ripples || []) { const s = q.s; if (s.dead || !onScr(s.x, s.y, s.r * z * 3)) continue; const k = 1 - (S.time - q.t) / .4; if (k <= 0) continue;
     const R = Math.max(s.r * 1.25, s.def.static ? 0 : vrOf(s) * 1.5), x = s.x + Math.cos(q.a) * R, y = s.y + Math.sin(q.a) * R, sz = R * (q.big ? .36 : .22) * (1.15 - k * .15); // a patch of cells where the shot landed, not a wall of them
@@ -971,7 +1018,8 @@ function sceneFrame() {
     if (D.kind === 'slug') { // a rail slug: a hot tracer you can follow across the field, with a fading trail behind it
       const L = Math.max(sv * (D.huge ? .07 : D.big ? .05 : .03), (D.huge ? 46 : D.big ? 32 : 20) * px), th = Math.max(D.huge ? 9 : D.big ? 5 : 2.2, (D.huge ? 5 : D.big ? 3.2 : 2) * px), ca = Math.cos(ang), sa = Math.sin(ang);
       B.streak.add(p.x - ca * L * 1.1, p.y - sa * L * 1.1, 3, L * 2.2, th * .55, ang, D.col, .22, 2.2); B.streak.add(p.x, p.y, 3, L, th, ang, D.col, 1, 2.2); B.glow.add(p.x + ca * L * .45, p.y + sa * L * .45, 3, th * 3.2, th * 3.2, 0, D.big ? 0xffb080 : 0xd8f2ff, .55, 1.6); }
-    else B.streak.add(p.x, p.y, 3, sv * .014, Math.max(1.6, px * 1.4), ang, D.col, .95, 2.4);
+    else if (D.kind === 'flak') { const L = Math.max(sv * .012, 8 * px); B.streak.add(p.x, p.y, 3, L, Math.max(2.2, px * 2), ang, D.col, 1, 2.6); B.glow.add(p.x, p.y, 3, Math.max(4, px * 5), Math.max(4, px * 5), 0, D.col, .5, 1.8); } // a flak round: a short bright dash with a hot head
+    else { const L = Math.max(sv * .02, 12 * px), th = Math.max(2, px * 1.8); B.streak.add(p.x - Math.cos(ang) * L * .9, p.y - Math.sin(ang) * L * .9, 3, L * 1.8, th * .5, ang, D.col, .3, 2); B.streak.add(p.x, p.y, 3, L, th, ang, D.col, 1, 2.6); } // a gun round: a tracer with a fading tail, so a broadside reads as a volley
   }
   for (const m of S.missiles) {
     if (!onScr(m.x, m.y, 60)) continue; const k = Math.max(1, px * 2.2) * (m.nuke ? 1.8 : 1), ca = Math.cos(m.a), sa = Math.sin(m.a), L = k * 14, Wd = k * 3.5;
