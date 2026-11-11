@@ -8,7 +8,7 @@ import * as TSL from 'three/tsl';
 import { bloom } from '../vendor/three/tsl/BloomNode.js';
 import { smaa } from '../vendor/three/tsl/SMAANode.js';
 import { loadGfx, preset, meterTick, gpuTimer } from './gfx.js';
-import { HAS_3D, buildHull, hullTextures, paintOf } from './hulls.js';
+import { HAS_3D, buildHull, hullTextures, paintOf, buildStation } from './hulls.js';
 import { mergeGeometries } from '../vendor/three/utils/BufferGeometryUtils.js';
 import { buildSlip, ganymedeDocks, phobosTraffic } from './yards.js';
 import { S } from './state.js';
@@ -1217,6 +1217,8 @@ function structMats(team, dead) {
     hull: new THREE.MeshStandardMaterial({ color: 0x4a4a54, metalness: .6, roughness: .45, flatShading: true }),
     armour: new THREE.MeshStandardMaterial({ color: 0x5c5c66, metalness: .5, roughness: .55, flatShading: true }),
     dark: new THREE.MeshStandardMaterial({ color: 0x1e1e24, metalness: .5, roughness: .6, flatShading: true }),
+    gun: new THREE.MeshStandardMaterial({ color: 0x2c2c32, metalness: .75, roughness: .35 }),
+    win: new THREE.MeshStandardMaterial({ color: dead ? 0x2a2a2a : 0xffd9a0, emissive: dead ? 0x000000 : 0xffd9a0, emissiveIntensity: dead ? 0 : 1.1 }),
     trim: new THREE.MeshStandardMaterial({ color: col, metalness: .3, roughness: .4, emissive: col, emissiveIntensity: dead ? 0 : .28 }),
     glow: new THREE.MeshStandardMaterial({ color: dead ? 0x333333 : 0x7ff3ff, emissive: dead ? 0x000000 : 0x7ff3ff, emissiveIntensity: dead ? 0 : .8 }),
     shield: new THREE.MeshStandardMaterial({ color: dead ? 0x333333 : 0x8fd3ff, emissive: dead ? 0x000000 : 0x8fd3ff, emissiveIntensity: dead ? 0 : .55, transparent: true, opacity: .85 }),
@@ -1226,35 +1228,12 @@ function structMats(team, dead) {
 function buildStruct(s) {
   const M = structMats(s.team, s.derelict), g = new THREE.Group(), add = (geo, mat, x = 0, y = 0, zz = 0, ry = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, zz); m.rotation.y = ry; g.add(m); return m; };
   const blink = [];
-  if (s.type === 'station') {
-    const tor = (r, t, mat) => { const m = add(new THREE.TorusGeometry(r, t, 10, 96), mat); m.rotation.x = PI / 2; return m; };
-    tor(.82, .075, M.hull); tor(.92, .012, M.trim); tor(.72, .012, M.trim);
-    for (let i = 0; i < 8; i++) { const a = i / 8 * TAU; add(new THREE.BoxGeometry(.24, .13, .18), M.dark, Math.cos(a) * .82, 0, Math.sin(a) * .82, -a); add(new THREE.BoxGeometry(.25, .02, .035), M.trim, Math.cos(a) * .82, .07, Math.sin(a) * .82, -a); blink.push(add(new THREE.SphereGeometry(.025, 8, 6), M.lt, Math.cos(a) * .97, 0, Math.sin(a) * .97)); }
-    for (let i = 0; i < 4; i++) { const a = i / 4 * TAU + PI / 4; add(new THREE.BoxGeometry(.48, .05, .06), M.hull, Math.cos(a) * .49, 0, Math.sin(a) * .49, -a); }
-    add(new THREE.CylinderGeometry(.3, .34, .22, 24), M.dark); add(new THREE.CylinderGeometry(.31, .31, .02, 24), M.trim, 0, .11);
-    add(new THREE.CylinderGeometry(.12, .2, .26, 16), M.hull, 0, .24); add(new THREE.CylinderGeometry(.025, .04, .5, 8), M.hull, 0, .5);
-    add(new THREE.SphereGeometry(.09, 16, 12), M.trim, 0, .38); blink.push(add(new THREE.SphereGeometry(.03, 8, 6), M.lt, 0, .76));
-    add(new THREE.CylinderGeometry(.18, .3, .2, 16), M.hull, 0, -.2);
+  if (s.type === 'station' || s.type === 'outpost' || s.type === 'gunplat' || s.type === 'shieldplat') { // built in hulls.js; the Shield Station's sphere stays here
+    for (const [slot, geo] of buildStation(s.type)) { const m = add(geo, M[slot] || M.hull); if (slot === 'lt') blink.push(m); }
+    if (s.type === 'shieldplat') blink.push(add(new THREE.SphereGeometry(.35, 24, 16), M.shield, 0, .35));
   } else if (s.type === 'dockyard') { // a construction slip with a hull on the stocks; Venus and Ganymede can lay down moonBreakers
     const type = s.world === 'venus' || s.world === 'ganymede' ? 'moonbreaker' : 'dread', Y = buildSlip(M, t => shipMats3(t, s.team).n, type, facKey(s.team) || 'none', (s.id * 7919) >>> 0);
     g.add(Y.g); g.userData.upd = Y.update;
-  } else if (s.type === 'outpost') {
-    add(new THREE.CylinderGeometry(.55, .55, .24, 6), M.dark); add(new THREE.CylinderGeometry(.56, .56, .02, 6), M.trim, 0, .12);
-    for (let i = 0; i < 3; i++) { const a = i / 3 * TAU; add(new THREE.BoxGeometry(.5, .1, .16), M.hull, Math.cos(a) * .75, 0, Math.sin(a) * .75, -a); add(new THREE.CylinderGeometry(.09, .09, .16, 10), M.trim, Math.cos(a) * 1, 0, Math.sin(a) * 1); }
-    add(new THREE.CylinderGeometry(.2, .26, .2, 12), M.hull, 0, .22); add(new THREE.SphereGeometry(.17, 16, 12), M.glow, 0, .36);
-    { const m = add(new THREE.TorusGeometry(1.08, .02, 6, 48), M.trim); m.rotation.x = PI / 2; } for (let i = 0; i < 6; i++) { const a = i / 6 * TAU + .3; blink.push(add(new THREE.SphereGeometry(.025, 6, 4), M.lt, Math.cos(a) * 1.08, 0, Math.sin(a) * 1.08)); }
-  } else if (s.type === 'gunplat') { // an armoured arrowhead: a layered slab with a gilt rim, three barbettes forward, a reactor glow aft and a sensor mast
-    const sh = new THREE.Shape([[.9, 0], [-.6, .75], [-.35, 0], [-.6, -.75]].map(([x, y]) => new THREE.Vector2(x, -y)));
-    const eg = new THREE.ExtrudeGeometry(sh, { depth: .22, bevelEnabled: false }); eg.rotateX(-PI / 2); eg.translate(0, -.11, 0); add(eg, M.hull);
-    const eg2 = new THREE.ExtrudeGeometry(sh, { depth: .02, bevelEnabled: false }); eg2.rotateX(-PI / 2); eg2.scale(1.03, 1, 1.03); eg2.translate(0, .1, 0); add(eg2, M.trim); /* the rim shows past the slab above it */
-    const eg3 = new THREE.ExtrudeGeometry(sh, { depth: .12, bevelEnabled: false }); eg3.rotateX(-PI / 2); eg3.scale(.9, 1, .9); eg3.translate(.02, .12, 0); add(eg3, M.dark);
-    for (const [x, zz] of [[.35, 0], [-.05, .32], [-.05, -.32]]) { add(new THREE.CylinderGeometry(.11, .14, .08, 10), M.armour, x, .27, zz); add(new THREE.CylinderGeometry(.08, .08, .02, 10), M.dark, x, .32, zz); }
-    add(new THREE.CylinderGeometry(.07, .07, .05, 12), M.glow, -.42, .26, 0); add(new THREE.CylinderGeometry(.012, .02, .5, 6), M.hull, -.25, .45, 0); blink.push(add(new THREE.SphereGeometry(.03, 8, 6), M.lt, -.25, .72, 0));
-  } else if (s.type === 'shieldplat') {
-    add(new THREE.CylinderGeometry(.8, .7, .16, 32), M.dark); add(new THREE.TorusGeometry(.8, .025, 6, 48), M.trim).rotation.x = PI / 2;
-    for (let i = 0; i < 3; i++) { const a = i / 3 * TAU; add(new THREE.CylinderGeometry(.03, .05, .5, 8), M.hull, Math.cos(a) * .5, .25, Math.sin(a) * .5); }
-    for (let i = 0; i < 6; i++) { const a = i / 6 * TAU; add(new THREE.BoxGeometry(.08, .1, .14), M.hull, Math.cos(a) * .72, .1, Math.sin(a) * .72, -a); add(new THREE.BoxGeometry(.04, .02, .1), M.glow, Math.cos(a) * .76, .17, Math.sin(a) * .76, -a); }
-    blink.push(add(new THREE.SphereGeometry(.35, 24, 16), M.shield, 0, .35));
   } else { add(new THREE.CylinderGeometry(.6, .6, .2, 12), M.dark); }
   shipsG.add(g); return { g, blink, team: s.team, dead: s.derelict, top: s.type === 'station' ? .12 : s.type === 'dockyard' ? .07 : s.type === 'outpost' ? .13 : .12 };
 }

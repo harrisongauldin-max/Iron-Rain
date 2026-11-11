@@ -484,6 +484,65 @@ export function buildHull(type, fac, variant = '') {
   return CACHE[key] = { geo: K.build(), bells: K.bells, xmin: x0, top: K.top, hw, deck, band: K.band };
 }
 
+// ---------------------------------------------------------------- the stations
+// Built for render.js's buildStruct: a list of [slot, geometry] in station units (the hit radius is 1; y up). Slots are
+// the struct material names: hull, armour, dark, gun, trim (the owner's colour), glow (emitters, hangar mouths), win (lit
+// windows, warm), lt (blinking nav lights). The dockyard keeps its own build (a slip with a hull on the stocks) in render.js.
+const SG = { cyl: (rt, rb, h, seg, x, y, z, rx = 0, rz = 0) => { const g = new THREE.CylinderGeometry(rt, rb, h, seg); if (rx) g.rotateX(rx); if (rz) g.rotateZ(rz); g.translate(x, y, z); return g; },
+  box: (w, h, d, x, y, z, ry = 0) => { const g = new THREE.BoxGeometry(w, h, d); if (ry) g.rotateY(ry); g.translate(x, y, z); return g; },
+  torus: (r, t, seg, x, y, z) => { const g = new THREE.TorusGeometry(r, t, 8, seg); g.rotateX(Math.PI / 2); g.translate(x, y, z); return g; },
+  sph: (r, x, y, z, ws = 12, hs = 8) => { const g = new THREE.SphereGeometry(r, ws, hs); g.translate(x, y, z); return g; } };
+export function buildStation(type) {
+  const P = [], add = (slot, g) => P.push([slot, g]), TAU = Math.PI * 2;
+  // a radial part: placed at radius r, angle a, turned to face outward
+  const at = (slot, g, r, a, y = 0) => { g.rotateY(-a); g.translate(Math.cos(a) * r, y, Math.sin(a) * r); add(slot, g); };
+  const windows = (r, y, n, w = .05, h = .012) => { for (let i = 0; i < n; i++) { const a = i / n * TAU; if ((i * 7) % 5 === 0) continue; at('win', SG.box(w, h, .01, 0, 0, 0), r, a, y); } };
+  if (type === 'station') { // the Citadel: a great habitat ring on four spars round an armoured hub, bastions with spitTube batteries on the ring, docking arms out past it, a command tower on the hub
+    add('hull', SG.torus(.8, .07, 96, 0, 0, 0)); add('trim', SG.torus(.8, .012, 96, 0, .075, 0)); add('trim', SG.torus(.8, .012, 96, 0, -.075, 0));
+    windows(.872, .02, 72); windows(.872, -.02, 72);
+    for (let i = 0; i < 8; i++) { const a = i / 8 * TAU; // the bastions: an armoured block over the ring, spitTubes in rows on its face, a rail turret on top
+      at('armour', SG.box(.2, .16, .22, 0, 0, 0), .8, a); at('dark', SG.box(.16, .04, .22, 0, 0, 0), .8, a, .1);
+      for (let r = 0; r < 2; r++) for (let c = 0; c < 4; c++) at('dark', SG.cyl(.012, .012, .03, 6, (c - 1.5) * .04, (r - .5) * .05, 0, Math.PI / 2), .905, a);
+      at('hull', SG.cyl(.045, .05, .03, 10, 0, 0, 0), .8, a, .095); at('gun', SG.cyl(.008, .008, .09, 6, .04, 0, 0, 0, Math.PI / 2), .8, a, .11);
+      at('lt', SG.sph(.02, 0, 0, 0, 8, 6), .93, a, .02);
+    }
+    for (let i = 0; i < 4; i++) { const a = i / 4 * TAU + Math.PI / 4; // spars from hub to ring, and the docking arms beyond, each ending in a cradle
+      at('hull', SG.box(.5, .045, .06, 0, 0, 0), .49, a); at('dark', SG.box(.5, .02, .03, 0, 0, 0), .49, a, .03);
+      at('armour', SG.box(.3, .04, .05, 0, 0, 0), 1.02, a); at('hull', SG.box(.06, .08, .2, 0, 0, 0), 1.17, a); at('glow', SG.box(.02, .05, .16, 0, 0, 0), 1.2, a);
+      at('lt', SG.sph(.018, 0, 0, 0, 8, 6), 1.2, a, .06);
+    }
+    add('dark', SG.cyl(.3, .34, .24, 24, 0, 0, 0)); add('trim', SG.cyl(.31, .31, .02, 24, 0, .12, 0)); add('armour', SG.cyl(.34, .3, .06, 24, 0, -.14, 0));   // the hub
+    for (let i = 0; i < 6; i++) { const a = i / 6 * TAU; at('dark', SG.box(.02, .06, .1, 0, 0, 0), .33, a, -.02); at('glow', SG.box(.012, .04, .08, 0, 0, 0), .335, a, -.02); } // hangar mouths, lit
+    add('hull', SG.cyl(.16, .22, .14, 16, 0, .19, 0)); add('armour', SG.cyl(.1, .16, .12, 16, 0, .32, 0)); add('hull', SG.cyl(.06, .1, .1, 12, 0, .43, 0));    // the command tower, stepped
+    windows(.165, .19, 20, .03, .01); windows(.105, .32, 14, .025, .01);
+    add('glow', SG.cyl(.062, .062, .025, 12, 0, .49, 0)); add('dark', SG.cyl(.012, .02, .3, 6, 0, .65, 0)); add('lt', SG.sph(.025, 0, .81, 0, 8, 6));           // the bridge's lit crown, the mast
+    add('hull', SG.cyl(.14, .26, .2, 16, 0, -.26, 0)); add('glow', SG.cyl(.09, .09, .02, 16, 0, -.37, 0));                                                     // the reactor below, lit
+  } else if (type === 'outpost') { // the Mining Station: a hexagonal refinery drum ringed with He-3 tanks, three collector arms ending in scoop dishes, a flare stack
+    add('dark', SG.cyl(.5, .5, .26, 6, 0, 0, 0)); add('trim', SG.cyl(.51, .51, .02, 6, 0, .13, 0)); add('armour', SG.cyl(.44, .5, .08, 6, 0, -.17, 0));
+    windows(.5, .04, 24, .04, .012);
+    for (let i = 0; i < 6; i++) { const a = i / 6 * TAU + Math.PI / 6; at('hull', SG.cyl(.09, .09, .3, 12, 0, 0, 0, Math.PI / 2), .62, a, -.02); at('trim', SG.torus(.092, .008, 12, 0, 0, 0), .62, a, -.02); } // the tanks, banded
+    for (let i = 0; i < 3; i++) { const a = i / 3 * TAU; at('hull', SG.box(.5, .06, .1, 0, 0, 0), .78, a); at('dark', SG.box(.5, .02, .03, 0, 0, 0), .78, a, .04);
+      at('armour', SG.cyl(.16, .04, .1, 14, 0, 0, 0, 0, -Math.PI / 2), 1.08, a); at('glow', SG.cyl(.06, .06, .02, 12, 0, 0, 0, 0, -Math.PI / 2), 1.0, a); at('lt', SG.sph(.02, 0, 0, 0, 8, 6), 1.16, a); } // collector arms and scoop dishes
+    add('hull', SG.cyl(.18, .24, .18, 12, 0, .22, 0)); windows(.185, .22, 12, .03, .012); add('dark', SG.cyl(.03, .04, .34, 8, .3, .3, .2)); add('glow', SG.sph(.05, .3, .5, .2, 10, 8)); // control block, flare stack
+    for (let i = 0; i < 4; i++) { const a = i / 4 * TAU + .4; at('dark', SG.cyl(.012, .012, .3, 6, 0, 0, 0, 0, Math.PI / 2), .35, a, .1); }                   // pipework
+  } else if (type === 'gunplat') { // the Gun Platform: an armoured wedge with three twin rail turrets, a magazine block aft, a reactor glow and a sensor mast
+    const sh = new THREE.Shape([[.95, 0], [-.55, .7], [-.4, 0], [-.55, -.7]].map(([x, y]) => new THREE.Vector2(x, -y)));
+    const ex = (d, sc, y, slot) => { const g = new THREE.ExtrudeGeometry(sh, { depth: d, bevelEnabled: false }); g.rotateX(-Math.PI / 2); g.scale(sc, 1, sc); g.translate(0, y, 0); add(slot, g); };
+    ex(.22, 1, -.11, 'hull'); ex(.02, 1.03, .1, 'trim'); ex(.1, .86, .12, 'armour'); ex(.06, .6, .22, 'dark');
+    for (const [x, zz] of [[.4, 0], [-.05, .33], [-.05, -.33]]) { add('dark', SG.cyl(.1, .12, .04, 12, x, .24, zz)); add('armour', SG.box(.14, .08, .16, x, .3, zz)); add('gun', SG.cyl(.012, .012, .3, 6, x + .2, .31, zz - .035, 0, Math.PI / 2)); add('gun', SG.cyl(.012, .012, .3, 6, x + .2, .31, zz + .035, 0, Math.PI / 2)); }
+    add('armour', SG.box(.2, .1, .5, -.3, .27, 0)); for (let i = 0; i < 4; i++) add('dark', SG.box(.03, .06, .08, -.3, .33, -.18 + i * .12));          // the magazine
+    add('glow', SG.cyl(.07, .07, .05, 12, -.45, .24, 0)); add('hull', SG.cyl(.012, .02, .5, 6, -.2, .5, 0)); add('lt', SG.sph(.03, -.2, .77, 0, 8, 6));
+    for (const z of [-.25, .25]) add('glow', SG.box(.3, .012, .02, .1, .2, z));                                                                          // deck strips
+  } else if (type === 'shieldplat') { // the Shield Station: a hub with three emitter pylons holding a ring above it (the shield sphere is render's)
+    add('dark', SG.cyl(.7, .62, .16, 24, 0, 0, 0)); add('trim', SG.torus(.7, .022, 48, 0, .06, 0)); add('armour', SG.cyl(.3, .36, .12, 16, 0, .14, 0));
+    windows(.705, -.02, 30, .04, .012);
+    for (let i = 0; i < 3; i++) { const a = i / 3 * TAU; at('hull', SG.cyl(.035, .05, .6, 8, 0, 0, 0), .45, a, .35); at('glow', SG.cyl(.045, .045, .03, 10, 0, 0, 0), .45, a, .66); }
+    add('trim', SG.torus(.45, .02, 36, 0, .68, 0)); add('glow', SG.torus(.45, .008, 36, 0, .7, 0));                                                     // the emitter ring
+    for (let i = 0; i < 6; i++) { const a = i / 6 * TAU + .5; at('hull', SG.box(.08, .1, .14, 0, 0, 0), .64, a, .1); at('glow', SG.box(.02, .06, .1, 0, 0, 0), .685, a, .1); at('lt', SG.sph(.018, 0, 0, 0, 8, 6), .74, a, .02); }
+  }
+  return P;
+}
+
 // ---------------------------------------------------------------- materials
 // hull plating: panel lines and plates along the length; lit windows in rows, as many as the ship's real size allows
 function canvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return [c, c.getContext('2d')]; }
