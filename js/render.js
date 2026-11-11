@@ -1028,16 +1028,21 @@ function sceneFrame() {
     else { const L = Math.max(sv * .02, 12 * px), th = Math.max(2, px * 1.8); B.streak.add(p.x - Math.cos(ang) * L * .9, p.y - Math.sin(ang) * L * .9, 3, L * 1.8, th * .5, ang, D.col, .3, 2); B.streak.add(p.x, p.y, 3, L, th, ang, D.col, 1, 2.6); } // a gun round: a tracer with a fading tail, so a broadside reads as a volley
   }
   for (const m of S.missiles) {
-    if (!onScr(m.x, m.y, 60)) continue; const ca = Math.cos(m.a), sa = Math.sin(m.a);
+    if (!onScr(m.x, m.y, 60)) continue;
+    // she is drawn pointing the way she is actually going (her velocity), not the way her motor is pushing: the motor's
+    // aim swings hard as she steers, and drawing the body along it made a salvo look like it was spinning in circles.
+    // Eased on the render clock so a slow missile (velocity near zero, its direction meaningless) holds its line.
+    if (!inPip) { const sp = Math.hypot(m.vx, m.vy), va = sp > 40 ? Math.atan2(m.vy, m.vx) : (m._da ?? m.a); if (m._da === undefined) m._da = va; else m._da += angDiff(m._da, va) * (1 - Math.exp(-10 * GDT)); }
+    const da = m._da ?? m.a, ca = Math.cos(da), sa = Math.sin(da);
     // drawn at 150× real size (5× the hulls' 30×, and following the Hulls setting), never under 4 px so a salvo can still be followed; the plume carries it at range
     const L = Math.max(MISSILE_M[m.nuke ? 'nuke' : m.emp ? 'emp' : 'std'] * M_TO_UNITS * MISSILE_X * (S.hullX || HULL_REF) / HULL_REF, 4 * px), Wd = L * .25;
     const tc = m.emp ? 0x8fd3ff : m.nuke ? 0xff4b3e : hex(S.teamc[m.team].light);
-    (m.nuke ? missileM.nuke : m.emp ? missileM.emp : missileM.std).add(m.x, m.y, 3, -m.a, L, L, L, tc); // the 3-D body, its fins and bands in the team's colour (hulls.js)
+    (m.nuke ? missileM.nuke : m.emp ? missileM.emp : missileM.std).add(m.x, m.y, 3, -da, L, L, L, tc); // the 3-D body, its fins and bands in the team's colour (hulls.js)
     if (m.nuke && (S.time * 5 | 0) % 2) B.glow.add(m.x + ca * L * .1, m.y + sa * L * .1, 3.1, Wd * 2.2, Wd * 2.2, 0, 0xff5040, .9, 1.8); // the warhead's blinking light
     if (m.thrusting) { const ex = m.emp ? 0x8fd3ff : 0xffc8a0, fl = .9 + .1 * Math.sin(S.time * 53 + m.x), nx = m.x - ca * L * .5, ny = m.y - sa * L * .5, pl = Math.max(L * 3.2, 12 * px) * (m.nuke ? 1.3 : 1) * fl; // the plume follows the body, with a floor so a salvo reads at range
       B.glow.add(nx, ny, 3, Math.max(Wd * 1.5, 2 * px), Math.max(Wd * 1.5, 2 * px), 0, ex, .8, 1.8); // glare at the nozzle
-      B.plume.add(nx, ny, 2, pl, Math.max(Wd * 1.3, 4), m.a, ex, .95, 1.6); /* the tail */ B.plume.add(nx, ny, 2.01, pl * .45, Math.max(Wd * .7, 2.5), m.a, 0xffffff, 1, 2.4); /* the white throat */
-      if (!S.paused && !inPip && Math.random() < 36 * GDT && px < 40) S.parts.push({ x: m.x - Math.cos(m.a) * 8, y: m.y - Math.sin(m.a) * 8, vx: m.vx * .15 + rand(-6, 6), vy: m.vy * .15 + rand(-6, 6), life: m.nuke ? 2.2 : 1.1, max: m.nuke ? 2.2 : 1.1, size: (m.nuke ? 9 : 4) + px * .6, col: 0x9a948c, smoke: 1, drag: 1.5 }); }
+      B.plume.add(nx, ny, 2, pl, Math.max(Wd * 1.3, 4), da, ex, .95, 1.6); /* the tail */ B.plume.add(nx, ny, 2.01, pl * .45, Math.max(Wd * .7, 2.5), da, 0xffffff, 1, 2.4); /* the white throat */
+      if (!S.paused && !inPip && Math.random() < 36 * GDT && px < 40) S.parts.push({ x: m.x - ca * 8, y: m.y - sa * 8, vx: m.vx * .15 + rand(-6, 6), vy: m.vy * .15 + rand(-6, 6), life: m.nuke ? 2.2 : 1.1, max: m.nuke ? 2.2 : 1.1, size: (m.nuke ? 9 : 4) + px * .6, col: 0x9a948c, smoke: 1, drag: 1.5 }); }
   }
   for (const f of S.flashes) { const k = f.life / f.max, g = 1 - k, e = 1 - (1 - g) * (1 - g), R = Math.max(f.r * 2, (f.px || 0) * px) * (f.fire ? .6 + e * .6 : 1); if (f._rot == null) f._rot = (f.x * 5.3 + f.y * 2.9) % TAU;
     B.sglow.add(f.x, f.y, 6, R * (f.fire ? .8 : 1.2), R * (f.fire ? .8 : 1.2), 0, f.blue ? 0xb0dcff : f.col || 0xffd7a0, f.fire ? k * .9 : k * k, 2);
