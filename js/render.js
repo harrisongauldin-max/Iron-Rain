@@ -38,20 +38,27 @@ function seeded(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 10
 function tex(c, o = {}) { const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = o.aniso || 4; if (o.wrap) t.wrapS = t.wrapT = THREE.RepeatWrapping; if (o.wrapS) t.wrapS = THREE.RepeatWrapping; return t; }
 function radial(size, stops) { const [c, g] = canvas(size, size), h = size / 2; const gr = g.createRadialGradient(h, h, 0, h, h, h); for (const [k, a] of stops) gr.addColorStop(k, `rgba(255,255,255,${a})`); g.fillStyle = gr; g.fillRect(0, 0, size, size); return c; }
 function streakC() { const [c, g] = canvas(128, 16); const gr = g.createLinearGradient(0, 0, 128, 0); gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(.75, 'rgba(255,255,255,.7)'); gr.addColorStop(1, 'rgba(255,255,255,1)'); g.fillStyle = gr; g.beginPath(); g.moveTo(0, 8); g.lineTo(120, 3); g.lineTo(128, 8); g.lineTo(120, 13); g.closePath(); g.fill(); return c; }
-function plumeC() { // white-hot core into a tinted tail; the batch tints it per team
+function plumeC() { // a torch drive: a white-hot throat with shock diamonds, into a long narrow tail that tapers and fades; the batch tints the tail per team
   const [c, g] = canvas(512, 64); const gr = g.createLinearGradient(512, 0, 0, 0);
-  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(.1, 'rgba(255,240,225,.9)'); gr.addColorStop(.3, 'rgba(255,210,180,.5)'); gr.addColorStop(.6, 'rgba(255,190,160,.18)'); gr.addColorStop(1, 'rgba(255,180,150,0)');
-  g.fillStyle = gr; g.beginPath(); g.moveTo(512, 8); g.quadraticCurveTo(200, 2, 0, 32); g.quadraticCurveTo(200, 62, 512, 56); g.closePath(); g.fill();
-  // shock diamonds down the core, then a white-hot throat
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(.06, 'rgba(255,245,235,.9)'); gr.addColorStop(.18, 'rgba(255,230,210,.5)'); gr.addColorStop(.4, 'rgba(255,210,190,.2)'); gr.addColorStop(.7, 'rgba(255,195,175,.07)'); gr.addColorStop(1, 'rgba(255,180,160,0)');
+  g.fillStyle = gr; g.beginPath(); g.moveTo(512, 18); g.quadraticCurveTo(440, 12, 360, 16); g.quadraticCurveTo(200, 22, 0, 29); g.lineTo(0, 35); g.quadraticCurveTo(200, 42, 360, 48); g.quadraticCurveTo(440, 52, 512, 46); g.closePath(); g.fill(); // flares just past the bell, then a pencil by the end
   g.globalCompositeOperation = 'lighter';
-  for (let i = 0; i < 5; i++) { const x = 470 - i * 42, w = 30 - i * 4, a = .55 - i * .1; const d = g.createRadialGradient(x, 32, 0, x, 32, w); d.addColorStop(0, `rgba(255,255,255,${a})`); d.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = d; g.fillRect(x - w, 32 - w, w * 2, w * 2); }
-  const core = g.createLinearGradient(512, 0, 230, 0); core.addColorStop(0, 'rgba(255,255,255,1)'); core.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = core; g.beginPath(); g.moveTo(512, 22); g.quadraticCurveTo(360, 26, 230, 32); g.quadraticCurveTo(360, 38, 512, 42); g.fill();
+  for (let i = 0; i < 6; i++) { const x = 478 - i * 36, w = 14 - i * 1.6, a = .6 - i * .09; const d = g.createRadialGradient(x, 32, 0, x, 32, w); d.addColorStop(0, `rgba(255,255,255,${a})`); d.addColorStop(.5, `rgba(255,255,255,${a * .35})`); d.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = d; g.fillRect(x - w * 1.6, 32 - w, w * 3.2, w * 2); } // shock diamonds
+  const core = g.createLinearGradient(512, 0, 120, 0); core.addColorStop(0, 'rgba(255,255,255,1)'); core.addColorStop(.3, 'rgba(255,255,255,.7)'); core.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = core; g.beginPath(); g.moveTo(512, 27); g.quadraticCurveTo(300, 29, 120, 32); g.quadraticCurveTo(300, 35, 512, 37); g.fill(); // the hot filament down the middle
   return c;
 }
 // a fireball: a noisy, soft-edged blob; drawn additive, white-hot shrinking to orange as it fades
-function fireC() { const [c, g] = canvas(128, 128), R = seeded(17); g.fillStyle = 'rgba(0,0,0,0)'; g.fillRect(0, 0, 128, 128);
-  for (let i = 0; i < 26; i++) { const r = 18 + R() * 30, x = 64 + (R() - .5) * 56, y = 64 + (R() - .5) * 56; const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, 'rgba(255,255,255,.55)'); gr.addColorStop(.45, 'rgba(255,255,255,.22)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2); }
-  const core = g.createRadialGradient(64, 64, 0, 64, 64, 40); core.addColorStop(0, 'rgba(255,255,255,1)'); core.addColorStop(.5, 'rgba(255,255,255,.5)'); core.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = core; g.fillRect(0, 0, 128, 128); return c; }
+function fireC() { const [c, g] = canvas(256, 256), R = seeded(17); g.fillStyle = 'rgba(0,0,0,0)'; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 46; i++) { const d = R() * 70, a = R() * Math.PI * 2, r = 16 + R() * 44 * (1 - d / 110), x = 128 + Math.cos(a) * d, y = 128 + Math.sin(a) * d, k = .3 + R() * .4; const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, `rgba(255,255,255,${k})`); gr.addColorStop(.4, `rgba(255,255,255,${k * .4})`); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2); }
+  for (let i = 0; i < 14; i++) { const a = R() * Math.PI * 2, L = 60 + R() * 60, w = 6 + R() * 10; g.save(); g.translate(128, 128); g.rotate(a); const gr = g.createLinearGradient(0, 0, L, 0); gr.addColorStop(0, 'rgba(255,255,255,.5)'); gr.addColorStop(.6, 'rgba(255,255,255,.18)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.beginPath(); g.moveTo(10, -w); g.quadraticCurveTo(L * .6, -w * .4, L, 0); g.quadraticCurveTo(L * .6, w * .4, 10, w); g.closePath(); g.fill(); g.restore(); } // tongues rolling outward
+  const core = g.createRadialGradient(128, 128, 0, 128, 128, 70); core.addColorStop(0, 'rgba(255,255,255,1)'); core.addColorStop(.35, 'rgba(255,255,255,.6)'); core.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = core; g.fillRect(0, 0, 256, 256);
+  g.globalCompositeOperation = 'destination-out'; for (let i = 0; i < 18; i++) { const a = R() * Math.PI * 2, d = 30 + R() * 60, r = 8 + R() * 18, x = 128 + Math.cos(a) * d, y = 128 + Math.sin(a) * d; const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, 'rgba(0,0,0,.55)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2); } // dark gaps between the tongues
+  return c; }
+// smoke: a puffy cluster, soft-edged, that turns as it drifts
+function smokeC() { const [c, g] = canvas(128, 128), R = seeded(23);
+  for (let i = 0; i < 22; i++) { const d = R() * 34, a = R() * Math.PI * 2, r = 14 + R() * 26, x = 64 + Math.cos(a) * d, y = 64 + Math.sin(a) * d, k = .25 + R() * .3; const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, `rgba(255,255,255,${k})`); gr.addColorStop(.5, `rgba(255,255,255,${k * .45})`); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2); }
+  const fade = g.createRadialGradient(64, 64, 0, 64, 64, 64); fade.addColorStop(0, 'rgba(255,255,255,1)'); fade.addColorStop(.7, 'rgba(255,255,255,.8)'); fade.addColorStop(1, 'rgba(255,255,255,0)'); g.globalCompositeOperation = 'destination-in'; g.fillStyle = fade; g.fillRect(0, 0, 128, 128);
+  return c; }
 // a thin shock ring with a soft outer skirt
 function shockC() { const [c, g] = canvas(256, 256); const gr = g.createRadialGradient(128, 128, 0, 128, 128, 128); gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(.86, 'rgba(255,255,255,0)'); gr.addColorStop(.92, 'rgba(255,255,255,.9)'); gr.addColorStop(.96, 'rgba(255,255,255,.3)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 256, 256); return c; }
 // a shield cell: a hexagonal tile with bright edges, flashed where a shot lands
@@ -64,7 +71,18 @@ function sparkC() { const [c, g] = canvas(64, 8); const gr = g.createLinearGradi
 // the sun's glare: a soft disc with a brighter core and faint rays
 function flareC() { const [c, g] = canvas(256, 256); const gr = g.createRadialGradient(128, 128, 0, 128, 128, 128); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(.08, 'rgba(255,255,255,.75)'); gr.addColorStop(.25, 'rgba(255,255,255,.22)'); gr.addColorStop(.6, 'rgba(255,255,255,.05)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 256, 256);
   g.globalCompositeOperation = 'lighter'; for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI + .2, L = 80 + (i % 3) * 40; g.strokeStyle = 'rgba(255,255,255,.08)'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(128 - Math.cos(a) * L, 128 - Math.sin(a) * L); g.lineTo(128 + Math.cos(a) * L, 128 + Math.sin(a) * L); g.stroke(); } return c; }
-function missileC() { const [c, g] = canvas(32, 16); g.fillStyle = '#fff'; g.beginPath(); g.moveTo(32, 8); g.lineTo(4, 2); g.lineTo(0, 8); g.lineTo(4, 14); g.closePath(); g.fill(); return c; }
+// a missile: the body is a shaded cylinder with a nose cone and a nozzle (tinted a pale grey); the fins and the band round
+// the waist are a second sprite the batch tints in the team's colour
+function missileC() { const [c, g] = canvas(64, 16);
+  const body = g.createLinearGradient(0, 3, 0, 13); body.addColorStop(0, 'rgba(120,124,130,1)'); body.addColorStop(.35, 'rgba(255,255,255,1)'); body.addColorStop(.6, 'rgba(225,228,232,1)'); body.addColorStop(1, 'rgba(90,94,100,1)');
+  g.fillStyle = body; g.beginPath(); g.moveTo(64, 8); g.lineTo(50, 3.5); g.lineTo(8, 3.5); g.lineTo(6, 5); g.lineTo(6, 11); g.lineTo(8, 12.5); g.lineTo(50, 12.5); g.closePath(); g.fill(); // cone, body, boat-tail
+  g.fillStyle = 'rgba(40,42,46,1)'; g.fillRect(2, 5.5, 5, 5); g.fillStyle = 'rgba(255,200,150,1)'; g.fillRect(2, 6.5, 2, 3); // the nozzle, hot inside
+  g.fillStyle = 'rgba(60,62,66,.9)'; g.fillRect(44, 3.5, 1.5, 9); g.fillRect(14, 3.5, 1.5, 9); // panel lines
+  return c; }
+function finsC() { const [c, g] = canvas(64, 16); g.fillStyle = '#fff';
+  g.beginPath(); g.moveTo(16, 3.5); g.lineTo(6, 0); g.lineTo(6, 3.5); g.closePath(); g.fill(); g.beginPath(); g.moveTo(16, 12.5); g.lineTo(6, 16); g.lineTo(6, 12.5); g.closePath(); g.fill(); // tail fins
+  g.beginPath(); g.moveTo(40, 3.5); g.lineTo(36, 1.5); g.lineTo(36, 3.5); g.closePath(); g.fill(); g.beginPath(); g.moveTo(40, 12.5); g.lineTo(36, 14.5); g.lineTo(36, 12.5); g.closePath(); g.fill(); // canards
+  g.fillRect(24, 3.5, 5, 9); g.fillRect(50, 4.5, 3, 7); return c; } // the band, and the seeker ring behind the cone
 function hullPath(g, pts, k) { g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x * k, y * k) : g.moveTo(x * k, y * k)); g.closePath(); }
 export const WINGS = []; let WF = 0; // wing icons drawn this frame, in screen pixels, for picking
 const HAND0 = 3.5, HAND1 = 14; // icon to hull hand-off, in pixels of hull half-length
@@ -119,21 +137,23 @@ function coronaC() { const [c, g] = canvas(512, 512), R = seeded(5); const gr = 
   return c; }
 function nebulaC() { // the deep sky: near black, the Milky Way as one soft band with a dark dust lane through it, faint colour in the star clouds
   const [c, n] = canvas(1024, 1024), R = seeded(4242); n.fillStyle = '#020207'; n.fillRect(0, 0, 1024, 1024);
+  // a radial blob drawn at every wrap offset, its gradient centred on each copy, so the tile repeats without a seam
+  const blob = (x, y, r, stops, wrapY = false) => { for (const ox of [-1024, 0, 1024]) for (const oy of wrapY ? [-1024, 0, 1024] : [0]) { const cx = x + ox, cy = y + oy; if (cx + r < 0 || cx - r > 1024 || cy + r < 0 || cy - r > 1024) continue; const gr = n.createRadialGradient(cx, cy, 0, cx, cy, r); for (const [k, col] of stops) gr.addColorStop(k, col); n.fillStyle = gr; n.fillRect(cx - r, cy - r, r * 2, r * 2); } };
   // the galactic band runs across the tile (the tile repeats, so it is one band, wide and soft, never a stripe pattern)
   const band = (w, col, a0) => { const gr = n.createLinearGradient(0, 512 - w, 0, 512 + w); gr.addColorStop(0, col + '0)'); gr.addColorStop(.3, col + (a0 * .45) + ')'); gr.addColorStop(.5, col + a0 + ')'); gr.addColorStop(.7, col + (a0 * .45) + ')'); gr.addColorStop(1, col + '0)'); n.fillStyle = gr; n.fillRect(0, 512 - w, 1024, w * 2); };
   n.globalCompositeOperation = 'lighter'; band(340, 'rgba(30,28,42,', .6); band(170, 'rgba(44,40,54,', .55); band(70, 'rgba(62,56,64,', .5);
   // star clouds: bright knots along the band, warm toward the core, cooler further out
   for (let i = 0; i < 110; i++) { const x = R() * 1024, y = 512 + (R() - .5) * 340 * (R() < .5 ? 1 : .5), r = 18 + R() * 100, a = .06 + R() * .09, warm = R() < .6;
-    const cc = warm ? '88,74,70' : '64,66,86'; const gr = n.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, `rgba(${cc},${a * .6})`); gr.addColorStop(.5, `rgba(${cc},${a * .22})`); gr.addColorStop(1, `rgba(${cc},0)`); n.fillStyle = gr; for (const ox of [-1024, 0, 1024]) n.fillRect(x - r + ox, y - r, r * 2, r * 2); }
+    const cc = warm ? '88,74,70' : '64,66,86'; blob(x, y, r, [[0, `rgba(${cc},${a * .6})`], [.5, `rgba(${cc},${a * .22})`], [1, `rgba(${cc},0)`]]); }
   // a brighter central bulge, once per tile
-  for (const ox of [-1024, 0, 1024]) { const gr = n.createRadialGradient(300 + ox, 512, 0, 300 + ox, 512, 420); gr.addColorStop(0, 'rgba(96,80,70,.16)'); gr.addColorStop(.5, 'rgba(70,60,62,.06)'); gr.addColorStop(1, 'rgba(60,50,60,0)'); n.fillStyle = gr; n.fillRect(0, 0, 1024, 1024); } // drawn thrice so the tile wraps without a seam
+  blob(300, 512, 420, [[0, 'rgba(96,80,70,.16)'], [.5, 'rgba(70,60,62,.06)'], [1, 'rgba(60,50,60,0)']]);
   n.globalCompositeOperation = 'multiply'; // the dust lane, ragged, darkest through the middle of the band
-  for (let i = 0; i < 70; i++) { const x = R() * 1024, y = 500 + (R() - .5) * 80 + Math.sin(x / 150) * 30 + Math.sin(x / 47) * 8, r = 24 + R() * 80, k = 70 + R() * 50; const gr = n.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, `rgba(${k},${k - 6},${k + 2},1)`); gr.addColorStop(.55, `rgba(${k + 60},${k + 56},${k + 60},1)`); gr.addColorStop(1, 'rgba(255,255,255,1)'); n.fillStyle = gr; for (const ox of [-1024, 0, 1024]) n.fillRect(x - r + ox, y - r, r * 2, r * 2); }
-  for (let i = 0; i < 24; i++) { const x = R() * 1024, y = 512 + (R() - .5) * 420, r = 40 + R() * 120; const gr = n.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, 'rgba(150,146,150,1)'); gr.addColorStop(1, 'rgba(255,255,255,1)'); n.fillStyle = gr; for (const ox of [-1024, 0, 1024]) n.fillRect(x - r + ox, y - r, r * 2, r * 2); } // thinner dust off the lane
+  for (let i = 0; i < 70; i++) { const x = R() * 1024, y = 500 + (R() - .5) * 80 + Math.sin(x / 150) * 30 + Math.sin(x / 47) * 8, r = 24 + R() * 80, k = 70 + R() * 50; blob(x, y, r, [[0, `rgba(${k},${k - 6},${k + 2},1)`], [.55, `rgba(${k + 60},${k + 56},${k + 60},1)`], [1, 'rgba(255,255,255,1)']]); }
+  for (let i = 0; i < 24; i++) { const x = R() * 1024, y = 512 + (R() - .5) * 420, r = 40 + R() * 120; blob(x, y, r, [[0, 'rgba(150,146,150,1)'], [1, 'rgba(255,255,255,1)']]); } // thinner dust off the lane
   n.globalCompositeOperation = 'lighter';
   // the faintest wash of nebula colour, far from the band as well: rust, violet, ochre, deep blue
   const blobs = [['rgba(70,26,22,', .07], ['rgba(34,22,60,', .065], ['rgba(58,42,22,', .05], ['rgba(16,30,56,', .065], ['rgba(40,18,40,', .05]];
-  for (let i = 0; i < 11; i++) { const [cc, a] = blobs[i % blobs.length]; const x = R() * 1024, y = R() * 1024, r = 160 + R() * 320; const gr = n.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, cc + a + ')'); gr.addColorStop(.45, cc + (a * .4) + ')'); gr.addColorStop(1, cc + '0)'); n.fillStyle = gr; for (const ox of [-1024, 0, 1024]) for (const oy of [-1024, 0, 1024]) n.fillRect(x - r + ox, y - r + oy, r * 2, r * 2); }
+  for (let i = 0; i < 11; i++) { const [cc, a] = blobs[i % blobs.length]; const x = R() * 1024, y = R() * 1024, r = 160 + R() * 320; blob(x, y, r, [[0, cc + a + ')'], [.45, cc + (a * .4) + ')'], [1, cc + '0)']], true); }
   // a dense sprinkle of the faintest stars baked into the sky itself: the depth behind the parallax layers
   for (let i = 0; i < 5000; i++) { const x = R() * 1024, y = R() * 1024, inBand = Math.abs(y - 512) < 260; if (!inBand && R() < .45) continue; const a = (.08 + R() * .22) * (inBand ? 1 : .7); n.fillStyle = `rgba(${235 + R() * 20 | 0},${228 + R() * 22 | 0},${225 + R() * 30 | 0},${a})`; n.fillRect(x, y, 1, 1); }
   return c;
@@ -467,8 +487,9 @@ export async function initRender() {
   ov = document.createElement('canvas'); ov.id = 'ov'; cv.after(ov); ctx = ov.getContext('2d'); sizeOverlay();
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(FOV, S.W / S.H, 1, 1e6);
-  TEX.glow = tex(radial(64, [[0, 1], [.35, .55], [1, 0]])); TEX.dot = tex(radial(16, [[0, 1], [.6, .8], [1, 0]])); TEX.smoke = tex(radial(64, [[0, .9], [.6, .35], [1, 0]]));
-  TEX.streak = tex(streakC()); TEX.plume = tex(plumeC()); TEX.missile = tex(missileC()); TEX.ring = tex(ringTexC());
+  TEX.glow = tex(radial(64, [[0, 1], [.2, .62], [.5, .2], [1, 0]])); // a glow, not a disc TEX.dot = tex(radial(32, [[0, 1], [.25, .7], [.6, .2], [1, 0]])); /* a soft mote, so a trail puff close up is a glow and not a ball */ TEX.smoke = tex(smokeC());
+  TEX.streak = tex(streakC()); TEX.plume = tex(plumeC()); TEX.missile = tex(missileC()); TEX.fins = tex(finsC()); TEX.ring = tex(ringTexC());
+  TEX.anam = tex(radial(128, [[0, 1], [.2, .5], [.5, .12], [1, 0]])); // stretched sideways: the anamorphic streak of a big flash
   FLARE_C = flareC(); TEX.fire = tex(fireC()); TEX.shock = tex(shockC()); TEX.hex = tex(hexC()); TEX.spark = tex(sparkC()); TEX.flare = tex(flareC()); TEX.corona = tex(coronaC());
   TEX.glint = tex(radial(64, [[0, 1], [.08, .9], [.25, .32], [.6, .06], [1, 0]])); // a far world as a point of light
   TEX.sunglow = tex(radial(128, [[0, 1], [.12, .8], [.3, .3], [.6, .07], [1, 0]]));
@@ -508,7 +529,7 @@ export async function initRender() {
   turretM.box = new Inst(box, new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: .5, roughness: .5 }), 8000, true);
   for (const t of Object.values(turretM)) scene.add(t.m);
   B.smoke = new Batch(TEX.smoke, { add: false, order: 8 }); B.dot = new Batch(TEX.dot, { order: 12 }); B.glow = new Batch(TEX.glow, { order: 13, cap: 3000 });
-  B.streak = new Batch(TEX.streak, { ground: true, ax: -.5, order: 11 }); B.plume = new Batch(TEX.plume, { ground: true, ax: -.5, order: 10, cap: 3000 }); B.missile = new Batch(TEX.missile, { ground: true, order: 11, cap: 2000 });
+  B.streak = new Batch(TEX.streak, { ground: true, ax: -.5, order: 11 }); B.plume = new Batch(TEX.plume, { ground: true, ax: -.5, order: 10, cap: 3000 }); B.missile = new Batch(TEX.missile, { add: false, ground: true, order: 11, cap: 2000 }); B.fins = new Batch(TEX.fins, { add: false, ground: true, order: 11, cap: 2000 }); B.anam = new Batch(TEX.anam, { order: 13, cap: 300 }); B.sglow = new Batch(TEX.sunglow, { order: 13, cap: 1500 }); // the soft wide glow of a flash or a fireball
   B.fire = new Batch(TEX.fire, { order: 14, cap: 2000 }); B.shock = new Batch(TEX.shock, { ground: true, order: 9, cap: 600 }); B.hex = new Batch(TEX.hex, { order: 13, cap: 600 }); B.spark = new Batch(TEX.spark, { ground: true, ax: -.5, order: 11, cap: 4000 });
   for (const b of Object.values(B)) scene.add(b.mesh);
   buildPost();
@@ -525,7 +546,8 @@ function buildPost() {
   try {
     const samples = P.msaa ? 4 : 0; // WebGPU multisamples at 1 or 4
     const scenePass = TSL.pass(scene, camera, { samples }), col = scenePass.getTextureNode('output');
-    bloomPass = bloom(col, .85 * ((S.gx && S.gx.bloomK) ?? 1), .45, 1); // only light brighter than white blooms: flashes, plumes, glints
+    bloomPass = bloom(col, .7 * ((S.gx && S.gx.bloomK) ?? 1), .62, .78); // bright light blooms: flashes, plumes, glints, the Sun; a soft knee so it rolls on rather than snapping
+    bloomPass.smoothWidth.value = .4; bloomPass.bloomTintColors[3].set(1, .96, .9); bloomPass.bloomTintColors[4].set(1, .92, .84); // the widest halos run a little warm
     composer = new THREE.RenderPipeline(renderer);
     // tone mapping and sRGB at the end (renderOutput), then SMAA on Ultra over the display image
     const finish = n => P.smaa ? smaa(TSL.renderOutput(n)) : n;
@@ -904,12 +926,13 @@ function sceneFrame() {
     const thr = clamp(s.throttle, 0, 1), burn = s.throttle > 1 ? 1 + .5 * Math.log1p(s.throttle - 1) : 1; // a transit burn runs the drive past its battle rating
     v.mats.bell.emissiveIntensity = dark ? 0 : thr * 1.6;
     if (thr > .04 && !dark && !(S.gx && S.gx.plumes === false)) {
-      const L = vr * (.9 + 2.6 * thr) * burn * (1 + Math.random() * .1), W = vr * (s.def.fighter ? .38 : .5), ca = Math.cos(s.a), sa = Math.sin(s.a), bx = s.x - ca * vr * (-v.xmin + .05), by = s.y - sa * vr * (-v.xmin + .05);
-      const pc = s.team === 0 ? 0xff9a6a : 0xffc880, al = Math.min(1, .45 + thr * .55), fl = .92 + .08 * Math.sin(S.time * 37 + s.id), nb = Math.max(1, v.bells.length);
+      // a fusion torch: a long narrow tail whose length follows the throttle (and a transit burn), a white-hot throat, glare on the stern
+      const L = vr * (1.1 + 3.2 * thr) * burn * (.96 + Math.random() * .08), W = vr * (s.def.fighter ? .3 : .38), ca = Math.cos(s.a), sa = Math.sin(s.a), bx = s.x - ca * vr * (-v.xmin + .05), by = s.y - sa * vr * (-v.xmin + .05);
+      const pc = s.team === 0 ? 0xffb080 : 0xffd0a0, al = Math.min(1, .5 + thr * .5), fl = .93 + .07 * Math.sin(S.time * 41 + s.id) + .03 * Math.sin(S.time * 97 + s.id * 3), nb = Math.max(1, v.bells.length);
       for (const yy of v.bells) { const ox = -sa * yy * vr, oy = ca * yy * vr, pl = L / Math.max(1, nb * .55), pw = W / Math.max(1, nb * .6);
-        B.plume.add(bx + ox, by + oy, 0, pl * fl, pw, s.a, pc, al * .9, 1.3); /* the tail */
-        B.plume.add(bx + ox, by + oy, 1, pl * .4, pw * .5, s.a, 0xfff4e6, al, 1.5); /* the white throat */
-        if (vz > 20) B.glow.add(bx + ox - ca * pw * .3, by + oy - sa * pw * .3, 1, pw * .8, pw * .8, 0, pc, thr * .25, 1.2); } /* and its glare on the stern */
+        B.plume.add(bx + ox, by + oy, 0, pl * fl, pw, s.a, pc, al * .9, 1.4); /* the tail */
+        B.plume.add(bx + ox, by + oy, 1, pl * .42 * fl, pw * .55, s.a, 0xffffff, al, 2.2); /* the white throat */
+        if (vz > 20) B.glow.add(bx + ox - ca * pw * .3, by + oy - sa * pw * .3, 1, pw * 1.2, pw * 1.2, 0, pc, thr * .35, 1.4); } /* and its glare on the stern */
     }
     if (!S.paused && !inPip && Math.hypot(s.rx, s.ry) > s.def.thrust * .05 && Math.random() < .5 && vz > 6) { const a = Math.atan2(s.ry, s.rx); S.parts.push({ x: s.x - Math.cos(a) * vr * .7, y: s.y - Math.sin(a) * vr * .7, vx: s.vx - Math.cos(a) * 120, vy: s.vy - Math.sin(a) * 120, life: .18, max: .18, size: vr * .15 + .3, col: 0xcfd8e0, drag: 3 }); }
     turrets(s, z, v.T * vr / 2, vr, v);
@@ -924,10 +947,12 @@ function sceneFrame() {
   // fx
   for (const p of S.parts) {
     if (!onScr(p.x, p.y, 40)) continue; const f = p.life / p.max;
-    if (p.smoke) { const sz = p.size * (1.8 - f * .8) * 2; B.smoke.add(p.x, p.y, 4, sz, sz, 0, p.col, f * f * .38); }
-    else if (p.fire) { // a fireball: white, then orange, then a dull red ember as it swells and thins
-      const g = 1 - f, sz = p.size * (.6 + g * 1.6), col = f > .7 ? 0xfff4e0 : f > .4 ? 0xffb050 : 0xff5a28; B.fire.add(p.x, p.y, 5, sz, sz, 0, col, Math.min(1, f * 1.6) * .9, f > .7 ? 2.2 : 1.4);
-      if (f < .35 && p.size > 6) B.smoke.add(p.x, p.y, 4, sz * 1.3, sz * 1.3, 0, 0x2a2420, (0.35 - f) * 1.2); }
+    if (p._rot == null) { p._rot = (p.x * 7.13 + p.y * 3.71) % TAU; p._spin = ((p.x * 1.7 + p.y * 2.3) % 2 - 1) * 1.6; } // a stable turn per puff, from where it was born
+    if (p.smoke) { const g = 1 - f, sz = p.size * (1 + g * 1.9) * 2; B.smoke.add(p.x, p.y, 4, sz, sz, p._rot + g * p._spin * .6, p.col, f * f * .42); }
+    else if (p.fire) { // a fire tongue: white-hot, then yellow, orange, and a dull ember as it swells (fast at first) and thins
+      const g = 1 - f, e = 1 - (1 - g) * (1 - g), sz = p.size * (.5 + e * 1.8), col = f > .75 ? 0xfff6e8 : f > .5 ? 0xffd070 : f > .25 ? 0xff8a38 : 0xc83a18, k = f > .75 ? 2.6 : f > .5 ? 1.9 : 1.3;
+      B.fire.add(p.x, p.y, 5, sz, sz, p._rot + g * p._spin, col, Math.min(1, f * 1.7) * .9, k);
+      if (f < .4 && p.size > 6) B.smoke.add(p.x, p.y, 4, sz * 1.4, sz * 1.4, p._rot - g * p._spin * .4, 0x2a2420, (0.4 - f) * 1.1); }
     else if (p.spark) { const sv = hyp(p.vx, p.vy), L = Math.max(sv * .035, px * 6) * (.4 + f), th = Math.max(1.2, px * 1.4) * (.5 + f); B.spark.add(p.x, p.y, 4, L, th, Math.atan2(p.vy, p.vx), p.col, Math.min(1, f * 1.8), 2); }
     else { const sz = Math.max(p.size * f, px * 1.6) * 1.6; B.dot.add(p.x, p.y, 4, sz, sz, 0, p.col, Math.min(1, f * 1.5), 1); }
   }
@@ -945,14 +970,21 @@ function sceneFrame() {
     else B.streak.add(p.x, p.y, 3, sv * .014, Math.max(1.6, px * 1.4), ang, D.col, .95, 2.4);
   }
   for (const m of S.missiles) {
-    if (!onScr(m.x, m.y, 60)) continue; const k = Math.max(1, px * 2.2) * (m.nuke ? 1.8 : 1);
-    B.missile.add(m.x, m.y, 3, k * 11, k * 5.5, m.a, m.nuke ? ((S.time * 6 | 0) % 2 ? 0xffffff : 0xff4b3e) : m.emp ? 0x8fd3ff : hex(S.teamc[m.team].light), 1, 1.3);
-    if (m.thrusting) { const gs = Math.max(14, 10 * px) * (m.nuke ? 2 : 1); B.glow.add(m.x - Math.cos(m.a) * 6, m.y - Math.sin(m.a) * 6, 3, gs, gs, 0, m.emp ? 0x8fd3ff : 0xffb070, .8, 1.6);
-      B.plume.add(m.x - Math.cos(m.a) * 4, m.y - Math.sin(m.a) * 4, 2, Math.max(40, 26 * px) * (m.nuke ? 1.8 : 1), Math.max(5, 3.5 * px), m.a, m.emp ? 0x8fd3ff : 0xffc090, .9, 1.8);
+    if (!onScr(m.x, m.y, 60)) continue; const k = Math.max(1, px * 2.2) * (m.nuke ? 1.8 : 1), ca = Math.cos(m.a), sa = Math.sin(m.a), L = k * 14, Wd = k * 3.5;
+    const tc = m.emp ? 0x8fd3ff : m.nuke ? 0xff4b3e : hex(S.teamc[m.team].light);
+    B.missile.add(m.x, m.y, 3, L, Wd, m.a, 0xe6e9ee, 1, 1); B.fins.add(m.x, m.y, 3.01, L, Wd, m.a, tc, 1, 1.2); // the body, then the fins and band in the team's colour
+    if (m.nuke && (S.time * 5 | 0) % 2) B.glow.add(m.x + ca * L * .1, m.y + sa * L * .1, 3.1, Wd * 2.2, Wd * 2.2, 0, 0xff5040, .9, 1.8); // the warhead's blinking light
+    if (m.thrusting) { const ex = m.emp ? 0x8fd3ff : 0xffc8a0, fl = .9 + .1 * Math.sin(S.time * 53 + m.x), nx = m.x - ca * L * .5, ny = m.y - sa * L * .5, pl = Math.max(44, 30 * px) * (m.nuke ? 1.6 : 1) * fl;
+      B.glow.add(nx, ny, 3, Wd * 1.5, Wd * 1.5, 0, ex, .8, 1.8); // glare at the nozzle
+      B.plume.add(nx, ny, 2, pl, Math.max(Wd * 1.3, 4), m.a, ex, .95, 1.6); /* the tail */ B.plume.add(nx, ny, 2.01, pl * .45, Math.max(Wd * .7, 2.5), m.a, 0xffffff, 1, 2.4); /* the white throat */
       if (!S.paused && !inPip && Math.random() < .6 && px < 40) S.parts.push({ x: m.x - Math.cos(m.a) * 8, y: m.y - Math.sin(m.a) * 8, vx: m.vx * .15 + rand(-6, 6), vy: m.vy * .15 + rand(-6, 6), life: m.nuke ? 2.2 : 1.1, max: m.nuke ? 2.2 : 1.1, size: (m.nuke ? 9 : 4) + px * .6, col: 0x9a948c, smoke: 1, drag: 1.5 }); }
   }
-  for (const f of S.flashes) { const k = f.life / f.max, R = Math.max(f.r * 2, (f.px || 0) * px); B.glow.add(f.x, f.y, 6, R, R, 0, f.blue ? 0xb0dcff : f.col || 0xffd7a0, k, 1.8);
-    if (f.fire) { const g = 1 - k, d = f.r * (.7 + g * 1.1); B.fire.add(f.x, f.y, 6, d, d, 0, k > .7 ? 0xffe8c8 : k > .35 ? 0xffa040 : 0xff5828, Math.min(1, k * 1.5), k > .7 ? 2 : 1.3); } }
+  for (const f of S.flashes) { const k = f.life / f.max, g = 1 - k, e = 1 - (1 - g) * (1 - g), R = Math.max(f.r * 2, (f.px || 0) * px) * (f.fire ? .6 + e * .6 : 1); if (f._rot == null) f._rot = (f.x * 5.3 + f.y * 2.9) % TAU;
+    B.sglow.add(f.x, f.y, 6, R * (f.fire ? .8 : 1.2), R * (f.fire ? .8 : 1.2), 0, f.blue ? 0xb0dcff : f.col || 0xffd7a0, f.fire ? k * .9 : k * k, 2);
+    if (f.r >= 60 && !f.fire && k > .3) B.anam.add(f.x, f.y, 6.01, R * 3.2, R * .22, 0, f.blue ? 0xb0dcff : 0xfff0d8, (k - .3) * .6, 1.4); // the streak of a hard flash across the lens
+    if (f.fire) { const d = f.r * (.5 + e * 1.3), col = k > .75 ? 0xfff2dc : k > .5 ? 0xffc860 : k > .25 ? 0xff8a3a : 0xd0481c, kk = k > .75 ? 2.4 : k > .5 ? 1.8 : 1.3; // a fireball: two turning layers, white → yellow → orange → ember
+      B.fire.add(f.x, f.y, 6, d, d, f._rot + g * .7, col, Math.min(1, k * 1.5), kk); B.fire.add(f.x, f.y, 6.01, d * .8, d * .8, f._rot + 2.1 - g * .5, col, Math.min(1, k * 1.3) * .8, kk);
+      if (k < .5) B.smoke.add(f.x, f.y, 5.9, d * 1.25, d * 1.25, f._rot - g, 0x2a2420, (.5 - k) * .8); } } // and the soot that follows
   for (const b of Object.values(B)) b.end();
   return { z, px, icons };
 }
