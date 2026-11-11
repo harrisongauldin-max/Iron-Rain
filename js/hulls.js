@@ -32,13 +32,18 @@ const lerp = (a, b, t) => a + (b - a) * t, ease = t => t * t * (3 - 2 * t);
 function smooth(secs, per = 3) {
   const out = [];
   for (let i = 0; i < secs.length - 1; i++) { const a = secs[i], b = secs[i + 1];
-    for (let k = 0; k < per; k++) { const t = k / per, e = ease(t); out.push({ x: lerp(a.x, b.x, t), w: lerp(a.w, b.w, e), h: lerp(a.h, b.h, e), y: lerp(a.y || 0, b.y || 0, e), b: lerp(a.b ?? .3, b.b ?? .3, t) }); } }
+    for (let k = 0; k < per; k++) { const t = k / per, e = ease(t); out.push({ x: lerp(a.x, b.x, t), w: lerp(a.w, b.w, e), h: lerp(a.h, b.h, e), y: lerp(a.y || 0, b.y || 0, e), b: lerp(a.b ?? .3, b.b ?? .3, t), p: a.p || b.p }); } }
   out.push({ ...secs[secs.length - 1] }); return out;
 }
-// a loft through sections {x, w (half-width), h (half-height), y (centre height), b (chamfer 0..0.5)}; uv: u along, v around
+// a loft through sections {x, w (half-width), h (half-height), y (centre height), b (chamfer 0..0.5), p (profile)}; uv: u along, v around
+// profiles: 'oct' a chamfered box (the default); 'slab' a wide flat-decked hull with short sides, for the capital ships;
+// 'blade' a hexagon with knife-edge flanks, for the Rim's Ganymede hulls
 function loft(secs, x0, x1) {
-  const ring = s => { const { w, h } = s, y = s.y || 0, c = Math.min(.49, s.b ?? .3);
-    return [[w, h * (1 - c)], [w * (1 - c), h], [-w * (1 - c), h], [-w, h * (1 - c)], [-w, -h * (1 - c)], [-w * (1 - c), -h], [w * (1 - c), -h], [w, -h * (1 - c)]].map(([z, yy]) => [z, yy + y]); };
+  const ring = s => { const { w, h } = s, y = s.y || 0, c = Math.min(.49, s.b ?? .3), p = s.p || 'oct';
+    const r = p === 'slab' ? [[w, h * .5], [w * .72, h], [-w * .72, h], [-w, h * .5], [-w, -h * .5], [-w * .72, -h], [w * .72, -h], [w, -h * .5]]
+      : p === 'blade' ? [[w, h * .1], [w * .42, h], [-w * .42, h], [-w, h * .1], [-w, -h * .1], [-w * .42, -h], [w * .42, -h], [w, -h * .1]]
+      : [[w, h * (1 - c)], [w * (1 - c), h], [-w * (1 - c), h], [-w, h * (1 - c)], [-w, -h * (1 - c)], [-w * (1 - c), -h], [w * (1 - c), -h], [w, -h * (1 - c)]];
+    return r.map(([z, yy]) => [z, yy + y]); };
   const P = [], UV = [], I = [], N = 8;
   secs.forEach(s => { const r = ring(s); for (let k = 0; k <= N; k++) { const [z, y] = r[k % N]; P.push(s.x, y, z); UV.push((s.x - x0) / (x1 - x0), k / N); } });
   for (let i = 0; i < secs.length - 1; i++) for (let k = 0; k < N; k++) { const a = i * (N + 1) + k, b = a + N + 1; I.push(a, b, a + 1, a + 1, b, b + 1); }
@@ -70,7 +75,7 @@ function cylZ(x, y, z0, z1, r, seg = 8) { const g = new THREE.CylinderGeometry(r
 class Kit {
   constructor() { this.parts = [...Array(NSLOT)].map(() => []); this.bells = []; this.top = 0; this.surf = []; this.body = null; this.band = [0, .62]; }
   add(slot, g) { if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2)); this.parts[slot].push(g.index ? g.toNonIndexed() : g); return this; }
-  loft(slot, secs, x0, x1, deck = true) { const S = smooth(secs); if (deck) this.surf.push(S); if (!this.body) this.body = S; return this.add(slot, loft(S, x0, x1)); }
+  loft(slot, secs, x0, x1, deck = true) { if (!this.body && this.profile) for (const s of secs) if (!s.p) s.p = this.profile; const S = smooth(secs); if (deck) this.surf.push(S); if (!this.body) this.body = S; return this.add(slot, loft(S, x0, x1)); }
   build() {
     const geos = [], groups = []; let start = 0;
     for (let s = 0; s < NSLOT; s++) {
@@ -83,7 +88,7 @@ class Kit {
   }
 }
 // a section list read at x: half-width, top
-const at = (secs, x) => { if (x <= secs[0].x) return secs[0]; for (let i = 0; i < secs.length - 1; i++) { const a = secs[i], b = secs[i + 1]; if (x <= b.x) { const t = (x - a.x) / (b.x - a.x || 1); return { w: lerp(a.w, b.w, t), h: lerp(a.h, b.h, t), y: lerp(a.y || 0, b.y || 0, t), b: lerp(a.b ?? .3, b.b ?? .3, t) }; } } return secs[secs.length - 1]; };
+const at = (secs, x) => { if (x <= secs[0].x) return secs[0]; for (let i = 0; i < secs.length - 1; i++) { const a = secs[i], b = secs[i + 1]; if (x <= b.x) { const t = (x - a.x) / (b.x - a.x || 1); return { w: lerp(a.w, b.w, t), h: lerp(a.h, b.h, t), y: lerp(a.y || 0, b.y || 0, t), b: lerp(a.b ?? .3, b.b ?? .3, t), p: a.p }; } } return secs[secs.length - 1]; };
 const inX = (secs, x) => x >= secs[0].x && x <= secs[secs.length - 1].x;
 
 // the outline's half-width at x (for lofting the classes that have no hand-built body)
@@ -94,7 +99,7 @@ const extent = pts => { const xs = pts.map(p => p[0]); return [Math.min(...xs), 
 const STYLE = {
   core:   { slim: 1, crescent: true, patches: false, fork: false },
   rising: { slim: 1.03, crescent: true, patches: true, fork: false },
-  rim:    { slim: .84, crescent: false, patches: false, fork: true },
+  rim:    { slim: .84, crescent: false, patches: false, fork: true, profile: 'blade' },
   none:   { slim: 1, crescent: false, patches: false, fork: false },
 };
 function bow(K, st, x, y, w, h, R) { // the prow: a crescent blade (Society lines), a forked lancer's bow (Rim), or a plain ram
@@ -186,10 +191,10 @@ const BUILD = {
     K.loft(SLOT.hull, [{ x: x0, w: .17 * s, h: .13 }, { x: -.6, w: .19 * s, h: .145 }, { x: .2, w: .13 * s, h: .11 }, { x: .85, w: .09 * s, h: .08 }, { x: 1.15, w: .06 * s, h: .06 }, { x: 1.28, w: .02, h: .03 }], x0, x1);
     const body = K.body;
     K.loft(SLOT.armour, [{ x: -.9, w: .12 * s, h: .05, y: .13 }, { x: .5, w: .08 * s, h: .04, y: .1 }, { x: .7, w: .03, h: .02, y: .08 }], x0, x1);
-    const top = bridge(K, -.12, .17, .2, .11, 3);
-    gunDecks(K, body, -.7, .4, .02, 4, 2, .8);                                 // 4 houses of 2 a side: its 8 broadside guns
-    for (const side of [-1, 1]) K.add(SLOT.hull, fin(-.72, -1.0, .02, .4 * s, .5, .014, side));
-    K.add(SLOT.trim, fin(-.78, -.98, .16, .2, .36, .012, 0));
+    const top = bridge(K, -.12, .17, .15, .09, 3);
+    gunDecks(K, body, -.7, .4, .02, 4, 2, .7);                                 // 4 houses of 2 a side: its 8 broadside guns
+    for (const side of [-1, 1]) K.add(SLOT.hull, fin(-.72, -.98, .02, .26 * s, .4, .014, side));
+    K.add(SLOT.trim, fin(-.78, -.96, .16, .14, .3, .012, 0));
     engines(K, x0, 0, [[.05, 0], [-.05, .1 * s], [-.05, -.1 * s]], .065, .14);
     for (const side of [-1, 1]) stripe(K, body, .45, 1.1, side, .3);
     navLights(K, -.88, .45 * s, .02);
@@ -197,24 +202,25 @@ const BUILD = {
     if (st.patches) patches(K, R, -.8, .6, body, .13, 8);
     K.top = top; return [x0, x1];
   },
-  dread(K, st, R) { // the destroyer's lines grown to a capital ship: a long armoured spine, broadside decks of 80 rail guns, a stepped upper deck, swept fins aft, a spinal lance
-    const s = st.slim, x0 = -1.12, x1 = 1.34;
-    K.loft(SLOT.hull, [{ x: x0, w: .25 * s, h: .145 }, { x: -.82, w: .27 * s, h: .155 }, { x: -.2, w: .23 * s, h: .14 }, { x: .45, w: .17 * s, h: .12 }, { x: .95, w: .1 * s, h: .085 }, { x: 1.18, w: .05 * s, h: .05 }, { x: 1.28, w: .015, h: .02 }], x0, x1);
+  dread(K, st, R) { // a capital ship, not a bigger destroyer: a flat armoured slab, heavy at the bow (a blunt wedge prow under the spinal lance), layered deck armour, 80 rail guns in two long rows of small houses, a low bridge well aft, no fins
+    const s = st.slim, x0 = -1.12, x1 = 1.34, P = 'slab';
+    K.loft(SLOT.hull, [{ x: x0, w: .24 * s, h: .1, p: P }, { x: -.85, w: .3 * s, h: .115, p: P }, { x: -.2, w: .32 * s, h: .12, p: P }, { x: .5, w: .31 * s, h: .125, p: P }, { x: .9, w: .26 * s, h: .12, p: P }, { x: 1.12, w: .15 * s, h: .09, p: P }, { x: 1.26, w: .04, h: .04, p: P }], x0, x1);
     const body = K.body;
-    K.loft(SLOT.armour, [{ x: -.95, w: .16 * s, h: .06, y: .145 }, { x: .45, w: .11 * s, h: .05, y: .12 }, { x: .82, w: .04, h: .03, y: .1 }], x0, x1);
-    K.loft(SLOT.hull, [{ x: -.8, w: .08 * s, h: .04, y: .2 }, { x: .15, w: .06 * s, h: .03, y: .18 }, { x: .38, w: .02, h: .02, y: .17 }], x0, x1);
-    gunDecks(K, body, -.78, .55, .02, 10, 4, .8, .55);                        // 10 houses of 4 a side: 80 guns
-    for (const side of [-1, 1]) { const sx = at(body, .7); K.add(SLOT.dark, box(.7, -.03, side * sx.w * .99, .2, .05, .01)); } // hangar mouths, forward of the batteries
-    for (let i = 0; i < 6; i++) { const x = -.7 + i * .2, sx = at(body, x); K.add(SLOT.armour, box(x, sx.h + .004, 0, .012, .008, sx.w * 1.3)); } // armour ribs across the deck
-    const top = bridge(K, -.55, .22, .2, .1, 3);
-    K.add(SLOT.dark, cylX(.9, 1.42, 0, 0, .026)); K.add(SLOT.glow, disc(1.43, 0, 0, .02)); // the spinal lance
-    for (const side of [-1, 1]) K.add(SLOT.hull, fin(-.74, -1.04, .02, .42 * s, .52, .016, side));
-    K.add(SLOT.trim, fin(-.8, -1.02, .2, .22, .38, .014, 0));
-    engines(K, x0, 0, [[.05, .15 * s], [.05, -.15 * s], [-.06, .06 * s], [-.06, -.06 * s]], .075, .16);
-    for (const side of [-1, 1]) stripe(K, body, .58, 1.16, side, .3);
-    navLights(K, -1.0, .3 * s, .05);
-    if (st.crescent) bow(K, st, 1.18, 0, .08, .06, .36); else if (st.fork) bow(K, st, 1.14, 0, .08, .05, .32);
-    if (st.patches) patches(K, R, -.9, .9, body, .13, 12);
+    K.loft(SLOT.armour, [{ x: -.95, w: .24 * s, h: .035, y: .12, p: P }, { x: .4, w: .25 * s, h: .035, y: .13, p: P }, { x: .95, w: .17 * s, h: .03, y: .12, p: P }, { x: 1.1, w: .06, h: .015, y: .1, p: P }], x0, x1); // first armour layer
+    K.loft(SLOT.hull, [{ x: -.8, w: .15 * s, h: .025, y: .16, p: P }, { x: .3, w: .16 * s, h: .028, y: .17, p: P }, { x: .8, w: .08 * s, h: .02, y: .155, p: P }], x0, x1);             // second, narrower
+    K.loft(SLOT.armour, [{ x: .55, w: .2 * s, h: .05, y: -.11, p: P }, { x: 1.0, w: .18 * s, h: .06, y: -.1, p: P }, { x: 1.2, w: .05, h: .02, y: -.06, p: P }], x0, x1, false);     // the prow's keel armour: mass forward
+    for (let i = 0; i < 5; i++) K.add(SLOT.armour, box(.95 + i * .06, .08 - i * .01, 0, .03, .07 - i * .01, (.3 - i * .045) * s));                                                 // the wedge's stepped glacis plates
+    gunDecks(K, body, -.9, .75, .01, 20, 2, .42, .5);                        // 20 houses of 2 a side, small against the hull: 80 guns
+    for (const side of [-1, 1]) { const sx = at(body, .55); K.add(SLOT.dark, box(.55, -.04, side * sx.w * .99, .16, .04, .01)); K.add(SLOT.dark, box(-.3, -.05, side * at(body, -.3).w * .99, .16, .04, .01)); } // hangar mouths, two a side
+    for (let i = 0; i < 12; i++) { const x = -.95 + i * .17, sx = at(body, x); K.add(SLOT.armour, box(x, sx.h + .003, 0, .01, .006, sx.w * 1.1)); } // armour ribs across the deck
+    for (let i = 0; i < 7; i++) K.add(SLOT.dark, box(-.9 + i * .26, .2, 0, .012, .018, .012));                                                  // deck masts and sensor pylons
+    const top = bridge(K, -.82, .19, .11, .055, 3);
+    K.add(SLOT.dark, cylX(.95, 1.42, .02, 0, .026)); K.add(SLOT.glow, disc(1.43, .02, 0, .02)); // the spinal lance
+    engines(K, x0, 0, [[.04, .17 * s], [.04, -.17 * s], [.04, 0], [-.05, .09 * s], [-.05, -.09 * s]], .065, .15);
+    for (const side of [-1, 1]) stripe(K, body, -.6, 1.0, side, .55);
+    navLights(K, -1.0, .3 * s, .06);
+    if (st.crescent) bow(K, st, 1.2, 0, .08, .05, .3); else if (st.fork) bow(K, st, 1.14, 0, .08, .05, .32);
+    if (st.patches) patches(K, R, -.9, .9, body, .11, 12);
     K.top = top; return [x0, x1];
   },
   spear(K, st, R) { // the Annihilo: a long shaft, a leaf-bladed head, broadside decks along the shaft
@@ -235,24 +241,24 @@ const BUILD = {
     navLights(K, -1.0, .3 * s, .05);
     K.top = top; return [x0, x1];
   },
-  moonbreaker(K, st, R) { // the same family at the scale of a city: a long wedge, twin siege lances, broadside decks of 160 guns, a stepped upper deck and a bridge tower aft
-    const s = st.slim, x0 = -1.16, x1 = 1.3;
-    K.loft(SLOT.hull, [{ x: x0, w: .35 * s, h: .24 }, { x: -.88, w: .37 * s, h: .26 }, { x: -.3, w: .33 * s, h: .24 }, { x: .4, w: .25 * s, h: .2 }, { x: .92, w: .14 * s, h: .14 }, { x: 1.12, w: .08 * s, h: .09 }, { x: 1.24, w: .025, h: .04 }], x0, x1);
+  moonbreaker(K, st, R) { // "twice the length of my ship, three times the girth ... a floating military dock city": a slab keel carrying a vast forward dock block, its back a city of decks and towers, twin siege lances, 160 guns in four rows, a bridge tower aft
+    const s = st.slim, x0 = -1.16, x1 = 1.3, P = 'slab';
+    K.loft(SLOT.hull, [{ x: x0, w: .3 * s, h: .16, p: P }, { x: -.9, w: .34 * s, h: .18, p: P }, { x: -.4, w: .36 * s, h: .19, p: P }, { x: -.1, w: .48 * s, h: .27, p: P }, { x: .6, w: .5 * s, h: .28, p: P }, { x: .95, w: .36 * s, h: .2, p: P }, { x: 1.15, w: .14 * s, h: .1, p: P }, { x: 1.26, w: .03, h: .04, p: P }], x0, x1);
     const body = K.body;
-    K.loft(SLOT.armour, [{ x: -1.05, w: .27 * s, h: .07, y: .24 }, { x: .3, w: .19 * s, h: .06, y: .2 }, { x: .72, w: .08, h: .04, y: .16 }], x0, x1);
-    K.loft(SLOT.armour, [{ x: -.9, w: .23 * s, h: .06, y: -.25 }, { x: .5, w: .14 * s, h: .05, y: -.2 }, { x: .82, w: .04, h: .03, y: -.15 }], x0, x1, false); // the keel
-    K.loft(SLOT.hull, [{ x: -.95, w: .15 * s, h: .05, y: .31 }, { x: .1, w: .12 * s, h: .045, y: .29 }, { x: .5, w: .05, h: .03, y: .26 }], x0, x1);   // a stepped upper deck, as on the dreadnought
-    K.loft(SLOT.armour, [{ x: -.85, w: .07 * s, h: .03, y: .36 }, { x: -.1, w: .055 * s, h: .025, y: .34 }, { x: .12, w: .02, h: .015, y: .33 }], x0, x1); // and a second tier on it
-    for (let i = 0; i < 9; i++) { const x = -.85 + i * .19, sx = at(body, x); K.add(SLOT.armour, box(x, sx.h + .004, 0, .014, .01, sx.w * 1.3)); } // armour ribs across the deck
-    const top = bridge(K, -.62, .38, .24, .13, 3);
-    gunDecks(K, body, -.95, .7, .03, 20, 4, 1.1, .55);                       // 20 houses of 4 a side: 160 guns
-    for (const z of [-1, 1]) { K.add(SLOT.dark, cylX(.85, 1.38, .02, z * .09, .04)); K.add(SLOT.armour, box(1.0, .02, z * .09, .3, .1, .08)); K.add(SLOT.glow, disc(1.39, .02, z * .09, .03)); } // twin siege lances
-    for (const side of [-1, 1]) { const sx = at(body, .82); K.add(SLOT.dark, box(.82, -.1, side * sx.w * .99, .22, .08, .01)); } // hangar decks
-    engines(K, x0, 0, [[.1, .22 * s], [.1, 0], [.1, -.22 * s], [-.1, .11 * s], [-.1, -.11 * s]], .1, .2);
-    for (const side of [-1, 1]) stripe(K, body, .74, 1.2, side, .25);
-    navLights(K, -1.05, .37 * s, .1);
-    if (st.crescent) bow(K, st, 1.16, 0, .13, .08, .34); else if (st.fork) bow(K, st, 1.1, 0, .14, .08, .34);
-    if (st.patches) patches(K, R, -1, .9, body, .22, 16);
+    K.loft(SLOT.armour, [{ x: -1.0, w: .25 * s, h: .05, y: .17, p: P }, { x: -.3, w: .3 * s, h: .05, y: .2, p: P }, { x: -.12, w: .2 * s, h: .03, y: .22, p: P }], x0, x1);          // aft deck armour
+    K.loft(SLOT.armour, [{ x: -.95, w: .22 * s, h: .05, y: -.17, p: P }, { x: .5, w: .34 * s, h: .07, y: -.28, p: P }, { x: 1.0, w: .18, h: .05, y: -.2, p: P }, { x: 1.2, w: .04, h: .02, y: -.1, p: P }], x0, x1, false); // the keel, deepest under the dock
+    for (const side of [-1, 1]) for (let i = 0; i < 4; i++) { const x = .05 + i * .18, sx = at(body, x); K.add(SLOT.dark, box(x, -.02, side * sx.w * .99, .12, .12, .012)); K.add(SLOT.glow, box(x, -.02, side * (sx.w * .99 + .007), .1, .1, .004)); } // the dock's open bays, lit
+    for (let i = 0; i < 6; i++) { const x = -.05 + i * .16, sx = at(body, x); K.add(SLOT.armour, box(x, sx.h + .004, 0, .014, .01, sx.w * 1.3)); }       // armour ribs across the dock's back
+    city(K, R, body, -.08, .88, .28, .2, .7);                                 // the city on the dock's back
+    const top = bridge(K, -.65, .25, .16, .08, 3);
+    gunDecks(K, body, -1.0, -.2, .02, 10, 2, .5, .5); gunDecks(K, body, -1.0, -.2, -.06, 10, 2, .5, .5);  // aft: 20 houses of 2 a side in two rows
+    gunDecks(K, body, 0, .9, .1, 15, 2, .5, .5); gunDecks(K, body, 0, .9, -.1, 15, 2, .5, .5);           // the dock's flanks: 30 houses of 2 a side in two rows: 160 guns in all
+    for (const z of [-1, 1]) { K.add(SLOT.dark, cylX(.9, 1.4, .0, z * .12, .04)); K.add(SLOT.armour, box(1.0, .0, z * .12, .3, .1, .09)); K.add(SLOT.glow, disc(1.41, .0, z * .12, .03)); } // twin siege lances
+    engines(K, x0, 0, [[.08, .2 * s], [.08, 0], [.08, -.2 * s], [-.08, .1 * s], [-.08, -.1 * s]], .09, .2);
+    for (const side of [-1, 1]) stripe(K, body, -.9, -.2, side, .5);
+    navLights(K, -1.05, .32 * s, .1);
+    if (st.crescent) bow(K, st, 1.18, 0, .12, .07, .3); else if (st.fork) bow(K, st, 1.12, 0, .13, .07, .32);
+    if (st.patches) patches(K, R, -1, .9, body, .22, 18);
     K.top = top; return [x0, x1];
   },
 
@@ -262,9 +268,9 @@ const BUILD = {
     K.loft(SLOT.hull, [{ x: x0, w: .16 * s, h: .125 }, { x: -.62, w: .175 * s, h: .135 }, { x: .15, w: .13 * s, h: .105 }, { x: .75, w: .08 * s, h: .075 }, { x: 1.12, w: .04 * s, h: .045 }, { x: 1.3, w: .012, h: .016 }], x0, x1);
     const body = K.body;
     K.loft(SLOT.armour, [{ x: -.85, w: .1 * s, h: .05, y: .125 }, { x: .35, w: .07 * s, h: .04, y: .1 }, { x: .6, w: .025, h: .02, y: .08 }], x0, x1);
-    const top = bridge(K, -.32, .16, .18, .1, 2);
-    gunDecks(K, body, -.6, .15, .015, 2, 2, .75, .6);
-    for (const side of [-1, 1]) K.add(SLOT.hull, fin(-.66, -.96, .02, .36 * s, .46, .014, side));
+    const top = bridge(K, -.32, .16, .15, .085, 2);
+    gunDecks(K, body, -.6, .15, .015, 2, 2, .7, .6);
+    for (const side of [-1, 1]) K.add(SLOT.hull, fin(-.66, -.94, .02, .26 * s, .38, .014, side));
     K.add(SLOT.trim, fin(-.72, -.94, .15, .17, .32, .012, 0));
     engines(K, x0, 0, [[.04, .07 * s], [.04, -.07 * s], [-.05, 0]], .06, .13);
     for (const side of [-1, 1]) stripe(K, body, .35, 1.05, side, .3);
@@ -412,7 +418,7 @@ export const HAS_3D = t => !!(LEN_M[t] && !['ripwing', 'starshell'].includes(t))
 // → { geo (with material groups by SLOT), bells (z offsets), xmin, top, hw(x) half-width, deck(x, z) height of the hull's top }
 export function buildHull(type, fac, variant = '') {
   const key = type + ':' + (fac || 'none') + ':' + variant; if (CACHE[key]) return CACHE[key];
-  const st = STYLE[fac] || STYLE.none, K = new Kit(), R = rnd(seedOf(key)), [vb, tags = ''] = variant.split('|');
+  const st = STYLE[fac] || STYLE.none, K = new Kit(), R = rnd(seedOf(key)), [vb, tags = ''] = variant.split('|'); K.profile = st.profile;
   K.tags = new Set(tags); const fn = BUILD[vb] || BUILD[type];
   const [x0, x1] = fn ? fn(K, st, R) : generic(K, type, fac, st);
   fittings(K, x0, x1, R);
