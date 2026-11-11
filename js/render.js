@@ -8,11 +8,11 @@ import * as TSL from 'three/tsl';
 import { bloom } from '../vendor/three/tsl/BloomNode.js';
 import { smaa } from '../vendor/three/tsl/SMAANode.js';
 import { loadGfx, preset, meterTick, gpuTimer } from './gfx.js';
-import { HAS_3D, buildHull, hullTextures, paintOf, buildStation, missileGeoOf, missileMaterial } from './hulls.js';
+import { HAS_3D, buildHull, hullTextures, paintOf, buildStation, missileGeoOf, missileMaterial, MISSILE_M } from './hulls.js';
 import { mergeGeometries } from '../vendor/three/utils/BufferGeometryUtils.js';
 import { buildSlip, ganymedeDocks, phobosTraffic } from './yards.js';
 import { S } from './state.js';
-import { SHAPES, BODIES, ICON_SCALE, DEFS, fshape, HULL_REF } from './data.js';
+import { SHAPES, BODIES, ICON_SCALE, DEFS, fshape, HULL_REF, M_TO_UNITS } from './data.js';
 import { TAU, PI, rand, clamp, hyp, hex, angDiff } from './util.js';
 import { grav } from './physics.js';
 import { disabled, mainAmmo, needsService, groupList, defaultRally, worldUnderAttack, nukesOf } from './sim.js';
@@ -85,6 +85,7 @@ function finsC() { const [c, g] = canvas(64, 16); g.fillStyle = '#fff';
   g.fillRect(24, 3.5, 5, 9); g.fillRect(50, 4.5, 3, 7); return c; } // the band, and the seeker ring behind the cone
 function hullPath(g, pts, k) { g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x * k, y * k) : g.moveTo(x * k, y * k)); g.closePath(); }
 export const WINGS = []; let WF = 0; // wing icons drawn this frame, in screen pixels, for picking
+const MISSILE_X = 150; // missiles drawn this many times their real size
 const HAND0 = 3.5, HAND1 = 14; // icon to hull hand-off, in pixels of hull half-length
 const vrOf = s => s.def.vr0 && !s.def.static ? s.def.vr0 * (S.hullX || HULL_REF) / HULL_REF : s.r;
 const R0 = type => DEFS[type].r0 ?? DEFS[type].r; // a hull's detailing follows its class, not its hit circle
@@ -1022,12 +1023,14 @@ function sceneFrame() {
     else { const L = Math.max(sv * .02, 12 * px), th = Math.max(2, px * 1.8); B.streak.add(p.x - Math.cos(ang) * L * .9, p.y - Math.sin(ang) * L * .9, 3, L * 1.8, th * .5, ang, D.col, .3, 2); B.streak.add(p.x, p.y, 3, L, th, ang, D.col, 1, 2.6); } // a gun round: a tracer with a fading tail, so a broadside reads as a volley
   }
   for (const m of S.missiles) {
-    if (!onScr(m.x, m.y, 60)) continue; const k = Math.max(1, px * 2.2) * (m.nuke ? 1.8 : 1), ca = Math.cos(m.a), sa = Math.sin(m.a), L = k * 14, Wd = k * 3.5;
+    if (!onScr(m.x, m.y, 60)) continue; const ca = Math.cos(m.a), sa = Math.sin(m.a);
+    // drawn at 150× real size (5× the hulls' 30×, and following the Hulls setting), never under 4 px so a salvo can still be followed; the plume carries it at range
+    const L = Math.max(MISSILE_M[m.nuke ? 'nuke' : m.emp ? 'emp' : 'std'] * M_TO_UNITS * MISSILE_X * (S.hullX || HULL_REF) / HULL_REF, 4 * px), Wd = L * .25;
     const tc = m.emp ? 0x8fd3ff : m.nuke ? 0xff4b3e : hex(S.teamc[m.team].light);
     (m.nuke ? missileM.nuke : m.emp ? missileM.emp : missileM.std).add(m.x, m.y, 3, -m.a, L, L, L, tc); // the 3-D body, its fins and bands in the team's colour (hulls.js)
     if (m.nuke && (S.time * 5 | 0) % 2) B.glow.add(m.x + ca * L * .1, m.y + sa * L * .1, 3.1, Wd * 2.2, Wd * 2.2, 0, 0xff5040, .9, 1.8); // the warhead's blinking light
-    if (m.thrusting) { const ex = m.emp ? 0x8fd3ff : 0xffc8a0, fl = .9 + .1 * Math.sin(S.time * 53 + m.x), nx = m.x - ca * L * .5, ny = m.y - sa * L * .5, pl = Math.max(44, 30 * px) * (m.nuke ? 1.6 : 1) * fl;
-      B.glow.add(nx, ny, 3, Wd * 1.5, Wd * 1.5, 0, ex, .8, 1.8); // glare at the nozzle
+    if (m.thrusting) { const ex = m.emp ? 0x8fd3ff : 0xffc8a0, fl = .9 + .1 * Math.sin(S.time * 53 + m.x), nx = m.x - ca * L * .5, ny = m.y - sa * L * .5, pl = Math.max(L * 3.2, 12 * px) * (m.nuke ? 1.3 : 1) * fl; // the plume follows the body, with a floor so a salvo reads at range
+      B.glow.add(nx, ny, 3, Math.max(Wd * 1.5, 2 * px), Math.max(Wd * 1.5, 2 * px), 0, ex, .8, 1.8); // glare at the nozzle
       B.plume.add(nx, ny, 2, pl, Math.max(Wd * 1.3, 4), m.a, ex, .95, 1.6); /* the tail */ B.plume.add(nx, ny, 2.01, pl * .45, Math.max(Wd * .7, 2.5), m.a, 0xffffff, 1, 2.4); /* the white throat */
       if (!S.paused && !inPip && Math.random() < 36 * GDT && px < 40) S.parts.push({ x: m.x - Math.cos(m.a) * 8, y: m.y - Math.sin(m.a) * 8, vx: m.vx * .15 + rand(-6, 6), vy: m.vy * .15 + rand(-6, 6), life: m.nuke ? 2.2 : 1.1, max: m.nuke ? 2.2 : 1.1, size: (m.nuke ? 9 : 4) + px * .6, col: 0x9a948c, smoke: 1, drag: 1.5 }); }
   }

@@ -578,6 +578,8 @@ function missileGeo(kind = 'std') {
   }
   const g = mergeGeometries(parts); g.computeBoundingSphere(); g.userData.tris = g.attributes.position.count / 3; return g;
 }
+// real lengths in metres: a ship-to-ship missile, the EMP round, a nuclear missile
+export const MISSILE_M = { std: 15, emp: 15, nuke: 25 };
 const MGEO = {};
 export const missileGeoOf = kind => MGEO[kind] || (MGEO[kind] = missileGeo(kind));
 export function missileMaterial() { // paint × instance colour where tm is set; the base node material multiplies by instanceColor itself, so pre-divide
