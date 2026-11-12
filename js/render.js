@@ -666,6 +666,21 @@ function applySurface(v) {
   if (t.clouds) { if (!v.clouds) { v.clouds = new THREE.Mesh(GEO.sphere, cloudMat()); v.clouds.scale.setScalar(1.012); v.clouds.renderOrder = 2; v.g.add(v.clouds); } v.clouds.material.uniforms.map.value = t.clouds; }
   v.mesh.visible = true;
 }
+// the outline of a world as the camera really sees it: the sphere's horizon circle (a sphere under perspective is
+// wider than r·k at its centre and sits off its projected centre) sampled and projected to the screen, so an overlay
+// ring drawn through these points hugs the disc at every zoom. n points; out[i] = {x, y}; also returns {cx, cy} of the ring
+export function silhouette(x, y, r, n = 48, out = []) {
+  const d0 = camDist(), [ox, oy, oz] = camOffset(d0), cx = S.cam.x + ox, ch = oy, cy = S.cam.y + oz; // the camera, in world x / height / world y
+  let ux = x - cx, uh = -ch, uy = y - cy; const dd = hyp(ux, uh, uy); if (dd <= r * 1.001) return null; ux /= dd; uh /= dd; uy /= dd;
+  const t = dd - r * r / dd, rho = r * Math.sqrt(dd * dd - r * r) / dd, hx = cx + ux * t, hh = ch + uh * t, hy = cy + uy * t; // the horizon circle: centre and radius
+  let e1x = uy, e1h = 0, e1y = -ux; const l1 = hyp(e1x, e1y) || 1; e1x /= l1; e1y /= l1; // e1 = u × up (up = height axis), e2 = u × e1
+  const e2x = uh * e1y - uy * e1h, e2h = uy * e1x - ux * e1y, e2y = ux * e1h - uh * e1x;
+  let sx = 0, sy = 0; const o = { x: 0, y: 0, k: 0, ok: false };
+  for (let i = 0; i < n; i++) { const a = i / n * TAU, c = Math.cos(a) * rho, s2 = Math.sin(a) * rho;
+    projectTo(o, hx + e1x * c + e2x * s2, hy + e1y * c + e2y * s2, hh + e1h * c + e2h * s2); if (!o.ok) return null;
+    const p = out[i] || (out[i] = { x: 0, y: 0 }); p.x = o.x; p.y = o.y; sx += o.x; sy += o.y; }
+  out.length = n; out.cx = sx / n; out.cy = sy / n; return out;
+}
 // a far world's point of light: on while its disc is under a few pixels, fading out as the disc grows
 const GL_Q = new THREE.Quaternion(), GL_N = new THREE.Vector3();
 function glintFor(v, x, y, rpx, z, on) {

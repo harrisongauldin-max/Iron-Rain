@@ -9,7 +9,7 @@ const PI = Math.PI;
 import * as K from './camp.js';
 import { C } from './camp.js';
 import { toWorld, projectTo } from './cam.js';
-import { buildIcon, overlayAPI, portrait } from './render.js';
+import { buildIcon, overlayAPI, portrait, silhouette } from './render.js';
 import { setupFactions } from './sim.js';
 import { fightBattle } from './battle.js';
 import * as GV from './groundview.js';
@@ -135,11 +135,16 @@ function drawOverlay(G, label) {
   for (const w of wl) {
     const q = sp[w.id]; if (!onScreen(q)) continue;
     const R = q.R, oc = colN(w.owner), selW = V.sel && V.sel.w && an[V.sel.w] === w.id, hov = V.hover && V.hover.w === w.id, moon = !!LAY.pos[w.id].parent, rr = Math.max(R + 3, moon ? 3.5 : 5);
-    if (w.owner !== 'neu') { const hr = rr + (moon ? 11 : 19), cs = colS(w.owner), gr = ctx.createRadialGradient(q.x, q.y, rr * .5, q.x, q.y, hr); gr.addColorStop(0, cs + '80'); gr.addColorStop(.55, cs + '30'); gr.addColorStop(1, cs + '00'); // UI v2: who holds it, at a glance
-      ctx.globalAlpha = w.owner === me ? 1 : .8; ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(q.x, q.y, hr, 0, PI * 2); ctx.fill();
-      if (w.id === K.CAPITAL[w.owner]) { ctx.globalAlpha = .55; ctx.strokeStyle = cs; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(q.x, q.y, rr + 4.5, 0, PI * 2); ctx.stroke(); } ctx.globalAlpha = 1; }
+    // a world big enough to show its disc gets its ring through the sphere's real outline (graphics: silhouette), 3 px out; smaller ones a circle
+    const P = LAY.pos[w.id], sil = R >= 6 ? silhouette(P.x, P.y, P.r, 48) : null;
+    const ringPath = (grow) => { ctx.beginPath(); if (sil) { for (let i = 0; i < sil.length; i++) { const p = sil[i], dx = p.x - sil.cx, dy = p.y - sil.cy, l = Math.hypot(dx, dy) || 1, g = 1 + grow / l; i ? ctx.lineTo(sil.cx + dx * g, sil.cy + dy * g) : ctx.moveTo(sil.cx + dx * g, sil.cy + dy * g); } ctx.closePath(); } else ctx.arc(q.x, q.y, rr + grow - 3, 0, PI * 2); };
+    if (w.owner !== 'neu') { const cs = colS(w.owner); ctx.globalAlpha = w.owner === me ? 1 : .8; ctx.strokeStyle = cs; // UI v2: who holds it, at a glance — a halo outside the disc, the disc itself left alone
+      if (sil) { for (const [wd, al] of [[22, '14'], [12, '22'], [5, '38']]) { ctx.strokeStyle = cs + al; ctx.lineWidth = wd; ringPath(3 + wd / 2); ctx.stroke(); } }
+      else { const hr = rr + (moon ? 11 : 19), gr = ctx.createRadialGradient(q.x, q.y, rr * .9, q.x, q.y, hr); gr.addColorStop(0, cs + '12'); gr.addColorStop(.12, cs + '58'); gr.addColorStop(.55, cs + '24'); gr.addColorStop(1, cs + '00'); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(q.x, q.y, hr, 0, PI * 2); ctx.fill(); }
+      if (w.id === K.CAPITAL[w.owner]) { ctx.globalAlpha = .55; ctx.strokeStyle = cs; ctx.lineWidth = 1; ringPath(7.5); ctx.stroke(); } ctx.globalAlpha = 1; }
     if (R < 2.5) G.screen().circle(q.x, q.y, moon ? 2.2 : 3).fill({ color: oc, alpha: .95 });
-    G.screen().circle(q.x, q.y, rr).stroke({ width: selW ? 2.4 : hov ? 1.8 : 1.1, color: oc, alpha: selW || hov ? 1 : .7 });
+    if (sil) { ctx.globalAlpha = selW || hov ? 1 : .7; ctx.strokeStyle = colS(w.owner); ctx.lineWidth = selW ? 2.4 : hov ? 1.8 : 1.1; ringPath(3); ctx.stroke(); ctx.globalAlpha = 1; }
+    else G.screen().circle(q.x, q.y, rr).stroke({ width: selW ? 2.4 : hov ? 1.8 : 1.1, color: oc, alpha: selW || hov ? 1 : .7 });
     if (w.siege) G.screen().dashed(q.x, q.y, rr + 5, 5, 4).stroke({ width: 1.6, color: 0xff5a4a, alpha: .95 });
     if (K.wreckAt(w.id)) debris(ctx, q.x, q.y, rr + (w.siege ? 10 : 6), K.wreckAt(w.id));
     if (selW) { const s = rr + 9, l = 7; ctx.globalAlpha = 1; ctx.strokeStyle = '#f2c14e'; ctx.lineWidth = 1.5; ctx.beginPath();
