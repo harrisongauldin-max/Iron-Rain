@@ -311,10 +311,10 @@ const planetMat = (atmo, o = {}) => {
     col.addAssign(nt.mul(one.sub(day)).mul(1.9).mul(one.sub(one.sub(sh).mul(.6))).mul(U.hasNight));
     col.addAssign(nt.mul(.5).mul(one.sub(day)).mul(pow(one.sub(mu), 1.5)).mul(U.hasNight)); // a little of the city light scatters in the air at the limb
     if (AUR) { // the auroral oval round each pole, on the night side: curtains that drift and ripple, in the world's own colour
-      const q = positionGeometry, alat = abs(q.y).toVar(), band = smoothstep(.74, .83, alat).mul(one.sub(smoothstep(.87, .95, alat))).toVar();
+      const q = positionGeometry, alat = abs(q.y).toVar(), band = (GAS ? smoothstep(.74, .83, alat).mul(one.sub(smoothstep(.87, .95, alat))) : smoothstep(.86, .905, alat).mul(one.sub(smoothstep(.925, .965, alat)))).toVar(); // Earth's oval: a thin ring at 60–75°; the giants' wider
       const cur = n3(vec3(q.x.mul(9), SH.time.mul(.11), q.z.mul(9))).mul(.6).add(n3(vec3(q.x.mul(27).add(SH.time.mul(.17)), q.y.mul(6), q.z.mul(27))).mul(.4)).toVar();
       const au = band.mul(pow(clamp(cur.add(.35), 0, 1.4), 2.2)).mul(one.sub(day)).toVar();
-      col.addAssign(U.aurCol.mul(au.mul(GAS ? .22 : .55).add(band.mul(GAS ? .02 : .07))).mul(one.sub(day)));
+      col.addAssign(U.aurCol.mul(au.mul(GAS ? .22 : .42).add(band.mul(GAS ? .02 : .05))).mul(one.sub(day)));
     }
     return vec4(col, 1);
   })();
