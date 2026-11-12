@@ -833,12 +833,30 @@ function defend(mine, foes) {
   if (!G.storksDone && reserve.length) { const rs = strOf(reserve);
     for (const z of G.zones) { const en = within(foes, z.x, z.y, ZONE_HOLD), d = hyp(z.x - city.x, z.y - city.y); if (en.length && strOf(en) < rs * .7 && d < city.r + 2200) { if (!sally || strOf(en) < sally.str) sally = { z, en, str: strOf(en) }; } } }
   if (sally) G.aist('sally'); if (urgent) G.aist(urgent.s.own === 0 ? 'retake' : 'reinforce');
+  // the clock: the legions win by holding a majority of the sites for two minutes, and a site changes hands only to
+  // whoever stands on it two to one (objectives). So the garrison reads the clock. One site short of the majority
+  // (the brink), every site still ours is held where it stands: men on the site, not out chasing shadows. With the clock
+  // running, everything that can be spared goes onto the taken site that is cheapest to take back, to stand on it two
+  // to one before the two minutes are out
+  const lost = sites.filter(x => x.own === 0), brink = lost.length === NEED() - 1, clock = lost.length >= NEED();
+  const focus = clock ? lost.slice().sort((p, q) => (p.a + strOf(within(foes, p.x, p.y, 500)) * .5) - (q.a + strOf(within(foes, q.x, q.y, 500)) * .5))[0] : null;
+  if (clock) G.aist('clock'); else if (brink) G.aist('brink');
+  // who can be spared: a site keeps on it half again the enemy within 550 m of it (two to one is what takes a site),
+  // and at least a quarter of its own; the rest goes where the clock says, nearest first, until that site has enough
+  if (clock || brink) {
+    const near = P.map(p => strOf(within(foes, p.s.x, p.s.y, 550)));
+    const want = clock ? [{ p: P[focus.id], need: (focus.a + near[focus.id]) * 2.3 }] : P.filter((p, i) => p.s.own === 1 && p.held < near[i] * .9).map(p => ({ p, need: near[p.s.id] * 1.2 }));
+    for (const w of want) { let have = w.p.held;
+      const spare = []; P.forEach((p, i) => { if (p === w.p || (p.s.own === 1 && near[i] > 0 && brink && !clock && p.held < near[i] * 1.6)) return; let free = p.s.own === 0 && p !== w.p ? p.held : p.held - Math.max(near[i] * 1.6, p.held * .25); for (const u of p.ours.slice().sort((a, b) => hyp(a.x - w.p.s.x, a.y - w.p.s.y) - hyp(b.x - w.p.s.x, b.y - w.p.s.y))) { const k = strOf([u]); if (free < k || u.melee) continue; spare.push(u); free -= k; } });
+      for (const u of spare.sort((a, b) => hyp(a.x - w.p.s.x, a.y - w.p.s.y) - hyp(b.x - w.p.s.x, b.y - w.p.s.y))) { if (have >= w.need) break; const from = P[u.site]; u.site = w.p.s.id; u.helped = w.p.s.id; have += strOf([u]); from.ours = from.ours.filter(x => x !== u); from.held -= strOf([u]); w.p.ours.push(u); w.p.held += strOf([u]); G.aist('shift'); } } }
+  const onSite = (u, x) => hyp(u.x - x.x, u.y - x.y) < x.r * .7, standOn = (u, x) => { const a = (u.id * 2.39996) % TAU, rr = x.r * (.25 + (u.id % 3) * .15); goTo(u, x.x + Math.cos(a) * rr, x.y + Math.sin(a) * rr, { run: hyp(u.x - x.x, u.y - x.y) > 400 }); };
   // the reserve
   for (const u of reserve) {
     if (steady(u, city.x, city.y)) continue;
     if (u.melee) continue;
     // the Legate keeps behind his reserve: his fall would shake the whole garrison (leaderDown)
     if (u.leader) { const e = nearest(u, foes), de = e ? Math.sqrt(dist2(u, e)) : Infinity; if (e && de < 200) strike(u, e, false); else { const s = urgent ? urgent.s : null, px = s ? s.x + (city.x - s.x) * .35 : u.post.x, py = s ? s.y + (city.y - s.y) * .35 : u.post.y; goTo(u, px, py); } continue; }
+    if (focus) { const on = foes.filter(f => hyp(f.x - focus.x, f.y - focus.y) < focus.r + 120); if (on.length) charge(u, bestStrike(u, on, 2600) || on[0]); else standOn(u, focus); continue; } // the clock is running: onto the site
     let tg = null;
     if (sally) tg = bestStrike(u, sally.en, 3600); // the beachhead may be far out on the plain
     else if (urgent) tg = bestStrike(u, urgent.en.length ? urgent.en : within(foes, urgent.s.x, urgent.s.y, 1300), 2800);
@@ -850,7 +868,11 @@ function defend(mine, foes) {
   for (const u of mine.filter(v => v.role === 'site')) {
     if (steady(u, city.x, city.y)) continue;
     if (u.melee) continue;
-    const near = nearest(u, foes), dn = near ? Math.sqrt(dist2(u, near)) : Infinity, home = P[u.site], s = home.s;
+    let home = P[u.site], s = home.s;
+    if (focus && s === focus) { const on = foes.filter(f => hyp(f.x - s.x, f.y - s.y) < s.r + 120); if (!onSite(u, s)) { standOn(u, s); continue; } if (on.length) { strike(u, nearest(u, on), false); continue; } }
+    const near = nearest(u, foes), dn = near ? Math.sqrt(dist2(u, near)) : Infinity;
+    // at the brink, a site's own garrison stays on it: shooting from where it stands, never drawn off it
+    if (brink && s.own === 1 && (home.threat > 0 || u.helped === s.id)) { if (!onSite(u, s)) { standOn(u, s); continue; } if (near && dn < u.wpn.range * 1.02 && los(u.x, u.y, near.x, near.y)) { if (u.order && u.order.type === 'move') order(u, { type: 'halt' }); continue; } const e = home.en.find(f => hyp(f.x - s.x, f.y - s.y) < s.r + 60); if (e) { strike(u, e, false); continue; } standOn(u, s); continue; }
     if (near && dn < u.wpn.range * 1.02 && los(u.x, u.y, near.x, near.y)) { if (u.order && u.order.type === 'move') order(u, { type: 'halt' }); continue; }
     if (s.own === 0 || home.en.some(e => hyp(e.x - s.x, e.y - s.y) < s.r + 20)) { const e = nearest(u, home.en.length ? home.en : foes); if (e) { strike(u, e, false); continue; } } // the enemy stands on our site: throw them off it
     if (near && dn < u.wpn.range * 1.3 && hyp(near.x - s.x, near.y - s.y) < 600) { strike(u, near, false); continue; } // close but hidden: go and find them
@@ -875,6 +897,32 @@ function defend(mine, foes) {
     if (w.down && near && dn < 320) { strike(u, near, false); continue; } // the gap is open: hold it
     if (near && dn < u.wpn.range * .98 && los(u.x, u.y, near.x, near.y) && hyp(u.x - m.x, u.y - m.y) < 160) { if (u.order && u.order.type === 'move') order(u, { type: 'halt' }); continue; }
     goTo(u, m.x + ix * (w.down ? 30 : 70) - iy * lat, m.y + iy * (w.down ? 30 : 70) + ix * lat, { run: hyp(u.x - m.x, u.y - m.y) > 500 });
+  }
+  // the gates and the breaches: the storming columns come through a gap two stretches wide or a breach, one cohort's
+  // width at a time. The two most threatened gaps (enemy strength within 700 m outside them) are held from inside by
+  // cohorts from the quiet sites, up to three to a gap and about two-thirds of the strength coming at it, so the head of
+  // each column meets a line it cannot go round. Back to the sites once a gap has been quiet for 25 s
+  if (G.map.wl.length) {
+    const R0 = city.r * .78, gaps = [];
+    for (let j = 0; j < 8; j++) { const a = ((j >> 1) * 10 + (j & 1 ? 6 : 1)) / 80 * TAU; gaps.push({ k: 'g' + j, x: city.x + Math.cos(a) * R0, y: city.y + Math.sin(a) * R0 }); }
+    for (const w of G.map.walls) if (w.down) { const m = wallMid(w); gaps.push({ k: 'w' + w.id, x: m.x, y: m.y }); }
+    for (const g of gaps) { const d = hyp(g.x - city.x, g.y - city.y) || 1; g.ix = (city.x - g.x) / d; g.iy = (city.y - g.y) / d;
+      g.en = foes.filter(f => !f.T.fly && hyp(f.x - g.x, f.y - g.y) < 700); g.thr = strOf(g.en); }
+    const gT = G.map.gapT = G.map.gapT || {}; for (const g of gaps) if (g.thr > 0) gT[g.k] = G.t; // kept on the map, which each battle builds anew
+    for (const u of mine) if (u.role === 'gate' && (!gaps.some(g => g.k === u.gk) || G.t - (gT[u.gk] ?? -99) > 25)) { u.role = 'site'; u.gk = null; }
+    for (const g of gaps.filter(g => g.thr > 0).sort((a, b) => b.thr - a.thr).slice(0, 2)) {
+      const on = mine.filter(u => u.role === 'gate' && u.gk === g.k); let have = strOf(on); if (on.length >= 3 || have >= g.thr * .65) continue;
+      const cand = mine.filter(u => u.role === 'site' && !u.melee && (u.type === 'legion' || u.type === 'railmen') && P[u.site] && P[u.site].threat < P[u.site].held * .6 && hyp(u.x - g.x, u.y - g.y) < 1500).sort((a, b) => hyp(a.x - g.x, a.y - g.y) - hyp(b.x - g.x, b.y - g.y));
+      for (const u of cand) { if (on.length >= 3 || have >= g.thr * .65) break; u.role = 'gate'; u.gk = g.k; on.push(u); have += strOf([u]); G.aist('holdGap'); } }
+    for (const u of mine.filter(v => v.role === 'gate')) {
+      if (steady(u, city.x, city.y)) continue;
+      if (u.melee) continue;
+      const g = gaps.find(x => x.k === u.gk), lat = (u.id % 3 - 1) * 50, gx = g.x + g.ix * 90 - g.iy * lat, gy = g.y + g.iy * 90 + g.ix * lat;
+      const near = nearest(u, g.en.length ? g.en : foes), dn = near ? Math.sqrt(dist2(u, near)) : Infinity;
+      if (near && dn < 200) { strike(u, near, false); continue; } // they are through: meet them
+      if (near && dn < u.wpn.range * .98 && los(u.x, u.y, near.x, near.y) && hyp(u.x - gx, u.y - gy) < 120) { if (u.order && u.order.type === 'move') order(u, { type: 'halt' }); continue; }
+      goTo(u, gx, gy, { run: hyp(u.x - gx, u.y - gy) > 500 });
+    }
   }
   // the guns and the Sarissas: stay out of reach of melee, otherwise at the post
   for (const u of mine.filter(v => v.role === 'post')) { if (u.melee) continue; const near = nearest(u, foes), dn = near ? Math.sqrt(dist2(u, near)) : Infinity;
