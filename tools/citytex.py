@@ -99,38 +99,40 @@ def fluted(light, dark, flutes=24, seed=5, grimec=None, sharp=False):
     g = fbm(seed*7+1, 5, 6); base = mix(dark, light, g*.6+.2)*shade[...,None]
     if grimec is not None: base = grime(base, grimec, seed*7+5, .4, .75)
     return base, 1 - depth*.8, .5 + g*.3
-def window_strip(wallf, glass_dark, glass_lit, frame, nw=4, shape='rect', lit=.45, seed=6, sill=True, band=None, inset=.2, top=.25, bottom=.8, mullions=2, glow=True):
-    """one storey of windows; returns albedo, height, rough, emissive mask"""
+def window_strip(wallf, glass_dark, glass_lit, frame, nw=4, shape='rect', lit=.45, seed=6, sill=True, band=None, inset=.2, top=.25, bottom=.8, mullions=2, glow=True, storeys=3):
+    """three storeys of windows per tile (so the lit ones do not line up in columns); returns albedo, height, rough, emissive mask"""
     base = wallf(); im = pil(base); d = ImageDraw.Draw(im); em = Image.new('L', (N,N), 0); de = ImageDraw.Draw(em); hgt = Image.new('L', (N,N), 255); dh = ImageDraw.Draw(hgt)
-    r = np.random.default_rng(seed); w = N//nw; fr = tuple(int(v*255) for v in frame)
-    for k in range(nw):
-        x0 = k*w + int(w*inset); x1 = (k+1)*w - int(w*inset); y0 = int(N*top); y1 = int(N*bottom)
-        on = r.random() < lit; g = glass_lit if on else glass_dark; gc = tuple(int(v*255) for v in g)
-        if shape == 'arch':
-            d.rectangle([x0, y0, x1, y1], fill=gc); d.pieslice([x0, y0-(x1-x0)//2, x1, y0+(x1-x0)//2], 180, 360, fill=gc)
-            dh.rectangle([x0, y0, x1, y1], fill=150); dh.pieslice([x0, y0-(x1-x0)//2, x1, y0+(x1-x0)//2], 180, 360, fill=150)
-            if on: de.rectangle([x0, y0, x1, y1], fill=255); de.pieslice([x0, y0-(x1-x0)//2, x1, y0+(x1-x0)//2], 180, 360, fill=255)
-        elif shape == 'slit':
-            for s in range(3):
-                sx0 = x0 + s*(x1-x0)//3 + 4; sx1 = x0 + (s+1)*(x1-x0)//3 - 4
-                d.rectangle([sx0, y0, sx1, y1], fill=gc); dh.rectangle([sx0, y0, sx1, y1], fill=150)
-                if on: de.rectangle([sx0, y0, sx1, y1], fill=255)
-        elif shape == 'hex':
-            pts = [(x0, (y0+y1)//2), ((x0+x1)//2, y0), (x1, (y0+y1)//2), ((x0+x1)//2, y1)]
-            d.polygon(pts, fill=gc); dh.polygon(pts, fill=150)
-            if on: de.polygon(pts, fill=255)
-        else:
-            d.rectangle([x0, y0, x1, y1], fill=gc); dh.rectangle([x0, y0, x1, y1], fill=150)
-            if on: de.rectangle([x0, y0, x1, y1], fill=255)
-        if shape != 'slit':
-            for m in range(1, mullions+1): d.line([(x0+(x1-x0)*m//(mullions+1), y0-((x1-x0)//2 if shape=='arch' else 0)), (x0+(x1-x0)*m//(mullions+1), y1)], fill=fr, width=4)
-            if mullions: d.line([(x0, (y0+y1)//2), (x1, (y0+y1)//2)], fill=fr, width=3)
-        if sill: d.rectangle([x0-4, y1, x1+4, y1+8], fill=fr); dh.rectangle([x0-4, y1, x1+4, y1+8], fill=255)
-        if on and glow:
-            for q in range(5): d.rectangle([x0+q*3, y0+q*3, x1-q*3, y1-q*3], outline=tuple(min(255, int(v*255*(1+.08*(5-q)))) for v in g))
+    r = np.random.default_rng(seed); w = N//nw; fr = tuple(int(v*255) for v in frame); SH = N/storeys
+    for st in range(storeys):
+        lit_set = set(r.permutation(nw)[:max(1, round(nw*lit*.7))].tolist())   # exactly the lit share, never none
+        oy = int(st*SH)
+        for k in range(nw):
+            x0 = k*w + int(w*inset); x1 = (k+1)*w - int(w*inset); y0 = oy + int(SH*top); y1 = oy + int(SH*bottom)
+            on = k in lit_set; g = glass_lit*.5 if on else glass_dark; gc = tuple(int(v*255) for v in g)
+            if shape == 'arch':
+                rr = min((x1-x0)//2, (y1-y0)//2)
+                d.rectangle([x0, y0, x1, y1], fill=gc); d.pieslice([x0, y0-rr, x1, y0+rr], 180, 360, fill=gc)
+                dh.rectangle([x0, y0, x1, y1], fill=150); dh.pieslice([x0, y0-rr, x1, y0+rr], 180, 360, fill=150)
+                if on: de.rectangle([x0, y0, x1, y1], fill=255); de.pieslice([x0, y0-rr, x1, y0+rr], 180, 360, fill=255)
+            elif shape == 'slit':
+                for q in range(3):
+                    sx0 = x0 + q*(x1-x0)//3 + 3; sx1 = x0 + (q+1)*(x1-x0)//3 - 3
+                    d.rectangle([sx0, y0, sx1, y1], fill=gc); dh.rectangle([sx0, y0, sx1, y1], fill=150)
+                    if on: de.rectangle([sx0, y0, sx1, y1], fill=255)
+            elif shape == 'hex':
+                pts = [(x0, (y0+y1)//2), ((x0+x1)//2, y0), (x1, (y0+y1)//2), ((x0+x1)//2, y1)]
+                d.polygon(pts, fill=gc); dh.polygon(pts, fill=150)
+                if on: de.polygon(pts, fill=255)
+            else:
+                d.rectangle([x0, y0, x1, y1], fill=gc); dh.rectangle([x0, y0, x1, y1], fill=150)
+                if on: de.rectangle([x0, y0, x1, y1], fill=255)
+            if shape != 'slit':
+                for m in range(1, mullions+1): d.line([(x0+(x1-x0)*m//(mullions+1), y0-(rr if shape=='arch' else 0)), (x0+(x1-x0)*m//(mullions+1), y1)], fill=fr, width=3)
+                if mullions: d.line([(x0, (y0+y1)//2), (x1, (y0+y1)//2)], fill=fr, width=2)
+            if sill: d.rectangle([x0-3, y1, x1+3, y1+5], fill=fr); dh.rectangle([x0-3, y1, x1+3, y1+5], fill=255)
     if band is not None:
-        bc = tuple(int(v*255) for v in band); d.rectangle([0, 0, N, N//10], fill=bc); d.rectangle([0, N//10-5, N, N//10], fill=tuple(int(v*110) for v in band)); dh.rectangle([0, 0, N, N//10], fill=255)
-    a = arr(im); emm = np.array(em)/255; h = np.array(hgt)/255
+        bc = tuple(int(v*255) for v in band); d.rectangle([0, 0, N, N//24], fill=bc); d.rectangle([0, N//24-3, N, N//24], fill=tuple(int(v*110) for v in band)); dh.rectangle([0, 0, N, N//24], fill=255)
+    a = arr(im); emm = np.array(em)/255; emm = emm*(.55 + .45*tile_blur(emm, 6)); h = np.array(hgt)/255
     rough = .7 - emm*.5 - (h < .7)*.3
     return a, h, np.clip(rough, .05, 1), emm
 def frieze_classical(light, dark, accent, seed=7, motif='egg'):
@@ -233,13 +235,13 @@ def world(name):
 def mercury():
     SAND, SAND_D, SAND_L, BR, BR_D, GR = col('#d9b98a'), col('#b7925f'), col('#efd9b4'), col('#8a6a2f'), col('#4f3a17'), col('#6b5a44')
     out = {}
-    out['wall'] = stone_wall(SAND_L, SAND_D, col('#3a2f22'), 6, .33, 1, vein=.2, grimec=GR, jitter=30)
+    out['wall'] = stone_wall(SAND_L, SAND, col('#5a4a36'), 6, .33, 1, vein=.2, grimec=GR, jitter=30)
     out['column'] = fluted(SAND_L, SAND, 24, 5, GR)
-    a, h, r, e = window_strip(lambda: mix(SAND_D, SAND, fbm(41,4,4)), col('#2e2c34'), col('#ffb25c'), col('#8c6a36'), 4, 'arch', .45, 6, True, BR*1.3)
+    a, h, r, e = window_strip(lambda: mix(SAND, SAND_L, fbm(41,4,4)*.7), col('#2e2c34'), col('#ffb25c'), col('#8c6a36'), 4, 'arch', .45, 6, True, BR*1.3)
     out['windows'] = (a, h, r, e)
     out['trim'] = frieze_classical(SAND_L, col('#8c6a36'), col('#f4e4c8'), 7, 'sun')
     out['pave'] = flagstones(col('#e9d3ad'), col('#c9ab7e'), col('#7d6a4e'), 8, 5, 9, sandc=col('#e8cf9a'))
-    out['metal'] = metal(BR, BR_D, 12, hammer=1, streak=.3, patina=col('#6f9a84'))
+    out['metal'] = metal(col('#b8904a'), col('#6a4c22'), 12, hammer=1, streak=.2, patina=col('#6f9a84'))
     return out
 
 @world('luna')      # Hyperion: the Eternal City, kilometre towers in layers, the Promenade; pale composite, chrome, gilt, glass

@@ -665,7 +665,7 @@ export function staticMaterial(opts = {}) {
 // the paving. Each cell tiles by fract(), so the mip level is computed from the untiled coordinate and sampled explicitly
 // (no seam at the tile edge); the gutters cover the levels that are used.
 const ATLAS_W = 1632, ATLAS_H = 1088, CELL = 544, GUT = 16, TEX = 512;
-const TILE = [[10, 10], [4, 4], [12, 4.2], [6, 6], [10, 10], [6, 6]]; // metres per tile per role (u, v): the facade is one storey of 4.2 m
+const TILE = [[10, 10], [4, 4], [12, 12.6], [6, 6], [10, 10], [6, 6]]; // metres per tile per role (u, v): the facade tile is three storeys of 4.2 m
 export function cityMaterial(world) {
   const S = CITY[world] || CITY._ice; if (!CITY[world]) world = '_ice';
   const tl = new THREE.TextureLoader();
@@ -693,7 +693,7 @@ export function cityMaterial(world) {
   m.normalNode = transformNormalToView(nW);
   m.roughnessNode = blend('g');
   m.metalnessNode = select(role.equal(float(CITY_ROLE.metal)), float(.6), float(0));
-  m.emissiveNode = paint.mul(em).mul(1.6).add(winColor.mul(blend('e')).mul(1.4));
+  m.emissiveNode = paint.mul(em).mul(1.6).add(winColor.mul(blend('e')).mul(.9));
   m.userData.textures = [A, Nm, Rg, Em];
   return m;
 }
