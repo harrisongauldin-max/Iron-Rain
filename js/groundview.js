@@ -3,7 +3,6 @@
 // and the drop zones before the Rain. The rules live in ground.js; this module only shows them and gives orders.
 // Kept in one file with its own renderer (a WebGPURenderer since the WebGPU port; WebGL2 backend where there is no WebGPU).
 import * as THREE from 'three/webgpu';
-import { instancedDynamicBufferAttribute, texture, vec4 } from 'three/tsl';
 import * as GR from './ground.js';
 import { G, MAP, NH, CH, UT, heightAt, footprint, radiusOf, fighting, live } from './ground.js';
 import { FACTIONS, NEUTRAL_C } from './data.js';
@@ -12,6 +11,11 @@ import { sfx, initAudio, music } from './audio.js';
 import { figureGeo, figureMaterial, corpseGeo, storkGeo, lodGeo, KINDS, MUZZLE, cityGeo, staticMaterial } from './groundmodels.js';
 import { animMesh, animFigure, animEnd, animReset, dyingAdd, drawDying, settle } from './groundanim.js'; // the figures' motion (animator chat)
 import * as GFX from './groundfx.js'; // textures and effects: the terrain surface, water, sky dome
+import * as PX from './groundpunch.js'; // the fighting: tracer ribbons, muzzle flashes, fireballs, smoke, shake
+import { pass, renderOutput } from 'three/tsl'; // the post: the scene pass and tone mapping before SMAA
+import { bloom } from '../vendor/three/tsl/BloomNode.js';
+import { smaa } from '../vendor/three/tsl/SMAANode.js';
+import { preset } from './gfx.js';
 
 const PI = Math.PI, TAU = PI * 2, hyp = Math.hypot, clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const FK = { rep: 'rising', soc: 'core', rim: 'rim' };
@@ -57,6 +61,18 @@ function init() {
   addEventListener('resize', resize);
   return V;
 }
+// the same post as the space battles: an HDR pass with MSAA, bloom with a soft knee, tone mapping, SMAA on Ultra.
+// Bloom follows the player's bloom setting; the Standard preset with bloom off draws straight to the screen
+function buildPost() {
+  if (V.post) { try { V.post.dispose(); } catch (e) { /* already gone */ } V.post = null; }
+  const P = preset(), k = (S.gx && S.gx.bloomK) ?? 1, on = S.bloom !== false && k > 0; V.R.setPixelRatio(Math.min(devicePixelRatio || 1, P.dpr || 2));
+  if (!on && !P.post) return;
+  try {
+    const sp = pass(V.scene, V.camera, { samples: P.msaa ? 4 : 0 }), col = sp.getTextureNode('output');
+    let out = col; if (on) { const bl = bloom(col, .7 * k, .62, .78); bl.smoothWidth.value = .4; bl.bloomTintColors[3].set(1, .96, .9); bl.bloomTintColors[4].set(1, .92, .84); out = col.add(bl); }
+    const pipe = new THREE.RenderPipeline(V.R); pipe.outputColorTransform = !P.smaa; pipe.outputNode = P.smaa ? smaa(renderOutput(out)) : out; V.post = pipe;
+  } catch (e) { console.warn('ground post-processing unavailable', e); V.post = null; }
+}
 function resize() { if (!V) return; const w = innerWidth, h = innerHeight; V.R.setSize(w, h, false); V.cv.style.width = w + 'px'; V.cv.style.height = h + 'px'; V.ov.width = w * (devicePixelRatio || 1); V.ov.height = h * (devicePixelRatio || 1); V.ov.style.width = w + 'px'; V.ov.style.height = h + 'px'; V.camera.aspect = w / h; V.camera.updateProjectionMatrix(); }
 
 // spec: built by camp.js groundSpec; meta: names for the screen
@@ -88,13 +104,8 @@ function rampColor(B, f, out) { // the biome's ground colours by height
   const r = B.ground, k = clamp(f, 0, .999) * (r.length - 1), i = Math.floor(k), t = k - i;
   out.copy(hexC(r[i])).lerp(hexC(r[Math.min(r.length - 1, i + 1)]), t); return out;
 }
-function glowTex() {
-  const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'), g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
-  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(.25, 'rgba(255,255,255,.6)'); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, 0, 64, 64);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
-}
 function buildScene() {
-  const M = G.map, B = M.B, sc = new THREE.Scene(); V.scene = sc; GFX.dispose();
+  const M = G.map, B = M.B, sc = new THREE.Scene(); V.scene = sc; GFX.dispose(); PX.dispose();
   sc.background = hexC(B.sky); sc.fog = new THREE.Fog(hexC(B.fog), 5000, 19000); // replaced by the sky dome below
   sc.add(new THREE.HemisphereLight(hexC(B.sky), hexC(B.ground[1]), .85));
   const sun = new THREE.DirectionalLight(hexC(B.sun), 2.4); sun.position.set(MAP * .2, 1800, -MAP * .15); sun.target.position.set(M.city.x, 0, M.city.y); sc.add(sun.target);
@@ -134,18 +145,8 @@ function buildScene() {
   V.inst = {}; V.lo = {}; animReset(); for (const k in geo) { V.inst[k] = mkI(geo[k], k, Math.max(1, cap[k] + 16), true); animMesh(V.inst[k], k); V.lo[k] = mkI(lodGeo(k), k, Math.max(1, cap[k] + 16), false); } // near figures are posed on the GPU (groundanim.js)
   V.corpse = mkI(corpseGeo(), 'corpse', CORPSES, false); V.corpseLo = mkI(lodGeo('corpse'), 'corpse', CORPSES, false);
   V.corpL = new Float32Array(CORPSES * 5); V.corpN = 0; V.corpDirty = true; V.corpCam = null; V.corpT = 0;
-  // shots, flashes, drop-pod trails, the Storks
-  const NT = 6000, tg = new THREE.BufferGeometry(); tg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(NT * 6), 3).setUsage(THREE.DynamicDrawUsage)); tg.setAttribute('color', new THREE.BufferAttribute(new Float32Array(NT * 6), 3).setUsage(THREE.DynamicDrawUsage)); tg.setDrawRange(0, 0);
-  V.lines = new THREE.LineSegments(tg, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })); V.lines.frustumCulled = false; sc.add(V.lines); V.NT = NT;
-  // WebGPU draws points one pixel wide, so the sparks and glows are instanced camera-facing sprites sized like the old
-  // points; the returned stand-in keeps the old shape (geometry.attributes.position / color, setDrawRange, cap)
-  const tex = glowTex(), mkPts = (n, size) => {
-    const pos = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage), col = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage);
-    const mat = new THREE.PointsNodeMaterial({ size, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true });
-    mat.positionNode = instancedDynamicBufferAttribute(pos); mat.colorNode = texture(tex).mul(vec4(instancedDynamicBufferAttribute(col), 1));
-    const sp = new THREE.Sprite(mat); sp.count = 0; sp.frustumCulled = false; sc.add(sp);
-    return { sp, cap: n, geometry: { attributes: { position: pos, color: col }, setDrawRange: (s, m) => { sp.count = m; } } }; };
-  V.ptS = mkPts(3000, 2.6); V.ptL = mkPts(800, 16);
+  // shots, flashes, fire and smoke, drop-pod trails: groundpunch's batches; then the bloom over the whole frame
+  PX.init(sc); buildPost();
   V.stork = new THREE.InstancedMesh(storkGeo(), figureMaterial('stork'), 96); V.stork.count = 0; V.stork.setColorAt(0, WHITE); V.stork.frustumCulled = false; V.stork.castShadow = true; sc.add(V.stork);
   V.drop = new THREE.InstancedMesh(figureGeo('drop'), figureMaterial('drop'), 400); V.drop.count = 0; V.drop.frustumCulled = false; V.drop.setColorAt(0, WHITE); sc.add(V.drop); // the first wave's ablative cocoons
 }
@@ -159,8 +160,8 @@ export function groundFrame(dt) {
   if (!V || !V.on) return;
   if (!G.over && G.phase === 'battle' && !G.paused) GR.step(dt * G.speed);
   camUpdate(dt); GFX.tick(dt, V.camera);
-  drawUnits(dt); drawFx(dt); drawSites();
-  if (V.ready) V.R.render(V.scene, V.camera); // the renderer starts asynchronously; the first frame or two wait for it
+  drawUnits(dt); drawFx(dt); drawSites(); PX.frame(dt, G.paused ? 0 : dt * G.speed, V.camera, innerHeight);
+  if (V.ready) { PX.shake(V.camera); try { if (V.post) V.post.render(); else V.R.render(V.scene, V.camera); } finally { PX.restore(V.camera); } } // the renderer starts asynchronously; the first frame or two wait for it
   overlay();
   V.hudT -= dt; if (V.hudT <= 0) { V.hudT = .2; hud(); }
   if (G.over && !V.ended) { V.ended = true; setTimeout(showEnd, 1400); }
@@ -236,53 +237,47 @@ function drawFx(dt) {
   // new events from the rules
   for (const f of G.fx) {
     if (f.k === 'shot') { const S0 = SHOT[f.f] || SHOT.scorch, h0 = heightAt(f.x0, f.y0) + (MUZZLE[WK[f.f]] || MUZZLE.inf)[1] * VS, h1 = heightAt(f.x1, f.y1) + 1.2 * VS, L = hyp(f.x1 - f.x0, f.y1 - f.y0, h1 - h0);
-      if (V.tr.length < 2500) V.tr.push({ x0: f.x0, y0: h0, z0: f.y0, x1: f.x1, y1: h1, z1: f.y1, L, t: -(f.d || 0) * .5, spd: S0[1], len: S0[2], c: new THREE.Color(S0[0]), arc: f.f === 'missile' ? Math.min(120, L * .25) : f.f === 'heavy' ? Math.min(40, L * .08) : 0, kind: f.f }); }
+      if (V.tr.length < 2500) V.tr.push({ x0: f.x0, y0: h0, z0: f.y0, x1: f.x1, y1: h1, z1: f.y1, L, t: -(f.d || 0) * .5, spd: S0[1], len: S0[2], arc: f.f === 'missile' ? Math.min(120, L * .25) : f.f === 'heavy' ? Math.min(40, L * .08) : 0, kind: f.f, mz: false }); }
     else if (f.k === 'breach') rubble(f.w);
-    else if (f.k === 'land') { flash(f.x, heightAt(f.x, f.y) + 4, f.y, '#e09048', true, 1.2); flash(f.x, heightAt(f.x, f.y) + 2, f.y, '#806040', true, 2); near(f.x, f.y) && sfx(f.big ? 'bigboom' : 'boom'); }
-    else if (f.k === 'melee') { if (Math.random() < .18) flash(f.x + (Math.random() - .5) * 8, heightAt(f.x, f.y) + 2, f.y + (Math.random() - .5) * 8, f.t === 0 ? '#ffd080' : '#ffe0a0', false, .35); near(f.x, f.y) && Math.random() < .2 && sfx('clang'); }
+    else if (f.k === 'land') { PX.blast(f.x, heightAt(f.x, f.y), f.y, !!f.big); near(f.x, f.y) && sfx(f.big ? 'bigboom' : 'boom'); }
+    else if (f.k === 'melee') { if (Math.random() < .18) PX.sparks(f.x + (Math.random() - .5) * 8, heightAt(f.x, f.y) + 2.2, f.y + (Math.random() - .5) * 8, 3, 9, f.t === 0 ? [2.4, 1.7, .8] : [2.4, 2, 1.2], .3); near(f.x, f.y) && Math.random() < .2 && sfx('clang'); }
     else if (f.k === 'charge') { near(f.x, f.y) && sfx('hit'); }
   }
   G.fx.length = 0;
-  // shots in flight
-  const pa = V.lines.geometry.attributes.position, ca = V.lines.geometry.attributes.color; let n = 0;
-  const keep = [];
+  // shots in flight: a lit ribbon from tail to head; the heavy rounds carry a glowing head, missiles a smoke trail
+  const cp = V.camera.position, step = G.paused ? 0 : dt * G.speed, keep = [];
   for (const s of V.tr) {
-    s.t += dt * G.speed * (G.paused ? 0 : 1); if (s.t < 0) { keep.push(s); continue; }
-    const head = s.t * s.spd, k1 = Math.min(1, head / s.L), k0 = Math.max(0, (head - s.len) / s.L);
+    s.t += step; if (s.t < 0) { keep.push(s); continue; }
+    const Lk = PX.LOOK[s.kind] || PX.LOOK.scorch, head = s.t * s.spd, k1 = Math.min(1, head / s.L), k0 = Math.max(0, (head - (Lk.len || s.len)) / s.L);
+    if (!s.mz) { s.mz = true; if (hyp(s.x0 - cp.x, s.z0 - cp.z) < 3200) PX.muzzle(s.x0, s.y0, s.z0, s.x1 - s.x0, s.y1 - s.y0, s.z1 - s.z0, s.kind);
+      if (near(s.x0, s.z0)) { if (s.kind === 'rail') sfx('rail'); else if (s.kind === 'cannon') sfx('cannon'); else if (s.kind === 'missile') sfx('missile'); } }
     if (k0 >= 1) { // it lands
-      const big = s.kind === 'missile' || s.kind === 'cannon' || s.kind === 'heavy';
-      flash(s.x1, s.y1, s.z1, big ? '#c87a30' : '#' + s.c.clone().multiplyScalar(.7).getHexString(), big, big ? .9 : .25);
-      if (big && near(s.x1, s.z1)) sfx(s.kind === 'missile' ? 'boom' : 'hit');
+      PX.impact(s.x1, s.y1, s.z1, s.kind);
+      const big = s.kind === 'missile' || s.kind === 'cannon' || s.kind === 'heavy'; if (big && near(s.x1, s.z1)) sfx(s.kind === 'missile' ? 'boom' : 'hit');
       continue; }
-    if (n < V.NT) { const p = (k, o) => { pa.array[o] = s.x0 + (s.x1 - s.x0) * k; pa.array[o + 1] = s.y0 + (s.y1 - s.y0) * k + s.arc * 4 * k * (1 - k); pa.array[o + 2] = s.z0 + (s.z1 - s.z0) * k; };
-      p(k0, n * 6); p(k1, n * 6 + 3); const fade = s.kind === 'rail' ? .5 : .15; ca.array[n * 6] = s.c.r * fade; ca.array[n * 6 + 1] = s.c.g * fade; ca.array[n * 6 + 2] = s.c.b * fade; ca.array[n * 6 + 3] = s.c.r; ca.array[n * 6 + 4] = s.c.g; ca.array[n * 6 + 5] = s.c.b; n++; }
-    if (s.t === 0 || (s.t < dt * 2 && Math.random() < .3)) { if (s.kind === 'rail' && near(s.x0, s.z0)) sfx('rail'); else if (s.kind === 'cannon' && near(s.x0, s.z0)) sfx('cannon'); else if (s.kind === 'missile' && near(s.x0, s.z0)) sfx('missile'); }
+    const px = k => s.x0 + (s.x1 - s.x0) * k, py = k => s.y0 + (s.y1 - s.y0) * k + s.arc * 4 * k * (1 - k), pz = k => s.z0 + (s.z1 - s.z0) * k, c = Lk.c;
+    PX.ribbon(px(k0), py(k0), pz(k0), px(k1), py(k1), pz(k1), Lk.w, 1, c[0], c[1], c[2], s.kind === 'rail' ? .06 : .3);
+    if (Lk.sheath) PX.ribbon(px(Math.max(0, k0 - .2)), py(Math.max(0, k0 - .2)), pz(Math.max(0, k0 - .2)), px(k1), py(k1), pz(k1), Lk.sheath, .22, c[0] * .5, c[1] * .5, c[2] * .6, 0); // the rail's ionised wake
+    if (Lk.head && k1 < 1) PX.glow(px(k1), py(k1), pz(k1), Lk.head, 1, c[0], c[1], c[2]);
+    if (Lk.smoke && k1 < 1) PX.trail(px(k1), py(k1), pz(k1));
     keep.push(s);
   }
   V.tr = keep;
-  // the drop: pods streak down out of the sky, burning; the Storks come down slow, hover, and lift away
+  // the drop: pods streak down out of the sky, burning; the Storks come down slow on their thrusters, hover, and lift away
   let ns = 0, nd = 0;
   for (const p of G.pods) {
     const k = clamp((G.t - p.t0) / Math.max(.1, p.t1 - p.t0), 0, 1), gh = heightAt(p.x, p.y);
     if (p.wave === 1) { if (ns >= 96) continue; const up = G.t > p.t1 ? (G.t - p.t1) ** 2 * 40 : 0, alt = gh + 45 + 2200 * (1 - k) ** 2 + up; tmpV.set(p.x - 600 * (1 - k), alt, p.y - 380 * (1 - k)); tmpQ.setFromAxisAngle(UP, .55); tmpS.set(1, 1, 1); tmpM.compose(tmpV, tmpQ, tmpS); V.stork.setMatrixAt(ns, tmpM); V.stork.setColorAt(ns, tmpC.set(V.colA.main)); ns++;
-      if (n < V.NT) { const o = n * 6; pa.array[o] = tmpV.x; pa.array[o + 1] = tmpV.y - 3; pa.array[o + 2] = tmpV.z; pa.array[o + 3] = tmpV.x; pa.array[o + 4] = tmpV.y - 30 - Math.random() * 12; pa.array[o + 5] = tmpV.z; ca.array.set([.6, .8, 1, 0, 0, .1], o); n++; }
+      const fl = .8 + Math.random() * .4; PX.ribbon(tmpV.x, tmpV.y - 3, tmpV.z, tmpV.x, tmpV.y - 30 - Math.random() * 12, tmpV.z, 5, .8 * fl, .9, 1.3, 2.4, 0); PX.glow(tmpV.x, tmpV.y - 4, tmpV.z, 14, .7 * fl, 1, 1.4, 2.4);
       continue; }
     if (p.u.state !== 'fall') continue;
     const alt = gh + 5000 * Math.pow(1 - k, 1.5), x = p.x - 1800 * (1 - k), z = p.y - 1000 * (1 - k);
     if (nd < 400) { DIR.set(1800, -7500 * Math.sqrt(Math.max(0, 1 - k)) - 200, 1000).normalize(); tmpQ.setFromUnitVectors(NZ, DIR); tmpV.set(x, alt, z); tmpS.set(3, 3, 3); tmpM.compose(tmpV, tmpQ, tmpS); V.drop.setMatrixAt(nd, tmpM); V.drop.setColorAt(nd, tmpC.set(V.colA.main)); nd++; }
-    if (n < V.NT) { const o = n * 6; pa.array[o] = x; pa.array[o + 1] = alt; pa.array[o + 2] = z; pa.array[o + 3] = x - 180 * (1.1 - k); pa.array[o + 4] = alt + 320 * (1.1 - k); pa.array[o + 5] = z - 100 * (1.1 - k); ca.array.set([1, .75, .35, .2, .05, 0], o); n++; }
-    flash(x, alt, z, '#ffc070', false, 1.6, true);
+    const tl = 1.1 - k; PX.ribbon(x - 180 * tl, alt + 320 * tl * 1.2, z - 100 * tl, x, alt, z, 7, .9, 2.6, 1.5, .5, .25); PX.glow(x, alt, z, 22, 1, 2.6, 1.8, .9); // the burn of re-entry
   }
   V.stork.count = ns; V.stork.instanceMatrix.needsUpdate = true; if (V.stork.instanceColor) V.stork.instanceColor.needsUpdate = true;
   V.drop.count = nd; V.drop.instanceMatrix.needsUpdate = true; if (V.drop.instanceColor) V.drop.instanceColor.needsUpdate = true;
-  pa.needsUpdate = ca.needsUpdate = true; V.lines.geometry.setDrawRange(0, n * 2);
-  // flashes fade
-  for (const P of [V.ptS, V.ptL]) { const L = P === V.ptS ? V.fl.filter(f => !f.big) : V.fl.filter(f => f.big), a = P.geometry.attributes.position, c = P.geometry.attributes.color; let m = 0;
-    for (const f of L) { if (m >= P.cap) break; const k = 1 - f.age / f.life; a.array[m * 3] = f.x; a.array[m * 3 + 1] = f.y + (f.big ? f.age * 10 : 0); a.array[m * 3 + 2] = f.z; c.array[m * 3] = f.c.r * k; c.array[m * 3 + 1] = f.c.g * k; c.array[m * 3 + 2] = f.c.b * k; m++; }
-    a.needsUpdate = c.needsUpdate = true; P.geometry.setDrawRange(0, m); }
-  const step = G.paused ? 0 : dt * G.speed; V.fl = V.fl.filter(f => !f.one && (f.age += step) < f.life);
 }
-function flash(x, y, z, hex, big, life, one) { if (V.fl.length > 3500) return; V.fl.push({ x, y, z, c: new THREE.Color(hex), big, life: life || .4, age: 0, one }); }
 const near = (x, z) => hyp(x - V.cam.tx, z - V.cam.tz) < V.cam.dist * 1.1 + 200;
 // a breached stretch of wall: a low spill of rubble across the gap (the towers at its ends still stand)
 function rubble(id) {
