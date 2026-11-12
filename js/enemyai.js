@@ -295,6 +295,7 @@ export function tick() {
   }
   orbitAI(mine, D, b, defending);
   smartAbilities(mine, seen, D, diff);
+  if (smart) salvos(mw, alloc, diff);
   for (const s of mine) if (s.lanceT > S.time && s.sub && s.sh > 0 && !(s.braceT > S.time) && Math.random() < [.25, .55, .8][diff]) brace(s, threatSide(s));
   // nuclear doctrine, after the books: a nuke is kept for the moment that matters. A wave of boarders in flight at one
   // of our capital ships (Roque at Ilium), or a knot of enemy capital ships with none of ours near. Two to a battle (three
@@ -310,6 +311,24 @@ export function tick() {
       if (!tgt) for (const c of seen.filter(o => o.def.cmd && !o.def.static)) { let v = 0; for (const o of seen) if (o.def.cmd && hyp(o.x - c.x, o.y - c.y) < 450) v += o.def.value || 0; if (v >= [2400, 1600, 1200][diff] && clear(c)) { tgt = c; break; } }
       if (tgt) for (const L of launchers) { const w = nukesOf(L).find(w => w.ammo >= 1 && w.cd <= 0); if (w && hyp(L.x - tgt.x, L.y - tgt.y) < w.def.range) { launchNuke(L, w, null, { x: tgt.x + tgt.vx * 3, y: tgt.y + tgt.vy * 3 }); P.nukes++; P.nukeT = S.time; break; } }
     }
+  }
+}
+// time on target: the missile racks and torpedo tubes of ships allotted the same target hold their fire (six seconds
+// at most) until three of them are ready (four on Hard), then all loose together, so her point defence meets twenty-odd
+// missiles at once instead of eight at a time. The AI thinks once a second, so a held launcher is kept a little over a
+// second from firing each time it thinks
+function salvos(mw, alloc, diff) {
+  const by = new Map();
+  for (const s of mw) { const t = alloc.get(s); if (!t || !live(t) || s.cold) continue; const d = hyp(t.x - s.x, t.y - s.y);
+    for (const w of s.weapons) { const D = w.def; if (D.kind !== 'missile' || D.nuke || D.manual || D.emp || w.ammo <= 0 || d > D.range * .95 || (D.breach && !bigHull(t))) continue;
+      if (!by.has(t)) by.set(t, []); by.get(t).push(w); } }
+  for (const w of P.held || []) if (![...by.values()].some(L => L.includes(w))) w.holdT = 0; // a launcher no longer on a shared target is let go
+  P.held = [];
+  for (const [t, L] of by) {
+    if (L.length < 2) { for (const w of L) w.holdT = 0; continue; }
+    const ready = L.filter(w => w.cd <= 1.2 && !(w.salvo > 0)), k = Math.min(L.length, diff >= 2 ? 4 : 3), first = Math.min(...L.map(w => w.holdT || Infinity));
+    if (ready.length >= k || S.time - first > 6) { for (const w of L) if (w.holdT) { w.cd = 0; w.holdT = 0; } continue; } // loose
+    for (const w of ready) { if (!w.holdT) w.holdT = S.time; w.cd = Math.max(w.cd, 1.15); P.held.push(w); }
   }
 }
 // abilities for a reason, not at random: each commander's group looks at what is happening around its flagship
