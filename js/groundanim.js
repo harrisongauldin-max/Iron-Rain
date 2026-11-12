@@ -4,40 +4,55 @@
 // so thousands of soldiers can each walk, aim, recoil, swing and fall on their own without skinned meshes.
 //
 // How it works
-// - Rig: per kind, the joints (hips, knees, waist, neck, shoulders, cape, banner) where the builders put them.
-// - Bones: each part the builder merged (groundmodels records the part ranges in geometry.userData.parts) is tagged
-//   with one bone by where it sits on the body, so a part never tears. Bones: 0 pelvis, 1/2 right thigh/shin,
-//   3/4 left thigh/shin, 5 chest, 6 head, 7 right arm (and what it holds), 8 left arm, 9 cape, 10 banner.
-// - Pose: the joint angles are worked out here on the CPU per figure (cheap: a few dozen numbers) and written to six
-//   per-instance vec4s; the material's positionNode reads the model's own vertices, poses them bone by bone, then
-//   places the figure itself (this three.js applies the instance matrix before positionNode, so the pose cannot be
-//   layered on top of it). Normals follow the same rotations, and the shadow pass uses the same node.
+// - Rig: per kind, the joints (hips, knees, ankles, waist, neck, shoulders, elbows, cape, banner) where the builders put
+//   them. Bones: 0 pelvis, 1/2/11 right thigh/shin/foot, 3/4/12 left thigh/shin/foot, 5 chest, 6 head, 7/13 right upper
+//   arm/forearm (and what the hand holds), 8/14 left upper arm/forearm, 9 cape, 10 banner. Each part the builder merged
+//   (groundmodels records the part ranges in geometry.userData.parts) is tagged with one bone, so a part never tears.
+// - Pose: the joint angles are worked out here per figure and kept in a float texture read by instance index; the
+//   material's positionNode poses the model's own vertices joint by joint (foot → knee → hip; forearm → shoulder;
+//   spine; pelvis), then places the figure itself. Normals follow, and the shadow pass uses the same node.
+//
+// The gait (from human gait measurements, scaled up a little so it reads at battle distance)
+// - Hip: flexed ~30° at heel strike, extended ~10° at toe-off; knee: a ~15° give as the foot takes the weight, nearly
+//   straight in mid-stance, ~60° in the swing (≈100° running); ankle: toes up at heel strike, foot flat through the
+//   stance, heel rising to push off, toes lifted to clear in the swing.
+// - The pelvis height comes from the legs themselves (the planted foot stays on the ground), so the body rises over
+//   the stance leg and dips at the double support, as people do. The pelvis turns with the swinging leg, tilts down on
+//   the swing side and shifts over the stance foot; the chest turns against it, the spine bends against the tilt, and
+//   the head stays level and looking ahead. Free arms swing against the legs with the elbows bending on the way
+//   forward, a beat behind the legs.
+// - Cadence is set by the speed so the planted foot does not skate; every figure has its own size of stride and pace
+//   (Grays keep step within a few percent).
+// - Standing is never still: the weight shifts from foot to foot every several seconds with the other knee relaxing,
+//   the chest rises with each breath, the head turns to look and holds, and now and then a soldier shifts his grip.
 //
 // The motion, drawn from the books
-// - Grays march in step, rifles at port when moving and shouldered when firing, each shot kicking the rifle up; in
-//   melee they drive in with the rifle butt.
-// - Obsidians lumber, the free arm swinging; in melee they wind the pulseAxe back over the shoulder and bring it down
-//   with their whole body behind it.
+// - Grays march in step, rifles at port when moving and shouldered when firing, each shot kicking the rifle and the
+//   shoulders back; in melee they drive in with the rifle butt.
+// - Obsidians lumber with a heavy roll, the axe sloped on the shoulder and the free arm swinging; in melee they wind
+//   the pulseAxe back over the shoulder and bring it down with the whole body, the forearm whipping through last.
 // - Golds fight in the Willow Way ("flow around him; never retreat backward"): the razor sweeps in a figure of eight,
-//   the torso turning with it, small steps that only ever go forward; their capes stream behind them, and when they
-//   fly on gravBoots the legs trail and the body leans into the flight.
-// - StarShells walk heavy, with a long roll from foot to foot; the pulseCannon arm bucks when it fires and the free
-//   fist punches in melee.
-// - Every figure breathes and looks about when it stands; a figure that dies buckles at the knees and topples forward,
-//   then lies where it fell (handing over to groundview's corpse).
+//   the hips and torso turning with it, small steps only forward; capes stream, and in gravBoot flight the legs trail.
+// - StarShells walk heavy, every stride a long roll; the pulseCannon arm bucks when it fires and the free fist punches.
+// - A figure that dies is struck back, buckles at the knees, slumps and topples forward, then lies where it fell.
 import * as THREE from 'three';
 import { Fn, attribute, positionGeometry, normalGeometry, normalLocal, vec3, select, cos, sin, textureLoad, instanceIndex, ivec2, int } from 'three/tsl';
 
 const TAU = Math.PI * 2, PI = Math.PI;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v, lerp = (a, b, k) => a + (b - a) * k, ease = k => k * k * (3 - 2 * k);
+const fract = x => x - Math.floor(x);
+const hash = (a, b = 0) => fract(Math.sin(a * 127.1 + b * 311.7) * 43758.5453);
+const gauss = (c, m, w) => { let d = c - m; d -= Math.round(d); return Math.exp(-(d * d) / (2 * w * w)); }; // on the cycle
 
 // ---------------------------------------------------------------- the rigs (model metres, +Z forward, Y up)
 // classify(c, s): c = the part's centre, s = its size; returns the bone
 const GRAY = {
-  hipR: [.13, .96, 0], hipL: [-.13, .96, 0], kneeR: [.14, .5, .08], kneeL: [-.14, .5, -.04], waist: [0, 1.04, 0], neck: [0, 1.6, 0],
-  shR: [0, 1.48, .02], shL: [0, 1.48, .02], cape: [0, 0, 0], banner: [0, 0, 0], leg: .92, style: 'gray',
+  hipR: [.13, .96, 0], hipL: [-.13, .96, 0], kneeR: [.14, .5, .08], kneeL: [-.14, .5, -.04], ankR: [.14, .1, .1], ankL: [-.14, .1, -.07],
+  waist: [0, 1.04, 0], neck: [0, 1.6, 0], shR: [0, 1.48, .02], shL: [0, 1.48, .02], elR: [0, 0, 0], elL: [0, 0, 0],
+  cape: [0, 0, 0], banner: [0, 0, 0], leg: .92, toe: .17, heel: .07, style: 'gray',
   classify(c, s) {
     const side = c[0] >= 0;
+    if (c[1] < .12 && Math.abs(c[0]) > .05) return side ? 11 : 12;
     if (c[1] < .53 && Math.abs(c[0]) > .05) return side ? 2 : 4;
     if (c[1] < .97 && Math.abs(c[0]) > .05) return side ? 1 : 3;
     if (Math.abs(c[0]) > .05 && c[2] > .03 && c[1] > 1.04 && c[1] < 1.46) return 7; // both arms and the rifle: one group
@@ -46,74 +61,88 @@ const GRAY = {
   },
 };
 const OBS = {
-  hipR: [.19, 1.32, 0], hipL: [-.19, 1.32, 0], kneeR: [.2, .72, .07], kneeL: [-.2, .72, -.05], waist: [0, 1.5, 0], neck: [0, 2.42, 0],
-  shR: [.5, 2.22, 0], shL: [-.5, 2.22, 0], cape: [0, 0, 0], banner: [0, 0, 0], leg: 1.3, style: 'obs',
+  hipR: [.19, 1.32, 0], hipL: [-.19, 1.32, 0], kneeR: [.2, .72, .07], kneeL: [-.2, .72, -.05], ankR: [.21, .14, .08], ankL: [-.21, .14, -.09],
+  waist: [0, 1.5, 0], neck: [0, 2.42, 0], shR: [.5, 2.22, 0], shL: [-.5, 2.22, 0], elR: [.53, 1.82, .2], elL: [-.49, 1.82, .12],
+  cape: [0, 0, 0], banner: [0, 0, 0], leg: 1.3, toe: .24, heel: .1, style: 'obs',
   classify(c, s) {
     const side = c[0] >= 0;
     if (c[1] > 2.28 && Math.abs(c[0]) > .35 && Math.abs(c[2]) < .15) return 5; // pauldrons and tusks ride the chest (the axe head, further forward, does not)
+    if (c[1] < .16 && Math.abs(c[0]) > .08) return side ? 11 : 12;
     if (c[1] < .78 && Math.abs(c[0]) > .08) return side ? 2 : 4;
     if (c[1] < 1.33 && Math.abs(c[0]) > .08) return side ? 1 : 3;
-    if (c[0] > .3 && c[1] > 1.2) return 7;                                   // the axe arm, the haft and the head
-    if (c[0] < -.3 && c[1] > 1.2 && c[1] < 2.25) return 8;                   // the pistol arm
-    if (c[1] > 2.44 && s[0] < .5) return 6;                                  // helm, mask, braids
+    if (c[0] > .3 && c[1] > 1.2) return c[1] > 1.9 && c[2] < .2 && s[1] < .8 ? 7 : 13; // the axe arm: upper arm; forearm, haft and head
+    if (c[0] < -.3 && c[1] > 1.2 && c[1] < 2.25) return c[1] > 1.85 ? 8 : 14;      // the pistol arm
+    if (c[1] > 2.44 && s[0] < .5) return 6;                                       // helm, mask, braids
     return c[1] < 1.52 ? 0 : 5;
   },
 };
 const GOLD = {
-  hipR: [.12, 1.02, 0], hipL: [-.12, 1.02, 0], kneeR: [.13, .56, .04], kneeL: [-.13, .56, -.03], waist: [0, 1.14, 0], neck: [0, 1.78, 0],
-  shR: [.27, 1.66, .02], shL: [-.27, 1.66, .02], cape: [0, 1.72, -.2], banner: [-.46, 3.08, -.2], leg: 1.0, style: 'gold',
+  hipR: [.12, 1.02, 0], hipL: [-.12, 1.02, 0], kneeR: [.13, .56, .04], kneeL: [-.13, .56, -.03], ankR: [.13, .1, .07], ankL: [-.13, .1, -.05],
+  waist: [0, 1.14, 0], neck: [0, 1.78, 0], shR: [.27, 1.66, .02], shL: [-.27, 1.66, .02], elR: [.28, 1.38, .22], elL: [-.29, 1.49, .2],
+  cape: [0, 1.72, -.2], banner: [-.46, 3.08, -.2], leg: 1.0, toe: .18, heel: .07, style: 'gold',
   classify(c, s) {
     const side = c[0] >= 0;
     if (c[2] < -.18 && Math.abs(c[0]) < .12 && s[0] > .4 && c[1] < 1.62) return 9;                  // the cape
     if (c[0] < -.4 && c[2] < -.3 && c[1] > 2.3 && c[1] < 3.0) return 10;                           // the banner cloth
+    if (c[1] < .12 && Math.abs(c[0]) > .05 && Math.abs(c[2]) < .3) return side ? 11 : 12;
     if (c[1] < .6 && Math.abs(c[0]) > .05 && Math.abs(c[2]) < .3) return side ? 2 : 4;
     if (c[1] < 1.04 && Math.abs(c[0]) > .05 && Math.abs(c[0]) < .3 && Math.abs(c[2]) < .3) return side ? 1 : 3; // (the razor, reaching forward past the knee, is the arm's)
-    if (c[0] > .2 && c[2] > .05 && c[1] < 1.62) return 7;                                          // razor arm
-    if (c[0] < -.2 && c[2] > .05 && c[1] < 1.62) return 8;                                         // pulseFist arm
+    if (c[0] > .2 && c[2] > .05 && c[1] < 1.62) return c[1] < 1.4 ? 13 : 7;                         // razor arm: forearm, gauntlet, razor
+    if (c[0] < -.2 && c[2] > .05 && c[1] < 1.62) return c[2] > .25 ? 14 : 8;                       // pulseFist arm
     if (c[1] > 1.8 && Math.abs(c[0]) < .2) return 6;
     return c[1] < 1.15 ? 0 : 5;
   },
 };
 const SHELL = {
-  hipR: [.3, 1.86, 0], hipL: [-.3, 1.86, 0], kneeR: [.33, 1.04, .06], kneeL: [-.33, 1.04, 0], waist: [0, 2.12, 0], neck: [0, 3.36, 0],
-  shR: [.64, 3.1, 0], shL: [-.64, 3.1, 0], cape: [0, 0, 0], banner: [0, 0, 0], leg: 1.8, style: 'shell',
+  hipR: [.3, 1.86, 0], hipL: [-.3, 1.86, 0], kneeR: [.33, 1.04, .06], kneeL: [-.33, 1.04, 0], ankR: [.34, .2, .1], ankL: [-.34, .2, -.06],
+  waist: [0, 2.12, 0], neck: [0, 3.36, 0], shR: [.64, 3.1, 0], shL: [-.64, 3.1, 0], elR: [.78, 2.36, .1], elL: [-.78, 2.36, -.05],
+  cape: [0, 0, 0], banner: [0, 0, 0], leg: 1.8, toe: .42, heel: .2, style: 'shell',
   classify(c, s) {
     const side = c[0] >= 0;
+    if (c[1] < .2 && Math.abs(c[0]) > .1) return side ? 11 : 12;
     if (c[1] < 1.16 && Math.abs(c[0]) > .1) return side ? 2 : 4;
     if (c[1] < 1.78 && Math.abs(c[0]) > .1 && Math.abs(c[0]) < .45) return side ? 1 : 3;
-    if (c[0] > .55 && c[1] < 3.05) return 7;                                  // the pulseCannon arm
-    if (c[0] < -.55 && c[1] < 3.05) return 8;                                 // the fist
+    if (c[0] > .55 && c[1] < 3.05) return c[1] < 2.2 ? 13 : 7;                 // the pulseCannon arm
+    if (c[0] < -.55 && c[1] < 3.05) return c[1] < 2.2 ? 14 : 8;                // the fist
     if (c[1] > 3.38 && Math.abs(c[0]) < .3) return 6;
     return c[1] < 2.1 ? 0 : 5;
   },
 };
 export const RIG = { inf: GRAY, rail: GRAY, obs: OBS, gold: GOLD, lead: GOLD, shell: SHELL };
 export const rigged = k => !!RIG[k];
+// the leg's rest geometry, worked out once per rig: segment lengths and the angles the model was built standing at
+for (const R of new Set(Object.values(RIG))) for (const sd of ['R', 'L']) {
+  const H = R['hip' + sd], K = R['knee' + sd], A = R['ank' + sd];
+  R['F0' + sd] = Math.atan2(K[2] - H[2], H[1] - K[1]);   // thigh's forward lean at rest
+  R['S0' + sd] = Math.atan2(A[2] - K[2], K[1] - A[1]);   // shin's
+  R['Lt' + sd] = Math.hypot(H[1] - K[1], H[2] - K[2]); R['Ls' + sd] = Math.hypot(K[1] - A[1], K[2] - A[2]);
+}
 
 // ---------------------------------------------------------------- tagging the parts with bones
-const _bb = new THREE.Box3();
+const _bb = new THREE.Box3(), _v = new THREE.Vector3();
 export function tagBones(geo, kind) {
-  if (geo.attributes.bone) return geo;
+  if (geo.attributes.bone && geo.userData.boneRig === 2) return geo;
   const R = RIG[kind], n = geo.attributes.position.count, bone = new Float32Array(n), parts = geo.userData.parts, P = geo.attributes.position;
   if (R && parts && parts.length) {
     let o = 0;
     for (const cnt of parts) {
-      _bb.makeEmpty(); for (let i = o; i < o + cnt; i++) _bb.expandByPoint(new THREE.Vector3(P.getX(i), P.getY(i), P.getZ(i)));
+      _bb.makeEmpty(); for (let i = o; i < o + cnt; i++) _bb.expandByPoint(_v.set(P.getX(i), P.getY(i), P.getZ(i)));
       const c = [(_bb.min.x + _bb.max.x) / 2, (_bb.min.y + _bb.max.y) / 2, (_bb.min.z + _bb.max.z) / 2], s = [_bb.max.x - _bb.min.x, _bb.max.y - _bb.min.y, _bb.max.z - _bb.min.z];
       bone.fill(R.classify(c, s), o, o + cnt); o += cnt;
     }
   }
-  geo.setAttribute('bone', new THREE.BufferAttribute(bone, 1));
+  geo.setAttribute('bone', new THREE.BufferAttribute(bone, 1)); geo.userData.boneRig = 2;
   return geo;
 }
 
 // ---------------------------------------------------------------- the pose on the GPU
-// six vec4s per figure, kept in a float texture (64 figures to a row) and read by instance index, since the vertex
-// attributes are already near the limit of 16 (position, normal, paint, team and glow masks, bone, the instance matrix
-// and colour): A0 = place (x, y, z, yaw); A1 = thigh R, knee R, thigh L, knee L; A2 = waist twist, waist lean,
-// head yaw, cape; A3 = right arm pitch, yaw, thrust, left arm pitch; A4 = left arm yaw, thrust, pelvis drop, pelvis roll;
-// A5 = fall (pitch about the feet), banner, scale, head nod
-const NV = 6, PER_ROW = 64;
+// eight vec4s per figure, kept in a float texture (64 figures to a row) and read by instance index (the vertex
+// attributes are already near their limit of 16):
+// A0 place x, y, z, yaw          A1 thigh R, knee R, thigh L, knee L     A2 foot R, foot L, pelvis yaw, pelvis tilt
+// A3 pelvis shift, pelvis drop, fall, scale                               A4 spine twist, spine lean, spine bend, head yaw
+// A5 head nod, cape, banner, —   A6 right arm pitch, swing, thrust, elbow  A7 left arm pitch, swing, thrust, elbow
+// Angles about X are positive backward (a limb hanging down swings its end back; a foot dips its toe).
+const NV = 8, PER_ROW = 64;
 const v3 = a => vec3(a[0], a[1], a[2]);
 const rX = (p, c, s) => vec3(p.x, p.y.mul(c).sub(p.z.mul(s)), p.y.mul(s).add(p.z.mul(c)));
 const rY = (p, c, s) => vec3(p.x.mul(c).add(p.z.mul(s)), p.y, p.z.mul(c).sub(p.x.mul(s)));
@@ -125,33 +154,42 @@ export function animMesh(im, kind) {
   const tex = new THREE.DataTexture(data, PER_ROW * NV, rows, THREE.RGBAFormat, THREE.FloatType); tex.minFilter = tex.magFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.needsUpdate = true;
   const ii = int(instanceIndex), row = ii.div(PER_ROW), col = ii.mod(PER_ROW).mul(NV);
   const A = []; for (let v = 0; v < NV; v++) A.push(textureLoad(tex, ivec2(col.add(v), row)));
-  const HR = v3(R.hipR), HL = v3(R.hipL), KR = v3(R.kneeR), KL = v3(R.kneeL), W = v3(R.waist), NK = v3(R.neck), SR = v3(R.shR), SL = v3(R.shL), CP = v3(R.cape), BP = v3(R.banner);
+  const HR = v3(R.hipR), HL = v3(R.hipL), KR = v3(R.kneeR), KL = v3(R.kneeL), AR = v3(R.ankR), AL = v3(R.ankL), W = v3(R.waist), NK = v3(R.neck);
+  const SR = v3(R.shR), SL = v3(R.shL), ER = v3(R.elR), EL = v3(R.elL), CP = v3(R.cape), BP = v3(R.banner), PV = vec3(0, R.hipR[1], 0);
   const m = im.material;
   m.positionNode = Fn(() => {
-    const b = attribute('bone', 'float'), a0 = A[0], a1 = A[1], a2 = A[2], a3 = A[3], a4 = A[4], a5 = A[5];
+    const b = attribute('bone', 'float'), [a0, a1, a2, a3, a4, a5, a6, a7] = A;
     const p = positionGeometry.toVar(), n = normalGeometry.toVar();
     const rot = (cond, piv, fn, c, s) => { p.assign(select(cond, fn(p.sub(piv), c, s).add(piv), p)); n.assign(select(cond, fn(n, c, s), n)); };
-    // the shins about the knees, then the whole leg about the hip
-    const isR = b.equal(1).or(b.equal(2)), isShin = b.equal(2).or(b.equal(4)), isLeg = b.greaterThan(.5).and(b.lessThan(4.5));
-    const kA = select(isR, a1.y, a1.w), tA = select(isR, a1.x, a1.z);
-    rot(isShin, select(isR, KR, KL), rX, cos(kA), sin(kA));
-    rot(isLeg, select(isR, HR, HL), rX, cos(tA), sin(tA));
-    // the arms about the shoulders (pitch, then swing), then their thrust along the body's forward line
-    const isAR = b.equal(7), isArm = isAR.or(b.equal(8)), aP = select(isAR, a3.x, a3.w), aY = select(isAR, a3.y, a4.x), aZ = select(isAR, a3.z, a4.y), Sp = select(isAR, SR, SL);
-    rot(isArm, Sp, rX, cos(aP), sin(aP)); rot(isArm, Sp, rY, cos(aY), sin(aY)); p.assign(select(isArm, p.add(vec3(0, 0, aZ)), p));
-    // the head looks about and nods; the cape streams; the banner swings
-    const isH = b.equal(6); rot(isH, NK, rY, cos(a2.z), sin(a2.z)); rot(isH, NK, rX, cos(a5.w), sin(a5.w));
-    rot(b.equal(9), CP, rX, cos(a2.w), sin(a2.w));
-    const bn = a5.y; rot(b.equal(10), BP, rZ, cos(bn), sin(bn)); rot(b.equal(10), BP, rX, cos(bn.mul(.7)), sin(bn.mul(.7)));
-    // everything above the waist turns and leans at the waist
-    const up = b.greaterThan(4.5); rot(up, W, rY, cos(a2.x), sin(a2.x)); rot(up, W, rX, cos(a2.y), sin(a2.y));
-    // the whole figure: the weight shifting side to side, the pelvis riding the stride, the fall about the feet
-    rot(b.greaterThan(-1), W, rZ, cos(a4.w), sin(a4.w)); p.assign(p.add(vec3(0, a4.z, 0)));
-    rot(b.greaterThan(-1), vec3(0, 0, 0), rX, cos(a5.x), sin(a5.x));
-    // placed: scaled, turned to face, set down
+    const is = v => b.equal(v);
+    // legs: the foot about the ankle, the shin (and foot) about the knee, the whole leg about the hip
+    const legR = is(1).or(is(2)).or(is(11)), legL = is(3).or(is(4)).or(is(12)), foot = is(11).or(is(12)), shin = is(2).or(is(4)).or(foot);
+    const fA = select(legR, a2.x, a2.y), kA = select(legR, a1.y, a1.w), tA = select(legR, a1.x, a1.z);
+    rot(foot, select(legR, AR, AL), rX, cos(fA), sin(fA));
+    rot(shin, select(legR, KR, KL), rX, cos(kA), sin(kA));
+    rot(legR.or(legL), select(legR, HR, HL), rX, cos(tA), sin(tA));
+    // arms: the forearm about the elbow, then the whole arm about the shoulder (pitch, then swing), then its thrust
+    const armR = is(7).or(is(13)), arm = armR.or(is(8)).or(is(14)), fore = is(13).or(is(14));
+    const eA = select(armR, a6.w, a7.w); rot(fore, select(armR, ER, EL), rX, cos(eA), sin(eA));
+    const aP = select(armR, a6.x, a7.x), aY = select(armR, a6.y, a7.y), aZ = select(armR, a6.z, a7.z), Sp = select(armR, SR, SL);
+    rot(arm, Sp, rX, cos(aP), sin(aP)); rot(arm, Sp, rY, cos(aY), sin(aY)); p.assign(select(arm, p.add(vec3(0, 0, aZ)), p));
+    // the head looks and nods; the cape streams; the banner swings
+    rot(is(6), NK, rY, cos(a4.w), sin(a4.w)); rot(is(6), NK, rX, cos(a5.x), sin(a5.x));
+    rot(is(9), CP, rX, cos(a5.y), sin(a5.y));
+    const bn = a5.z; rot(is(10), BP, rZ, cos(bn), sin(bn)); rot(is(10), BP, rX, cos(bn.mul(.7)), sin(bn.mul(.7)));
+    // the spine: everything above the waist turns, bends to the side and leans
+    const up = b.greaterThan(4.5).and(b.lessThan(10.5)).or(b.greaterThan(12.5));
+    rot(up, W, rY, cos(a4.x), sin(a4.x)); rot(up, W, rZ, cos(a4.z), sin(a4.z)); rot(up, W, rX, cos(a4.y), sin(a4.y));
+    // the pelvis carries it all: turned, tilted, shifted over the stance foot, at the height the legs allow
+    // (the legs lean in against the sideways shift so the planted foot stays put, and the tilt is the pelvis's and the
+    // body's above it, not the legs')
+    const all = b.greaterThan(-1), legs = legR.or(legL), body = is(0).or(up), lb = a3.x.mul(-1 / R.leg);
+    rot(legs, select(legR, HR, HL), rZ, cos(lb), sin(lb));
+    rot(all, PV, rY, cos(a2.z), sin(a2.z)); rot(body, PV, rZ, cos(a2.w), sin(a2.w)); p.assign(p.add(vec3(a3.x, a3.y, 0)));
+    rot(all, vec3(0, 0, 0), rX, cos(a3.z), sin(a3.z));                // a fall, about the feet
     const cy = cos(a0.w), sy = sin(a0.w);
     normalLocal.assign(rY(n, cy, sy));
-    return rY(p.mul(a5.z), cy, sy).add(a0.xyz);
+    return rY(p.mul(a3.w), cy, sy).add(a0.xyz);
   })();
   m.needsUpdate = true;
   im.userData.anim = { tex, data, kind, rig: R };
@@ -159,12 +197,10 @@ export function animMesh(im, kind) {
 }
 
 // ---------------------------------------------------------------- each figure walks to its place
-// groundview lays a unit's figures out on formation slots every frame; set straight onto them, figures teleported when
-// the block re-formed (men falling, a file added or lost), skated sideways when the unit wheeled, swivelled with every
-// jostle and popped up into flight. settle() eases each figure from where it stood last frame (L = [x, y, z, yaw, lift])
-// toward its slot, turns it at its own pace and lifts it smoothly; it returns [x, z, yaw, lift, speed], the speed being
-// how fast the figure itself is moving, so its legs step when it shuffles into a new place. Far jumps (a landing, a
-// first frame) are taken at once.
+// groundview lays a unit's figures out on formation slots every frame; settle() eases each figure from where it stood
+// last frame (L = [x, y, z, yaw, lift]) toward its slot, turns it at its own pace and lifts it smoothly; it returns
+// [x, z, yaw, lift, speed], the speed being how fast the figure itself is moving, so its legs step when it shuffles into
+// a new place. Far jumps (a landing, a first frame) are taken at once.
 const SET = [0, 0, 0, 0, 0];
 export function settle(L, tx, tz, tyaw, lift, dt) {
   if (globalThis.__irNoSettle || !L || !(dt >= 0) || Math.hypot(L[0] - tx, L[2] - tz) > 40) { SET[0] = tx; SET[1] = tz; SET[2] = tyaw; SET[3] = lift; SET[4] = 0; return SET; }
@@ -174,15 +210,41 @@ export function settle(L, tx, tz, tyaw, lift, dt) {
   SET[4] = dt > 0 ? Math.hypot(SET[0] - L[0], SET[1] - L[2]) / dt : 0; return SET;
 }
 
-// ---------------------------------------------------------------- the per-figure motion (CPU)
-const U = new Map();   // per unit: stride phase, gait, turn, melee and fire phases
-const Q = new Float32Array(NV * 4);
-// the cycle of a melee blow: wind up, strike, recover (k in 0..1) → −1 (wound back) … +1 (struck through)
-const blow = (k, up = .45, hit = .14) => k < up ? -ease(k / up) : k < up + hit ? lerp(-1, 1, ease((k - up) / hit)) : lerp(1, 0, ease((k - up - hit) / (1 - up - hit)));
-const pulse = (k, w = .1) => k < w ? Math.sin(k / w * PI / 2) : Math.exp(-(k - w) * 8); // eases into the kick, no corner at the top
-// advance one unit's clocks (once per game step, before its figures are posed)
+// ---------------------------------------------------------------- the gait
+// The stride as a cycle c in 0..1 for the right leg (0 = heel strike; the left leg runs half a cycle behind).
+// Returns the hip's forward flexion F, the knee's flexion K and the foot's pitch P (toe down +) for that leg, for a
+// walk (k = 0) blending to a run (k = 1).
+const PKW = [[0, -.22], [.08, 0], [.42, 0], [.58, .5], [.68, .28], [.8, -.14], [1, -.22]];   // the foot through a walk
+const PKR = [[0, -.06], [.1, .05], [.28, .55], [.42, .35], [.62, -.2], [1, -.06]];            // and a run (no heel-to-toe)
+const keys = (K, c) => { for (let i = 1; i < K.length; i++) if (c <= K[i][0]) { const a = K[i - 1], b = K[i]; return lerp(a[1], b[1], ease((c - a[0]) / (b[0] - a[0]))); } return K[0][1]; };
+const kneeAt = (c, k) => lerp(.2, .5, k) * gauss(c, lerp(.13, .14, k), .06) + lerp(1.05, 1.75, k) * gauss(c, lerp(.72, .6, k), lerp(.12, .13, k)) + .05;
+const ankZ = (R, sd, F, K) => R['Lt' + sd] * Math.sin(F) + R['Ls' + sd] * Math.sin(F - K); // the ankle's reach ahead of the hip
+const gaitEnds = k => { const Fm = lerp(.1, .22, k), Fa = lerp(.4, .58, k); return [Fm + Fa, Fm - .9 * Fa, lerp(.6, .4, k)]; };
+// how far the planted ankle travels back under the hip in one stance (model metres), for the cadence
+export function reachOf(R, k) { const [Fx, Fn, beta] = gaitEnds(k); return (ankZ(R, 'R', Fx, kneeAt(0, k)) - ankZ(R, 'R', Fn, kneeAt(beta, k)) + ankZ(R, 'L', Fx, kneeAt(0, k)) - ankZ(R, 'L', Fn, kneeAt(beta, k))) / 2; }
+function leg(c, k, out, R, sd) {
+  c = fract(c);
+  // hip: forward at heel strike; while the foot is down the hip is solved (two-joint IK, a few Newton steps) so the
+  // ankle moves back under the body in a straight line at an even speed, whatever the knee is doing: the planted foot
+  // holds its ground; then the leg swings through. β is the share of the cycle the foot is down.
+  const [Fx, Fn, beta] = gaitEnds(k), K = kneeAt(c, k);
+  let F;
+  if (c < beta) {
+    const z0 = ankZ(R, sd, Fx, kneeAt(0, k)), z1 = ankZ(R, sd, Fn, kneeAt(beta, k)), zt = lerp(z0, z1, c / beta), Lt = R['Lt' + sd], Ls = R['Ls' + sd];
+    F = lerp(Fx, Fn, c / beta); for (let it = 0; it < 4; it++) { const e = ankZ(R, sd, F, K) - zt, d = Lt * Math.cos(F) + Ls * Math.cos(F - K); F -= e / Math.max(.2, d); }
+  } else F = Fn + (Fx - Fn) * ease((c - beta) / (1 - beta));
+  out[0] = F; out[1] = K; out[2] = lerp(keys(PKW, c), keys(PKR, c), k); return out;
+}
+const LR = [0, 0, 0], LL = [0, 0, 0];
+// the leg's height from hip to ground for given angles (the lower of heel and toe touches)
+function legH(R, sd, F, K, P) {
+  return R['Lt' + sd] * Math.cos(F) + R['Ls' + sd] * Math.cos(F - K) + R['ank' + sd][1] - Math.min(0, -(P > 0 ? R.toe * Math.sin(P) : R.heel * Math.sin(-P)));
+}
+
+// ---------------------------------------------------------------- per-unit clocks
+const U = new Map();   // per unit: stride phase, gait, turn, melee and fire blends, flight
 function unitClock(u, t, kind, scale) {
-  let s = U.get(u.id); if (!s) { s = { ph: Math.random() * TAU, g: 0, a: u.a, turn: 0, mph: Math.random(), fire: 0, fly: 0, mel: 0, t }; U.set(u.id, s); }
+  let s = U.get(u.id); if (!s) { s = { ph: Math.random(), g: 0, a: u.a, turn: 0, fire: 0, fly: 0, mel: 0, run: 0, t }; U.set(u.id, s); }
   const dt = Math.max(0, Math.min(.1, t - s.t)); s.t = t; if (dt <= 0) return s;
   const R = RIG[kind], L = R.leg * scale, T = u.T || {}, ca = Math.cos(u.a), sa = Math.sin(u.a);
   const v0 = Math.hypot(u.vx || 0, u.vy || 0), along = (u.vx || 0) * ca + (u.vy || 0) * sa;
@@ -190,68 +252,123 @@ function unitClock(u, t, kind, scale) {
   let da = u.a - s.a; da -= TAU * Math.round(da / TAU); s.a = u.a; s.turn += (clamp(Math.abs(da) / Math.max(dt, 1e-3), 0, 2) - s.turn) * (1 - Math.exp(-dt * 6));
   const flying = (kind === 'gold' || kind === 'lead') && v0 > 8;
   s.fly += ((flying ? 1 : 0) - s.fly) * (1 - Math.exp(-dt * 3));
-  // stride: the swing amplitude grows from a walk to a run, and the cadence is set so the feet don't slide
-  const walk = T.walk || 3, run = T.run || walk * 2, k = clamp((v - walk) / Math.max(.1, run - walk), 0, 1), A = lerp(.28, .5, k);
-  const gT = v > .3 && !flying ? clamp(v / walk, .35, 1) + k * .5 : s.turn > .25 ? .35 : 0; // shuffling round when turning on the spot
-  s.g += (gT - s.g) * (1 - Math.exp(-dt * 5)); s.A = A;
-  const f = v > .3 ? v / (4 * L * Math.sin(A)) : .8;  // cycles a second
-  s.ph += TAU * f * dt * (along < -.3 ? -1 : 1);       // walking backward plays the stride backward
+  const walk = T.walk || 3, run = T.run || walk * 2;
+  s.run += (clamp((v - walk) / Math.max(.1, run - walk), 0, 1) - s.run) * (1 - Math.exp(-dt * 3));
+  const gT = v > .3 && !flying ? clamp(v / (walk * .7), .3, 1) : s.turn > .25 ? .45 : 0; // shuffling round when turning on the spot
+  s.g += (gT - s.g) * (1 - Math.exp(-dt * 4));
+  // cadence: a stride (two steps) covers 2 × leg × (sin(F at heel strike) − sin(F at toe-off)), so the planted foot holds
+  // the planted foot is down for a share β of the cycle (0.6 walking, 0.4 running) while the hip passes over it from
+  // flexed (heel strike) to extended (toe-off), so the cycle rate is v·β / (leg · (sin F_hs − sin F_to)) at full stride
+  const k = s.run, beta = lerp(.6, .4, k), reach = reachOf(R, k) * scale;
+  const f = v > .3 ? v * beta / Math.max(.15, reach * Math.max(.35, s.g)) : .7;
+  s.ph += f * dt * (along < -.3 ? -1 : 1);       // walking backward plays the stride backward
   s.mel += ((u.melee ? 1 : 0) - s.mel) * (1 - Math.exp(-dt * 6));
   s.fire += ((u.firing || u.state === 'fire' ? 1 : 0) - s.fire) * (1 - Math.exp(-dt * 4));
-  s.run = k; return s;
+  return s;
 }
+
+// ---------------------------------------------------------------- one figure's pose
+const Q = new Float32Array(NV * 4);
+// a melee blow: wind up, strike, recover (k in 0..1) → −1 (wound back) … +1 (struck through)
+const blow = (k, up = .45, hit = .14) => k < up ? -ease(k / up) : k < up + hit ? lerp(-1, 1, ease((k - up) / hit)) : lerp(1, 0, ease((k - up - hit) / (1 - up - hit)));
+// a kick that eases in and settles with a small overshoot, as a body absorbing a recoil does
+const kick = (k, w = .08) => k < w ? Math.sin(k / w * PI / 2) : Math.exp(-(k - w) * 7) * Math.cos((k - w) * 13);
+// a hold-and-turn glance: the head picks a new mark every few seconds, turns to it and holds
+function glance(t, h, amp) { const P = 2.6 + 2.4 * h, i = Math.floor((t + h * 13) / P), k = clamp(((t + h * 13) / P - i) / .22, 0, 1); return amp * lerp(hash(i, h) * 2 - 1, hash(i + 1, h) * 2 - 1, ease(k)) * (1 - .3 * hash(i + 7, h)); }
 // write one figure: (x, y, z) its feet, yaw as groundview turns it, n its index in the unit, h a stable 0..1 hash
 export function animFigure(im, i, x, y, z, yaw, u, kind, n, h, scale, t, fv = 0) {
   const D = im.userData.anim; if (!D) return false;
   const s = unitClock(u, t, kind, scale), R = D.rig, st = R.style, q = Q; q.fill(0);
-  // the gait: Grays keep step across the cohort (a little ragged), the others each their own
-  const ph = s.ph + (st === 'gray' ? (h - .5) * .5 : h * TAU), g = Math.max(s.g, (1 - s.fly) * clamp((fv - .4) / ((u.T && u.T.walk) || 3), 0, 1) * .9), /* stepping when it shuffles into place, too */ A = (s.A || .3) * Math.min(1, g), sn = Math.sin(ph), cs = Math.cos(ph);
-  const kb = .06 + .14 * s.fire * (1 - Math.min(1, g)), K = (.5 + .35 * (s.run || 0)) * Math.min(1, g);
-  q[4] = -A * sn; q[5] = kb + K * Math.max(0, cs) ** 1.5; q[6] = A * sn; q[7] = kb + K * Math.max(0, -cs) ** 1.5;
-  let drop = -R.leg * (1 - Math.cos(A * Math.abs(sn))) - R.leg * .45 * (1 - Math.cos(kb)), roll = .035 * g * sn * (st === 'shell' ? 2 : st === 'obs' ? 1.5 : 1);
-  if ((s.run || 0) > .3) drop += R.leg * .05 * s.run * Math.abs(Math.sin(ph * 2)); // the run's lift off the ground
-  let twist = .1 * g * sn, lean = .04 * Math.min(1, g) + .16 * (s.run || 0) * Math.min(1, g), head = 0, nod = 0, cape = .08, banner = 0;
-  let aRp = 0, aRy = 0, aRz = 0, aLp = 0, aLy = 0, aLz = 0;
-  // standing: breathing, a weight shift, looking about
-  const idle = 1 - Math.min(1, g), br = Math.sin(t * 1.7 + h * 20);
-  lean += .012 * br * idle; head += idle * (.35 * Math.sin(t * .37 + h * 31) * Math.sin(t * .13 + h * 7)); roll += idle * .015 * Math.sin(t * .29 + h * 13);
-  // firing: braced, each shot kicking the weapon (own rate, own moment)
-  const rate = st === 'gray' ? (kind === 'rail' ? .3 : .75) : st === 'shell' ? .5 : st === 'obs' ? .9 : 1, rk = pulse(((t * rate + h * 7.3) % 1 + 1) % 1) * s.fire;
-  if (st === 'gray') { aRp = .3 * g * (1 - s.fire) + .03 * Math.sin(ph * 2) * g - (kind === 'rail' ? .2 : .13) * rk + .01 * br * idle; aRz = -.05 * rk; lean -= .03 * rk; }
-  if (st === 'obs') { aLp = -.45 * g * sn - .5 * s.fire + .25 * rk; aRp = .06 * Math.sin(ph * 2) * g; } // the free arm swings; the pistol comes up to fire
-  if (st === 'gold') { aRp = .25 * g * sn * (1 - s.fly); aLp = -.25 * g * sn * (1 - s.fly) + .2 * rk; aLz = -.04 * rk; }                // the pulseFist bucks
-  if (st === 'shell') { aLp = -.3 * g * sn; aRp = .06 * Math.sin(ph * 2) * g - .3 * rk; aRz = -.08 * rk; lean -= .04 * rk; twist += .05 * rk; }
-  // melee: each figure on its own beat
-  if (s.mel > .02) {
-    const m = s.mel, mk = ((t / (st === 'obs' ? 1.5 : st === 'gold' ? 1.3 : st === 'shell' ? 1.6 : 1.1) + h * 3.7) % 1 + 1) % 1;
-    if (st === 'gray') { const b = blow(mk, .4, .12); aRz += m * (b > 0 ? .32 * b : .1 * b); aRp += m * (-.15 * b); lean += m * .16 * Math.max(0, b); q[4] -= m * .2 * Math.max(0, b); twist += m * .12 * b; }
-    if (st === 'obs') { const b = blow(mk, .5, .12); aRp = lerp(aRp, b < 0 ? -1.0 * -b : 1.1 * b, m); lean += m * (b < 0 ? -.18 * -b : .32 * b); twist += m * -.25 * b; q[4] -= m * .25 * Math.max(0, b); q[5] += m * .3 * Math.max(0, b); aLp = lerp(aLp, -.3, m); }
-    if (st === 'gold') { // the Willow Way: the razor's figure of eight, the body turning with it, stepping only forward
-      const w = TAU * mk; aRy = lerp(aRy, 1.05 * Math.sin(w), m); aRp = lerp(aRp, -.55 * Math.sin(2 * w) - .2, m); twist += m * .4 * Math.sin(w - .4); lean += m * .1;
-      aLp = lerp(aLp, -.5 + .15 * Math.sin(w + 1), m); q[4] -= m * .18 * Math.max(0, Math.sin(w)); q[5] += m * .25 * Math.max(0, Math.sin(w)); }
-    if (st === 'shell') { const b = blow(mk, .45, .1); aLp = lerp(aLp, b < 0 ? .35 * -b : -.9 * b, m); aLz += m * .45 * Math.max(0, b); twist += m * -.25 * b; lean += m * .12 * Math.max(0, b); }
+  const T = u.T || {}, walk = T.walk || 3;
+  // how much the figure walks: the unit's gait, or the figure's own shuffle into its place
+  const g = clamp(Math.max(s.g, (1 - s.fly) * clamp((fv - .4) / walk, 0, 1) * .9), 0, 1), idle = 1 - g, k = s.run;
+  // its own stride: Grays keep step within a few percent, the others each their own pace and size
+  const own = st === 'gray' ? .02 : .07, c = s.ph * (1 + own * (h - .5)) + (st === 'gray' ? (h - .5) * .06 : h);
+  const amp = (1 + (hash(h, 3) - .5) * .1) * g; // stride size, ±5% from one man to the next
+  const heavy = st === 'shell' ? 1.9 : st === 'obs' ? 1.45 : 1;
+  // ---- legs: from the gait cycle, blended to a stance
+  leg(c, k, LR, R, 'R'); leg(c + .5, k, LL, R, 'L');
+  // the stance, standing: weight on one foot for a few seconds, then the other; the free knee relaxed
+  const wP = 7 + 5 * h, w = Math.sin(TAU * (t / wP + h)) , ws = Math.sign(w) * Math.pow(Math.abs(w), .35); // a held shift with a quick change
+  const brace = .1 * s.fire;
+  const Fr = lerp(.1 * Math.max(0, -ws) + .03, LR[0] * amp + (1 - amp) * .03, g), Fl = lerp(.1 * Math.max(0, ws) + .03, LL[0] * amp + (1 - amp) * .03, g);
+  const Kr = lerp(.05 + .34 * Math.max(0, -ws) + brace, LR[1] * amp + (1 - amp) * .08, g), Kl = lerp(.05 + .34 * Math.max(0, ws) + brace, LL[1] * amp + (1 - amp) * .08, g);
+  const Pr = lerp(-.04 * Math.max(0, -ws), LR[2] * amp, g), Pl = lerp(-.04 * Math.max(0, ws), LL[2] * amp, g);
+  // joint commands relative to the model's rest pose (positive = backward)
+  q[4] = R.F0R - Fr; q[5] = R.S0R - R.F0R + Kr; q[6] = R.F0L - Fl; q[7] = R.S0L - R.F0L + Kl;
+  q[8] = Pr - q[4] - q[5]; q[9] = Pl - q[6] - q[7];
+  // the pelvis rides at the height the stance leg allows
+  const hR = legH(R, 'R', Fr, Kr, Pr), hL = legH(R, 'L', Fl, Kl, Pl), h0 = R.hipR[1];
+  let drop = Math.max(hR, hL) - h0; // the leg that reaches lowest is the one standing; the other swings clear
+  if (k > .2) drop += R.leg * .06 * k * g * Math.max(0, Math.sin(TAU * 2 * (c - .08)));  // the run's flight
+  // ---- pelvis and spine: turning with the swinging leg, tilting down on the swing side, over the stance foot
+  const cs = Math.cos(TAU * c), sn = Math.sin(TAU * c);
+  let pYaw = -.1 * cs * amp * (1 + .3 * k), pTilt = .07 * sn * amp * heavy * (1 - .5 * k), pShift = .035 * R.leg * sn * amp * heavy * (1 - .6 * k);
+  pTilt += idle * -.075 * ws; pShift += idle * .05 * R.leg * ws;         // standing, the hip drops toward the relaxed knee
+  const sway = Math.sin(TAU * (t / (5.5 + 2 * h) + h * 3)); // and the whole body sways a little, as standing people do
+  let twist = -1.15 * pYaw + .06 * sway * idle, bend = -.8 * pTilt, lean = lerp(.04, .2, k) * g + .02 * idle + .025 * sway * idle;
+  const br = Math.sin(TAU * (t / (3.4 + h) + h * 5)); lean += .03 * br * idle; // breathing
+  lean += .04 * s.fire;
+  let headYaw = -(twist + pYaw) * .85 + glance(t, h, st === 'shell' ? .35 : .55) * idle * (1 - .7 * s.fire) * (1 - s.mel), nod = -lean * .55 + .03 * br * idle;
+  // ---- arms
+  const ac = Math.cos(TAU * (c - .04)); // the arms swing a beat behind the legs
+  let rp = 0, ry = 0, rz = 0, re = 0, lp = 0, ly = 0, lz = 0, le = 0;
+  const swing = (side, A, eb) => { const sg = side * ac; return [sg * A * amp, -(eb + .35 * Math.max(0, -sg) * amp + k * .9 * g)]; }; // forward swing bends the elbow
+  if (st === 'gray') { // rifle at port on the move, shouldered to fire; it rides the shoulders' swing
+    rp = (.3 * g + .38 * idle) * (1 - s.fire) + .045 * Math.sin(TAU * 2 * c) * amp - .04 * br * idle; ry = .06 * sn * amp + .08 * sway * idle * (1 - s.fire); // low ready at rest, port on the march
+    const fid = hash(Math.floor((t + h * 31) / 9), h) < .35 ? Math.sin(PI * clamp(fract((t + h * 31) / 9) / .12, 0, 1)) : 0; // now and then, a shifted grip
+    rp -= .28 * fid * idle * (1 - s.fire); // brings the rifle up to look it over
   }
-  // flight on gravBoots: legs trail, the body leans into it, the cape streams
-  if (s.fly > .02) { const f = s.fly; q[4] = lerp(q[4], .35, f); q[6] = lerp(q[6], .45, f); q[5] = lerp(q[5], .7, f); q[7] = lerp(q[7], .9, f); lean = lerp(lean, .38, f); drop *= 1 - f; roll = lerp(roll, .08 * Math.sin(t * 1.1 + h * 9), f); }
-  if (R.cape[1]) { const v = Math.hypot(u.vx || 0, u.vy || 0); cape = Math.min(.75, .1 + .45 * Math.min(1, v / 7) + .2 * s.fly + .07 * Math.sin(t * 6 + h * 17) * (.3 + Math.min(1, v / 5)) + .1 * s.mel * Math.sin(t * 9 + h)); } // streams back, never past 43° (the cape is a rigid plate)
-  if (kind === 'lead') banner = .08 * Math.sin(t * 1.3 + h * 5) + .25 * Math.min(1, Math.hypot(u.vx || 0, u.vy || 0) / 6);
+  if (st === 'obs') { [lp, le] = swing(-1, .42, .25); rp = .05 * ac * amp + .04 * Math.sin(TAU * 2 * c) * amp - .05 * br * idle; re = -.05; lp += .25 * idle; } // heavy breathing heaves the axe
+  if (st === 'gold') { [rp, re] = swing(1, .1, .2); re *= .6; [lp, le] = swing(-1, .3, .25); rp += .06 * idle; re -= .1 * idle; // the razor held steady, low and ready (its long blade magnifies any swing)
+    lp += .7 * idle * (1 - s.fire); le += .35 * idle * (1 - s.fire);                                  // the pulseFist lowered at rest
+    const P = 6 + 3 * h, fk = fract((t + h * 17) / P), fl = hash(Math.floor((t + h * 17) / P), h + 1) < .55 ? Math.sin(PI * clamp(fk / .3, 0, 1)) : 0; // a flourish of the razor
+    ry += .8 * fl * Math.sin(TAU * clamp(fk / .3, 0, 1)) * idle; rp -= .35 * fl * idle; twist += .12 * fl * idle; }
+  if (st === 'shell') { [lp, le] = swing(-1, .2, .15); [rp, re] = swing(1, .12, .1); }
+  // ---- firing: braced, each shot kicking the weapon and the shoulders (own rate, own moment)
+  const rate = st === 'gray' ? (kind === 'rail' ? .3 : .75) : st === 'shell' ? .5 : st === 'obs' ? .9 : 1, rk = kick(fract(t * rate + h * 7.3)) * s.fire;
+  if (st === 'gray') { rp -= (kind === 'rail' ? .2 : .13) * rk; rz = -.05 * rk; lean -= .05 * rk; twist += .04 * rk; }
+  if (st === 'obs') { lp = lerp(lp, -.55, s.fire) + .25 * rk; le = lerp(le, -.1, s.fire); twist += .1 * s.fire; }
+  if (st === 'gold') { lp = lerp(lp, -.75, s.fire) + .22 * rk; le = lerp(le, .05, s.fire); lz = -.04 * rk; twist -= .12 * s.fire; }
+  if (st === 'shell') { rp -= .3 * rk; rz = -.08 * rk; re += .15 * rk; lean -= .05 * rk; twist += .06 * rk; }
+  // ---- melee: each figure on its own beat
+  if (s.mel > .02) {
+    const m = s.mel, mk = fract(t / (st === 'obs' ? 1.5 : st === 'gold' ? 1.3 : st === 'shell' ? 1.6 : 1.1) + h * 3.7);
+    if (st === 'gray') { const b = blow(mk, .4, .12); rz += m * (b > 0 ? .32 * b : .1 * b); rp += m * (-.15 * b); lean += m * .16 * Math.max(0, b); pYaw += m * .12 * b; q[4] -= m * .2 * Math.max(0, b); }
+    if (st === 'obs') { const b = blow(mk, .5, .12), lag = blow(Math.max(0, mk - .03), .5, .12); // the forearm whips through a beat after the arm
+      rp = lerp(rp, b < 0 ? -1.0 * -b : 1.1 * b, m); re = lerp(re, lag < 0 ? -.6 * -lag : 0, m);
+      lean += m * (b < 0 ? -.18 * -b : .32 * b); pYaw += m * -.18 * b; twist += m * -.15 * b; q[4] -= m * .25 * Math.max(0, b); q[5] += m * .3 * Math.max(0, b); lp = lerp(lp, -.3, m); le = lerp(le, -.4, m); }
+    if (st === 'gold') { // the Willow Way: the razor's figure of eight, the hips leading it, stepping only forward
+      const a = TAU * mk; ry = lerp(ry, 1.05 * Math.sin(a), m); rp = lerp(rp, -.55 * Math.sin(2 * a) - .2, m); re = lerp(re, -.3 - .35 * Math.max(0, Math.cos(a)), m);
+      pYaw += m * .18 * Math.sin(a - .7); twist += m * .3 * Math.sin(a - .3); lean += m * .1;
+      lp = lerp(lp, -.5 + .15 * Math.sin(a + 1), m); le = lerp(le, -.7, m); q[4] -= m * .18 * Math.max(0, Math.sin(a)); q[5] += m * .25 * Math.max(0, Math.sin(a)); }
+    if (st === 'shell') { const b = blow(mk, .45, .1); lp = lerp(lp, b < 0 ? .65 * -b : -1.0 * b, m); le = lerp(le, b < 0 ? -1.7 * -b : -.1 * (1 - b), m); /* the fist drawn back at the shoulder, then driven out */ lz += m * .45 * Math.max(0, b); pYaw += m * -.12 * b; twist += m * -.15 * b; lean += m * .12 * Math.max(0, b); }
+  }
+  // ---- flight on gravBoots: legs trail, the body leans into it, the cape streams
+  let cape = .08;
+  if (s.fly > .02) { const f = s.fly; q[4] = lerp(q[4], .35, f); q[6] = lerp(q[6], .45, f); q[5] = lerp(q[5], .7, f); q[7] = lerp(q[7], .9, f); q[8] = lerp(q[8], .4, f); q[9] = lerp(q[9], .5, f); lean = lerp(lean, .38, f); drop *= 1 - f; pTilt = lerp(pTilt, .08 * Math.sin(t * 1.1 + h * 9), f); pShift *= 1 - f; }
+  if (R.cape[1]) { const v = Math.hypot(u.vx || 0, u.vy || 0); cape = Math.min(.75, .1 + .45 * Math.min(1, v / 7) + .2 * s.fly + .06 * Math.sin(t * 5.3 + h * 17) * (.3 + Math.min(1, v / 5)) + .05 * Math.sin(TAU * 2 * c) * g + .1 * s.mel * Math.sin(t * 9 + h)); }
+  let banner = 0; if (kind === 'lead') banner = .08 * Math.sin(t * 1.3 + h * 5) + .25 * Math.min(1, Math.hypot(u.vx || 0, u.vy || 0) / 6) + .04 * Math.sin(TAU * 2 * c) * g;
   q[0] = x; q[1] = y; q[2] = z; q[3] = yaw;
-  q[8] = twist; q[9] = lean; q[10] = head; q[11] = cape;
-  q[12] = aRp; q[13] = aRy; q[14] = aRz; q[15] = aLp; q[16] = aLy; q[17] = aLz; q[18] = drop; q[19] = roll;
-  q[20] = 0; q[21] = banner; q[22] = scale; q[23] = nod;
+  q[10] = pYaw; q[11] = pTilt; q[12] = pShift; q[13] = drop; q[14] = 0; q[15] = scale;
+  q[16] = twist; q[17] = lean; q[18] = bend; q[19] = headYaw;
+  q[20] = nod; q[21] = cape; q[22] = banner; q[23] = 0;
+  q[24] = rp; q[25] = ry; q[26] = rz; q[27] = re; q[28] = lp; q[29] = ly; q[30] = lz; q[31] = le;
   write(D, i, q);
   const ST = globalThis.__irAnimStats; if (ST) { // test hook: how far each figure moves against its own unit, frame to frame
-    const key = u.id * 4096 + n, rx = x - u.x, rz = z - u.y, p = ST.last.get(key);
-    if (p && t > p[3]) { const d = Math.hypot(rx - p[0], rz - p[1]); let dy = yaw - p[2]; dy = Math.abs(dy - TAU * Math.round(dy / TAU)); ST.n++; ST.d.push(d); ST.y.push(dy); }
-    ST.last.set(key, [rx, rz, yaw, t]); }
+    const key = u.id * 4096 + n, rx = x - u.x, rz2 = z - u.y, p = ST.last.get(key);
+    if (p && t > p[3]) { const d = Math.hypot(rx - p[0], rz2 - p[1]); let dy = yaw - p[2]; dy = Math.abs(dy - TAU * Math.round(dy / TAU)); ST.n++; ST.d.push(d); ST.y.push(dy); }
+    ST.last.set(key, [rx, rz2, yaw, t]); }
   return true;
 }
-function write(D, i, q) { const o = ((Math.floor(i / PER_ROW) * PER_ROW + i % PER_ROW) * NV) * 4, a = D.data; for (let k = 0; k < NV * 4; k++) a[o + k] = q[k]; }
+function write(D, i, q) { const o = i * NV * 4, a = D.data; for (let k = 0; k < NV * 4; k++) a[o + k] = q[k]; }
 export function animEnd(meshes) { for (const k in meshes) { const D = meshes[k].userData.anim; if (D) D.tex.needsUpdate = true; } }
 export function animReset() { U.clear(); DY.length = 0; }
+// for tests: the gait's leg angles, the pelvis height rule, and the rest geometry
+export const gaitProbe = { leg, legH, reachOf, RIG };
 
-// ---------------------------------------------------------------- the dying: they buckle, topple forward and lie still
-const DY = [], FALL = .95;
+// ---------------------------------------------------------------- the dying: struck back, they buckle, slump and topple
+const DY = [], FALL = 1.05;
 export function dyingAdd(f, team, kind, col, scale, t) {
   if (!RIG[kind] || DY.length > 600) return false;
   DY.push({ x: f[0], y: f[1], z: f[2], yaw: f[3] + (Math.random() - .5) * 1.2, kind, team, col, t0: t, h: Math.random(), scale }); return true;
@@ -260,17 +377,19 @@ export function dyingAdd(f, team, kind, col, scale, t) {
 // to corpse(f, team): f = [x, y, z, yaw] where the corpse model (feet at −0.95 m) lies along the fallen figure
 export function drawDying(meshes, cnt, t, corpse) {
   for (let j = DY.length - 1; j >= 0; j--) {
-    const d = DY[j], k = (t - d.t0) / FALL, im = meshes[d.kind];
+    const d = DY[j], k = (t - d.t0) / FALL, im = meshes[d.kind], R = RIG[d.kind];
     if (k >= 1 || k < 0 || !im || cnt[d.kind] >= im.instanceMatrix.count) {
-      const fw = 1.1 * d.scale * (RIG[d.kind].leg / .92); corpse([d.x + Math.sin(d.yaw) * fw, d.y, d.z + Math.cos(d.yaw) * fw, d.yaw], d.team); DY.splice(j, 1); continue; }
+      const fw = 1.1 * d.scale * (R.leg / .92); corpse([d.x + Math.sin(d.yaw) * fw, d.y, d.z + Math.cos(d.yaw) * fw, d.yaw], d.team); DY.splice(j, 1); continue; }
     const D = im.userData.anim, i = cnt[d.kind]++, q = Q; q.fill(0);
-    const crumple = ease(Math.min(1, k / .3)), top = Math.max(0, (k - .2) / .8), fall = top * top * (PI / 2) * 1.0, straight = ease(Math.min(1, top * 1.3));
+    const hit = Math.sin(PI * clamp(k / .16, 0, 1)) * (1 - clamp(k / .16, 0, 1) * .3), crumple = ease(clamp((k - .08) / .3, 0, 1)), top = clamp((k - .25) / .75, 0, 1), fall = top * top * (PI / 2), straight = ease(clamp(top * 1.3, 0, 1));
+    const sd = d.h < .5 ? -1 : 1, F = -.55 * crumple * (1 - straight), K = 1.2 * crumple * (1 - straight);
     q[0] = d.x; q[1] = d.y; q[2] = d.z; q[3] = d.yaw;
-    q[4] = q[6] = -.5 * crumple * (1 - straight); q[5] = q[7] = 1.1 * crumple * (1 - straight);
-    q[18] = -RIG[d.kind].leg * .35 * crumple * (1 - straight);
-    q[12] = -1.1 * Math.sin(k * PI) + .6 * straight; q[15] = -1.3 * Math.sin(k * PI * .9) + .5 * straight; // the arms thrown out
-    q[9] = .25 * crumple; q[10] = .4 * (d.h - .5) * crumple; q[11] = .3 + .5 * crumple; q[23] = .3 * crumple;
-    q[20] = fall; q[22] = d.scale;
+    q[4] = R.F0R - F; q[5] = R.S0R - R.F0R + K * (1 + .2 * sd); q[6] = R.F0L - F; q[7] = R.S0L - R.F0L + K * (1 - .2 * sd);
+    q[8] = -q[4] - q[5] + .4 * crumple * (1 - straight); q[9] = -q[6] - q[7] + .4 * crumple * (1 - straight);
+    q[10] = .25 * sd * hit; q[11] = .12 * sd * crumple; q[13] = -R.leg * .38 * crumple * (1 - straight);
+    q[16] = .2 * sd * hit; q[17] = -.25 * hit + .35 * crumple; q[18] = .1 * sd * crumple; q[19] = .35 * sd * crumple; q[20] = -.3 * hit + .5 * crumple; q[21] = .3 + .5 * crumple;
+    q[14] = fall; q[15] = d.scale;
+    q[24] = -1.0 * hit + .5 * crumple; q[27] = -.2 - .3 * crumple; q[28] = -1.2 * hit + .4 * crumple; q[31] = -.3 * crumple; // arms flung, then limp
     im.setColorAt(i, d.col); write(D, i, q);
   }
 }
