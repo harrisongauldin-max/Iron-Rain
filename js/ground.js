@@ -684,6 +684,37 @@ const keepOrSwitch = (u, tg) => { const cur = u.target && fighting(u.target) && 
   if (!cur) return tg; if (!tg || tg === cur) return cur; return dist2(u, tg) < dist2(u, cur) * .45 ? tg : cur; };
 const strike = (u, tg, run) => { const k = keepOrSwitch(u, tg); if (k && (k !== u.target || !u.order || u.order.type !== 'attack')) order(u, { type: 'attack', t: k, run }); return k; };
 const goTo = (u, x, y, o = {}) => { if (u.order && u.order.type === 'move' && hyp(u.order.x - x, u.order.y - y) < 80) return; if (!u.order && hyp(u.x - x, u.y - y) < 40) return; order(u, Object.assign({ type: 'move', x, y }, o)); };
+// the pin and the flank, as in any field battle since the Iron Age: a shock unit whose target is already locked in a
+// fight (in melee, or shooting at someone else) does not walk into its face, it swings wide and comes in on its flank or
+// rear, where a blow lands at one and a half to twice the weight and the charge shakes the line (blow, morale)
+function flankPt(u, tg) {
+  const a = Math.atan2(u.y - tg.y, u.x - tg.x), off = angDiff(tg.a, a); if (Math.abs(off) > 1.3) return null; // already on her side or behind her
+  const side = off >= 0 ? 1 : -1, ang = tg.a + side * 2.0, r = radiusOf(tg) + radiusOf(u) + 90, x = tg.x + Math.cos(ang) * r, y = tg.y + Math.sin(ang) * r;
+  if (x < 60 || y < 60 || x > MAP - 60 || y > MAP - 60 || isDeep(x, y) || (G.map.wl.length && crossesWall(u.x, u.y, x, y))) return null;
+  return { x, y };
+}
+const pinned = (u, tg) => !!(tg.melee && tg.melee !== u) || !!(tg.aim && tg.aim !== u && tg.firing);
+const charge = (u, tg) => {
+  if (u.flankOf && fighting(u.flankOf) && dist2(u, u.flankOf) < 1800 * 1800 && pinned(u, u.flankOf)) tg = u.flankOf; else u.flankOf = null;
+  if (!tg) return null;
+  const d = Math.sqrt(dist2(u, tg));
+  if (u.T.mel >= 8 && !u.melee && d > radiusOf(tg) + radiusOf(u) + 40 && d < 1800 && pinned(u, tg)) {
+    const fp = flankPt(u, tg);
+    if (fp && hyp(u.x - fp.x, u.y - fp.y) > 60) { if (u.flankOf !== tg) G.aist('flank'); u.flankOf = tg; goTo(u, fp.x, fp.y, { run: u.stam > .35 || u.T.fly }); return tg; }
+  }
+  u.flankOf = null; return strike(u, tg, true);
+};
+// a unit about to break steps back out of the fight to steady itself (morale recovers once nothing has hit it for six
+// seconds), and goes back in once it has; a leader's guard and the guns never do
+const steady = (u, bx, by) => {
+  if (u.leader || u.T.art || u.T.aa) return false;
+  if (u.backT && G.t < u.backT && u.morale < 46) { goTo(u, u.back.x, u.back.y, { run: true }); return true; }
+  u.backT = 0;
+  if (u.morale < 24 && u.men > u.men0 * .3 && (u.melee || G.t - (u.underFire || -99) < 3)) {
+    const d = hyp(bx - u.x, by - u.y) || 1, k = Math.min(380, d); u.back = { x: u.x + (bx - u.x) / d * k, y: u.y + (by - u.y) / d * k }; u.backT = G.t + 14; u.melee = null; G.aist('steady');
+    goTo(u, u.back.x, u.back.y, { run: true }); return true; }
+  return false;
+};
 const strOf = L => L.reduce((a, u) => a + u.men * u.eq * (u.T.mel + u.wpn.dmg * u.wpn.rof * 10) / 10, 0); // fighting worth, not just heads
 const within = (L, x, y, r) => L.filter(u => hyp(u.x - x, u.y - y) < r);
 function ai(t) {
@@ -699,7 +730,7 @@ function defend(mine, foes) {
     else { const s = sites.slice().sort((a, b) => hyp(a.x - u.post.x, a.y - u.post.y) - hyp(b.x - u.post.x, b.y - u.post.y))[0]; u.role = 'site'; u.site = s.id; u.post.site0 = s.id; } }
   const reserve = mine.filter(u => u.role === 'reserve');
   // the picture: enemy worth near each site, our worth there, and the beachheads
-  const P = sites.map(s => { const en = within(foes, s.x, s.y, 900), ours = mine.filter(u => u.role === 'site' && u.site === s.id); return { s, threat: strOf(en), en, ours, held: strOf(ours) }; });
+  const P = sites.map(s => { const en = within(foes, s.x, s.y, 1300), ours = mine.filter(u => u.role === 'site' && u.site === s.id); return { s, threat: strOf(en), en, ours, held: strOf(ours) }; });
   const urgent = P.filter(p => p.s.own === 0 || p.threat > p.held * 1.1).sort((a, b) => (b.s.own === 0) - (a.s.own === 0) || b.threat - a.threat)[0];
   // before the Storks: is there a beachhead the reserve can crush?
   let sally = null;
@@ -708,24 +739,46 @@ function defend(mine, foes) {
   if (sally) G.aist('sally'); if (urgent) G.aist(urgent.s.own === 0 ? 'retake' : 'reinforce');
   // the reserve
   for (const u of reserve) {
+    if (steady(u, city.x, city.y)) continue;
     if (u.melee) continue;
+    // the Legate keeps behind his reserve: his fall would shake the whole garrison (leaderDown)
+    if (u.leader) { const e = nearest(u, foes), de = e ? Math.sqrt(dist2(u, e)) : Infinity; if (e && de < 200) strike(u, e, false); else { const s = urgent ? urgent.s : null, px = s ? s.x + (city.x - s.x) * .35 : u.post.x, py = s ? s.y + (city.y - s.y) * .35 : u.post.y; goTo(u, px, py); } continue; }
     let tg = null;
     if (sally) tg = bestStrike(u, sally.en, 3600); // the beachhead may be far out on the plain
     else if (urgent) tg = bestStrike(u, urgent.en.length ? urgent.en : within(foes, urgent.s.x, urgent.s.y, 1300), 2800);
     if (!tg) { const pool = foes.filter(f => hyp(f.x - city.x, f.y - city.y) < city.r + 700); tg = pool.length ? bestStrike(u, pool, 2200) : null; }
-    if (tg) strike(u, tg, true);
+    if (tg) charge(u, tg);
     else goTo(u, u.post.x, u.post.y);
   }
   // the garrisons: hold the site; shoot what is in sight; help a site in trouble only if their own is quiet
   for (const u of mine.filter(v => v.role === 'site')) {
+    if (steady(u, city.x, city.y)) continue;
     if (u.melee) continue;
     const near = nearest(u, foes), dn = near ? Math.sqrt(dist2(u, near)) : Infinity, home = P[u.site], s = home.s;
     if (near && dn < u.wpn.range * 1.02 && los(u.x, u.y, near.x, near.y)) { if (u.order && u.order.type === 'move') order(u, { type: 'halt' }); continue; }
     if (s.own === 0 || home.en.some(e => hyp(e.x - s.x, e.y - s.y) < s.r + 20)) { const e = nearest(u, home.en.length ? home.en : foes); if (e) { strike(u, e, false); continue; } } // the enemy stands on our site: throw them off it
     if (near && dn < u.wpn.range * 1.3 && hyp(near.x - s.x, near.y - s.y) < 600) { strike(u, near, false); continue; } // close but hidden: go and find them
-    if (urgent && urgent !== home && home.threat === 0 && !u.helped && mine.filter(v => v.helped === urgent.s.id).length < 2) { u.helped = urgent.s.id; u.site = urgent.s.id; }
+    if (urgent && urgent !== home && home.threat === 0 && !u.helped && mine.filter(v => v.helped === urgent.s.id).length < 3) { u.helped = urgent.s.id; u.site = urgent.s.id; } // a quiet site sends up to three cohorts, read from 1.3 km out: the help is there before the blow lands
     const ps = u.site === u.post.site0 ? u.post : { x: sites[u.site].x + (u.id % 3 - 1) * 110, y: sites[u.site].y - 100 };
     goTo(u, ps.x, ps.y, { run: hyp(u.x - ps.x, u.y - ps.y) > 700 });
+  }
+  // the breach: a stretch of wall under the suits' fire is manned from inside, by the railRifle teams (the one weapon
+  // a starShell fears) of the quietest sites near it and a cohort to hold the gap when it falls. Back to their sites
+  // once the wall has been quiet for half a minute
+  for (const u of mine) if (u.role === 'wall' && (!G.map.walls[u.bw] || G.t - (G.map.walls[u.bw].hitT ?? -99) > 30)) { u.role = 'site'; u.bw = null; }
+  for (const w of G.map.walls) { if (w.down || G.t - (w.hitT ?? -99) > 8) continue;
+    const m = wallMid(w), n = mine.filter(u => u.role === 'wall' && u.bw === w.id).length; if (n >= 3) continue;
+    const cand = mine.filter(u => u.role === 'site' && !u.melee && (u.type === 'railmen' || u.type === 'legion') && P[u.site] && P[u.site].threat < P[u.site].held * .8 && hyp(u.x - m.x, u.y - m.y) < 1800)
+      .sort((a, b) => (b.type === 'railmen') - (a.type === 'railmen') || hyp(a.x - m.x, a.y - m.y) - hyp(b.x - m.x, b.y - m.y));
+    for (const u of cand.slice(0, 3 - n)) { u.role = 'wall'; u.bw = w.id; G.aist('manWall'); } }
+  for (const u of mine.filter(v => v.role === 'wall')) {
+    if (steady(u, city.x, city.y)) continue;
+    if (u.melee) continue;
+    const w = G.map.walls[u.bw], m = wallMid(w), d = hyp(m.x - city.x, m.y - city.y) || 1, ix = (city.x - m.x) / d, iy = (city.y - m.y) / d, lat = (u.id % 3 - 1) * 45;
+    const near = nearest(u, foes), dn = near ? Math.sqrt(dist2(u, near)) : Infinity;
+    if (w.down && near && dn < 320) { strike(u, near, false); continue; } // the gap is open: hold it
+    if (near && dn < u.wpn.range * .98 && los(u.x, u.y, near.x, near.y) && hyp(u.x - m.x, u.y - m.y) < 160) { if (u.order && u.order.type === 'move') order(u, { type: 'halt' }); continue; }
+    goTo(u, m.x + ix * (w.down ? 30 : 70) - iy * lat, m.y + iy * (w.down ? 30 : 70) + ix * lat, { run: hyp(u.x - m.x, u.y - m.y) > 500 });
   }
   // the guns and the Sarissas: stay out of reach of melee, otherwise at the post
   for (const u of mine.filter(v => v.role === 'post')) { if (u.melee) continue; const near = nearest(u, foes), dn = near ? Math.sqrt(dist2(u, near)) : Infinity;
@@ -745,7 +798,14 @@ function attack(mine, foes) {
   else if (A.assaultT) { A.x += (c0.x - A.x) * .3; A.y += (c0.y - A.y) * .3; A.path = null; } // storming: the command follows the columns
   const held = sites.filter(s => s.own === 0);
   // the objective: the nearest site still theirs; once two are ours, stand between them and keep them
-  let tgt = sites.filter(s => s.own === 1 || s.v < 1).sort((p, q) => hyp(p.x - A.x, p.y - A.y) - hyp(q.x - A.x, q.y - A.y))[0] || sites[0];
+  // the objective: the site still theirs that is cheapest to take, its distance and the garrison standing on it both
+  // counted (a lightly held site a little farther off before a strong one close by), held to for a minute once chosen
+  const costOf = s => hyp(s.x - A.x, s.y - A.y) + strOf(within(foes, s.x, s.y, 700)) * .55;
+  const open = sites.filter(s => s.own === 1 || s.v < 1);
+  let tgt = open.sort((p, q) => costOf(p) - costOf(q))[0] || sites[0];
+  const was = open.find(s => s.id === A.tgt);
+  if (was && was !== tgt && (A.assaultT || G.t - (A.tgtT || 0) < 60) && costOf(was) < costOf(tgt) * 1.6) tgt = was;
+  if (A.tgt !== tgt.id) A.tgtT = G.t;
   if (held.length >= NEED()) { const thr = held.map(s => ({ s, t: strOf(within(foes, s.x, s.y, 900)) })).sort((a, b) => b.t - a.t)[0]; tgt = thr.s; }
   if (!A.path || A.tgt !== tgt.id) { A.path = findPath(A.x, A.y, tgt.x, tgt.y, false); A.tgt = tgt.id; }
   // the line faces the objective, and wheels slowly: a kilometre-wide line that turned with every bend in the road would never form
@@ -791,6 +851,7 @@ function attack(mine, foes) {
   A.bk = A.breach;
   A.tg2 = assault && held.length < NEED() ? sites.filter(s => s !== tgt && (s.own === 1 || s.v < 1)).sort((p, q) => hyp(p.x - A.x, p.y - A.y) - hyp(q.x - A.x, q.y - A.y))[0] || null : null; // a second column for the next site along
   for (const u of landed) {
+    if (!gather && u.keep == null && steady(u, A.x - fx * 300, A.y - fy * 300)) continue;
     if (u.melee) continue;
     const near = nearest(u, foes), dn = near ? Math.sqrt(dist2(u, near)) : Infinity, sees = near && los(u.x, u.y, near.x, near.y);
     if (u.keep != null) { const s = sites[u.keep]; // the holding force: on the site, shooting what comes
@@ -804,10 +865,10 @@ function attack(mine, foes) {
       if (z && hyp(u.x - z.x, u.y - z.y) > 450) goTo(u, z.x + (u.id % 5 - 2) * 100, z.y + (u.id % 3 - 1) * 100); continue; }
     if (u.type === 'peerless') {
       if (u.leader) { const p = { x: A.x - fx * 260, y: A.y - fy * 260 }; if (near && dn < 160) strike(u, near, false); else goTo(u, p.x, p.y, { a: face }); continue; }
-      const pool = foes.filter(f => hyp(f.x - A.x, f.y - A.y) < 900 || f.T.aa && hyp(f.x - A.x, f.y - A.y) < 1800); const tg = pool.length ? bestStrike(u, pool, 2000) : null;
-      if (tg) strike(u, tg, true); else goTo(u, A.x - fx * 150 + (u.id % 3 - 1) * 90, A.y - fy * 150, { a: face }); continue; }
+      const pool = foes.filter(f => hyp(f.x - A.x, f.y - A.y) < 900 || (f.T.aa || f.leader) && hyp(f.x - A.x, f.y - A.y) < 1800); const tg = pool.length ? bestStrike(u, pool, 2000) : null;
+      if (tg) charge(u, tg); else goTo(u, A.x - fx * 150 + (u.id % 3 - 1) * 90, A.y - fy * 150, { a: face }); continue; }
     if (u.type === 'starshell' && A.breach && !(near && dn < 220)) { const wid = A.breach[u.id % A.breach.length]; if (!u.order || u.order.type !== 'breach' || u.order.w !== wid) order(u, { type: 'breach', w: wid }); continue; }
-    if (u.type === 'obsidian' || u.type === 'starshell') { const tg = front.length ? nearest(u, front) : null; if (tg && Math.sqrt(dist2(u, tg)) < 450) { strike(u, tg, u.type === 'obsidian'); continue; } }
+    if (u.type === 'obsidian' || u.type === 'starshell') { const pool = front.length ? front : foes.filter(f => pinned(u, f) && hyp(f.x - A.x, f.y - A.y) < 900), tg = pool.length ? (u.type === 'obsidian' ? bestStrike(u, pool, 700) : nearest(u, pool)) : null; if (tg && Math.sqrt(dist2(u, tg)) < 700) { if (u.type === 'obsidian') charge(u, tg); else strike(u, tg, false); continue; } }
     if (near && dn < u.wpn.range * .95 && sees) { if (u.order && u.order.type === 'move') order(u, { type: 'halt' }); continue; } // in reach and in sight: the line stands and shoots
     if (near && dn < u.wpn.range * 1.3 && !sees && (A.stall || 0) > 20) { strike(u, near, false); continue; } // dig them out of the buildings
     if (assault && u.keep == null && !u.leader) { // storming: each cohort makes for the objective by its own road, and fights whatever it meets
@@ -830,7 +891,8 @@ function cen(L) { if (!L.length) return { x: MAP / 2, y: MAP / 4 }; return { x: 
 function bestStrike(u, foes, reach = 900) { // weak, isolated, or busy fighting someone else; ranged and artillery first
   let best = null, bs = -Infinity;
   for (const f of foes) { const d = Math.sqrt(dist2(u, f)); if (d > reach) continue;
-    const s = -d * .6 + (f.T.art || f.T.aa ? 400 : 0) + (f.melee ? 200 : 0) + (f.T.wpn === 'railRifle' && u.type !== 'peerless' ? -150 : 0) - f.men * f.eq * .3 + (f.T.low ? 120 : 0) - (f.type === 'starshell' && u.type === 'obsidian' ? 500 : 0); if (s > bs) { bs = s; best = f; } }
+    const s = -d * .6 + (f.T.art || f.T.aa ? 400 : 0) + (f.melee ? 200 : 0) + (f.T.wpn === 'railRifle' && u.type !== 'peerless' ? -150 : 0) - f.men * f.eq * .3 + (f.T.low ? 120 : 0) - (f.type === 'starshell' && u.type === 'obsidian' ? 500 : 0)
+      + (f.leader ? (u.type === 'peerless' ? 650 : 150) : 0) + (pinned(u, f) && u.T.mel >= 8 ? 180 : 0); /* the enemy commander; a line already locked in a fight */ if (s > bs) { bs = s; best = f; } }
   return best;
 }
 
