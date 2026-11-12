@@ -117,7 +117,7 @@ function hullTex(type, col, fac) {
   for (const cx of [g, e]) { hullPath(cx, pts, K); cx.strokeStyle = col.main; cx.lineWidth = Math.max(1.5, K * .035); cx.globalAlpha = cx === e ? .75 : 1; cx.stroke(); cx.globalAlpha = 1; }
   return [tex(c), tex(ce)];
 }
-function ringTexC() { // Saturn's rings across the radius: the translucent C ring, the bright B ring full of fine ringlets, the Cassini Division, the A ring with the Encke gap, the thin F ring beyond
+function ringTexC() { // Saturn // Saturn's rings across the radius: the translucent C ring, the bright B ring full of fine ringlets, the Cassini Division, the A ring with the Encke gap, the thin F ring beyond
   const N = 2048, [c, g] = canvas(N, 8), rnd = seeded(91), A = new Float32Array(N), K = new Float32Array(N);
   for (let x = 0; x < N; x++) { const f = x / N; let a, k = 1;
     if (f < .2) { a = .1 + .12 * f / .2 + .05 * Math.sin(f * 140); k = .82; } // C ring: dim, grey-tan
@@ -131,6 +131,25 @@ function ringTexC() { // Saturn's rings across the radius: the translucent C rin
   for (let x = 0; x < N; x++) { const a = clamp(S[x], 0, .95), k = K[x] * (.92 + .08 * Math.sin(x / N * 31)); g.fillStyle = `rgba(${232 * k | 0},${212 * k | 0},${168 * k | 0},${a})`; g.fillRect(x, 0, 1, 8); }
   return c;
 }
+// the other giants' rings are faint and dark, and seen mostly by the dust in them. Each painter maps r0..r1 planet radii across the width;
+// the height is azimuth (0..1 round the ring) so a ring can vary round its circuit, as Neptune's Adams ring does
+const ringProfile = (N, H, col, f) => { const [c, g] = canvas(N, H); for (let y = 0; y < H; y++) for (let x = 0; x < N; x++) { const [a, k = 1] = f(x / N, y / H); if (a <= 0) continue; g.fillStyle = `rgba(${col[0] * k | 0},${col[1] * k | 0},${col[2] * k | 0},${clamp(a, 0, .95)})`; g.fillRect(x, y, 1, 1); } return c; };
+const gauss = (f, c, w) => Math.exp(-(((f - c) / w) ** 2));
+function jupiterRingC() { // 1.25..2.6 R: the halo climbing to the main ring, the main ring with its bright outer edge at 1.81, the gossamer rings fading beyond
+  return ringProfile(1024, 4, [205, 178, 160], f => { const r = 1.25 + f * 1.35; let a = 0;
+    if (r > 1.29 && r < 1.72) a = .012 + .05 * ((r - 1.29) / .43) ** 2.2;
+    if (r >= 1.72 && r < 1.812) a = .1 + .07 * (r - 1.72) / .09 + .1 * gauss(r, 1.806, .006);
+    if (r >= 1.812 && r < 2.55) a = .03 * (1 - (r - 1.812) / .74) ** 1.3 + .01 * (r < 2.1 ? 1 : 0);
+    return [a, .95 + .05 * Math.sin(f * 90)]; }); }
+function uranusRingC() { // 1.4..2.1 R: thirteen narrow charcoal rings (6, 5, 4, α, β, η, γ, δ, λ, ε) over the broad faint ζ sheet; ε the widest and brightest, at 2.0
+  const R = [[1.637, .007, .2], [1.652, .007, .22], [1.666, .007, .2], [1.75, .009, .32], [1.787, .009, .34], [1.846, .006, .16], [1.863, .007, .3], [1.89, .008, .3], [1.957, .005, .14], [2.001, .014, .6]];
+  return ringProfile(1024, 4, [150, 150, 160], f => { const r = 1.4 + f * .7; let a = .012 * gauss(r, 1.52, .09); for (const [c, w, k] of R) a += k * gauss(r, c, w); return [a, 1]; }); }
+function neptuneRingC() { // 1.6..2.7 R: Galle broad and faint, Le Verrier narrow, the Lassell sheet out to Arago, and the Adams ring with its three bright arcs (Liberté, Égalité, Fraternité, and the knot Courage)
+  const arcs = [[.5, .022, 1], [.545, .016, .9], [.585, .02, .95], [.61, .006, .5]]; // azimuth, half-width, strength
+  return ringProfile(1024, 512, [200, 172, 160], (f, az) => { const r = 1.6 + f * 1.1; let a = .035 * gauss(r, 1.692, .045) + .19 * gauss(r, 2.148, .005) + .025 * (r > 2.15 && r < 2.31 ? 1 : 0) + .06 * gauss(r, 2.31, .005);
+    let adams = .12; for (const [c, w, k] of arcs) adams += .36 * k * Math.max(0, 1 - Math.abs(az - c) / w); a += adams * gauss(r, 2.541, .005); return [a, 1]; }); }
+// which worlds carry rings, their radii in planet radii, the painter, and whether the ring is seen by its dust (brightens when backlit) or its ice
+const RINGS = { saturn: { r0: 1.35, r1: 2.3, tex: ringTexC, dust: 0, shadow: 1 }, jupiter: { r0: 1.25, r1: 2.6, tex: jupiterRingC, dust: 1, shadow: .3 }, uranus: { r0: 1.4, r1: 2.1, tex: uranusRingC, dust: .5, shadow: .5 }, neptune: { r0: 1.6, r1: 2.7, tex: neptuneRingC, dust: 1, shadow: .3 } };
 // the Sun's corona for the map: a soft wide glow with faint radial streamers, drawn additive behind the disc
 function coronaC() { const [c, g] = canvas(512, 512), R = seeded(5); const gr = g.createRadialGradient(256, 256, 0, 256, 256, 256); gr.addColorStop(0, 'rgba(255,245,225,.9)'); gr.addColorStop(.1, 'rgba(255,225,170,.55)'); gr.addColorStop(.3, 'rgba(255,200,130,.16)'); gr.addColorStop(.6, 'rgba(255,180,110,.04)'); gr.addColorStop(1, 'rgba(255,170,100,0)'); g.fillStyle = gr; g.fillRect(0, 0, 512, 512);
   g.globalCompositeOperation = 'lighter'; g.translate(256, 256);
@@ -218,7 +237,7 @@ const planetMat = (atmo, o = {}) => {
   const U = { map: texU(), night: texU(), hasNight: uniform(0), hmap: texU(), hasH: uniform(0), clouds: texU(), hasClouds: uniform(0), cloudOff: uniform(0),
     texel: uniform(new THREE.Vector2(1 / 512, 1 / 256)), bumpK: uniform(BUMP), gas: uniform(GAS ? 1 : 0), hasAtmo: uniform(AIR),
     sunPos: uniform(new THREE.Vector3()), atmo: uniform(new THREE.Color().setRGB(...atmo.map(v => v / 255), THREE.SRGBColorSpace)),
-    C: uniform(new THREE.Vector3()), pr: uniform(1), ringN: uniform(new THREE.Vector3(0, 1, 0)), ringR: uniform(new THREE.Vector2(1.35, 2.3)), ringMap: texU() };
+    C: uniform(new THREE.Vector3()), pr: uniform(1), ringN: uniform(new THREE.Vector3(0, 1, 0)), ringR: uniform(new THREE.Vector2(1.35, 2.3)), ringK: uniform(1), ringMap: texU() };
   const vN = worldN();
   const vT = varying(Fn(() => { const n = normalGeometry, t = vec3(n.z, 0, n.x.mul(-1)); return normalize(modelWorldMatrix.mul(vec4(select(length(t).greaterThan(1e-4), t, vec3(0, 0, 1)), 0)).xyz); })());
   const frag = Fn(() => {
@@ -256,7 +275,7 @@ const planetMat = (atmo, o = {}) => {
       const dn = dot(L, U.ringN), tt = dot(U.C.sub(positionWorld), U.ringN).div(select(abs(dn).lessThan(1e-4), float(1e-4), dn)).toVar();
       const Hp = positionWorld.add(L.mul(tt)), rr = length(Hp.sub(U.C)).div(U.pr).toVar();
       const inR = step(0, tt).mul(step(U.ringR.x, rr)).mul(step(rr, U.ringR.y)), ra = U.ringMap.at(vec2(rr.sub(U.ringR.x).div(U.ringR.y.sub(U.ringR.x)), .5)).a;
-      sh.mulAssign(one.sub(inR.mul(ra).mul(.82)));
+      sh.mulAssign(one.sub(inR.mul(ra).mul(.82).mul(U.ringK)));
     }
     const fr = pow(one.sub(mu), 2.6).toVar();
     const diff = GAS ? max(nl.add(.12), 0).div(1.12).mul(.95) : max(nl, 0).mul(.97); // a gas giant's thick air wraps the light a little round the terminator
@@ -337,14 +356,14 @@ const atmoMat = (rgb, k) => {
 // the rings: the world's shadow falls across them with a soft edge (the Sun has size), the unlit face is dim, and
 // looking toward the Sun the thin ringlets glow with forward-scattered light
 const ringMat = map => {
-  const U = { map: texU(map), sunPos: uniform(new THREE.Vector3()), C: uniform(new THREE.Vector3()), r0: uniform(1.35), r1: uniform(2.3), pr: uniform(1), N: uniform(new THREE.Vector3(0, 1, 0)) };
+  const U = { map: texU(map), sunPos: uniform(new THREE.Vector3()), C: uniform(new THREE.Vector3()), r0: uniform(1.35), r1: uniform(2.3), pr: uniform(1), N: uniform(new THREE.Vector3(0, 1, 0)), dust: uniform(0) };
   const frag = Fn(() => {
-    const rr = length(positionGeometry.xy), t = U.map.at(vec2(rr.sub(U.r0).div(U.r1.sub(U.r0)), .5)).toVar();
+    const rr = length(positionGeometry.xy), az = TSL.atan(positionGeometry.y, positionGeometry.x).div(TAU).add(.5), t = U.map.at(vec2(rr.sub(U.r0).div(U.r1.sub(U.r0)), az)).toVar();
     const L = normalize(U.sunPos.sub(U.C)), p = positionWorld.sub(U.C).toVar(), along = dot(p, L).toVar(), perp = length(p.sub(L.mul(along)));
     const V = normalize(cameraPosition.sub(positionWorld)).toVar();
     const shadow = select(along.lessThan(0), smoothstep(U.pr.mul(.9), U.pr.mul(1.08), perp), float(1)).mul(.9).add(.1).toVar();
     const lit = smoothstep(-.08, .08, dot(U.N, L).mul(dot(U.N, V))).mul(.45).add(.55); // the face the Sun lights, or the one it does not
-    const fs = pow(max(dot(V.negate(), L), 0), 5).mul(one.sub(t.a)).mul(.7).mul(shadow); // forward scattering through the thin parts
+    const fs = pow(max(dot(V.negate(), L), 0), 5).mul(mix(one.sub(t.a), min(t.a.mul(5), one), U.dust)).mul(.7).mul(shadow); // forward scattering: through the thin parts of an ice ring, by the grains of a dust ring
     const col = t.rgb.mul(shadow.mul(1.0).add(.2)).mul(lit).add(vec3(1, .95, .85).mul(fs));
     return vec4(col, min(one, t.a.mul(.96).add(fs.mul(.4))));
   })();
@@ -494,7 +513,7 @@ export async function initRender() {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(FOV, S.W / S.H, 1, 1e6);
   TEX.glow = tex(radial(64, [[0, 1], [.2, .62], [.5, .2], [1, 0]])); /* a glow, not a disc */ TEX.dot = tex(radial(32, [[0, 1], [.25, .7], [.6, .2], [1, 0]])); /* a soft mote, so a trail puff close up is a glow and not a ball */ TEX.smoke = tex(smokeC());
-  TEX.streak = tex(streakC()); TEX.plume = tex(plumeC()); TEX.missile = tex(missileC()); TEX.fins = tex(finsC()); TEX.ring = tex(ringTexC());
+  TEX.streak = tex(streakC()); TEX.plume = tex(plumeC()); TEX.missile = tex(missileC()); TEX.fins = tex(finsC()); TEX.rings = {}; for (const id in RINGS) TEX.rings[id] = tex(RINGS[id].tex(), { wrap: true }); TEX.ring = TEX.rings.saturn;
   TEX.anam = tex(radial(128, [[0, 1], [.2, .5], [.5, .12], [1, 0]])); // stretched sideways: the anamorphic streak of a big flash
   FLARE_C = flareC(); TEX.fire = tex(fireC()); TEX.shock = tex(shockC()); TEX.hex = tex(hexC()); TEX.spark = tex(sparkC()); TEX.flare = tex(flareC()); TEX.corona = tex(coronaC());
   TEX.glint = tex(radial(64, [[0, 1], [.08, .9], [.25, .32], [.6, .06], [1, 0]])); // a far world as a point of light
@@ -691,7 +710,7 @@ function glintFor(v, x, y, rpx, z, on) {
 function ringUniforms(v, x, y, pr, sunP) {
   const R = v.ring.material.uniforms; R.sunPos.value.copy(sunP); R.C.value.set(x, 0, y); R.pr.value = pr;
   v.g.updateMatrixWorld(); v.g.getWorldQuaternion(GL_Q); GL_N.set(0, 1, 0).applyQuaternion(GL_Q); R.N.value.copy(GL_N);
-  const U = v.mesh.material.uniforms; if (U.ringN) { U.ringN.value.copy(GL_N); U.ringR.value.set(1.35, 2.3); }
+  const U = v.mesh.material.uniforms; if (U.ringN) { U.ringN.value.copy(GL_N); const RS = v.ringSpec || RINGS.saturn; U.ringR.value.set(RS.r0, RS.r1); }
 }
 // the worlds' axes lean back from the camera so their equators, where the lore puts so much, face you;
 // Uranus rolls on its side
@@ -711,9 +730,11 @@ function buildBodies() {
       const cm = new THREE.SpriteMaterial({ map: TEX.corona, color: 0xffd9a0, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, depthTest: false, opacity: .55 });
       v.corona = new THREE.Sprite(cm); v.corona.renderOrder = -1; bodiesG.add(v.corona); // the corona, behind everything but the sky
     } else {
-      v.mesh = new THREE.Mesh(sph, planetMat(pal.atmo || [180, 180, 190], { gas: b.gas, air: !!pal.atmo && !b.gas, ring: !!pal.ring, bump: b.gas ? 0 : b.id === 'earth' || b.id === 'venus' || b.id === 'titan' ? .55 : 1 }));
+      v.mesh = new THREE.Mesh(sph, planetMat(pal.atmo || [180, 180, 190], { gas: b.gas, air: !!pal.atmo && !b.gas, ring: !!(RINGS[b.id] || pal.ring), bump: b.gas ? 0 : b.id === 'earth' || b.id === 'venus' || b.id === 'titan' ? .55 : 1 }));
       if (pal.atmo && !b.dwarf && b.r > 250) { v.atmo = new THREE.Mesh(sph, atmoMat(pal.atmo, b.gas ? .75 : b.kind === 'moon' ? .55 : 1)); v.atmoK = b.gas ? 1.07 : 1.12; v.atmo.renderOrder = 3; bodiesG.add(v.atmo); }
-      if (pal.ring) { const rg = new THREE.RingGeometry(1.35, 2.3, 192, 1); v.ring = new THREE.Mesh(rg, ringMat(TEX.ring)); v.ring.rotation.x = -PI / 2; v.ring.renderOrder = 4; v.g.add(v.ring); v.mesh.material.uniforms.ringMap.value = TEX.ring; }
+      const RS = RINGS[b.id] || (pal.ring ? RINGS.saturn : null); // the four giants carry rings; a palette's ring flag means Saturn's
+      if (RS) { const rg = new THREE.RingGeometry(RS.r0, RS.r1, 192, 1), rt = TEX.rings[b.id] || TEX.ring; v.ring = new THREE.Mesh(rg, ringMat(rt)); v.ringSpec = RS; const RU = v.ring.material.uniforms; RU.r0.value = RS.r0; RU.r1.value = RS.r1; RU.dust.value = RS.dust;
+        v.ring.rotation.x = -PI / 2; v.ring.renderOrder = 4; v.g.add(v.ring); const MU = v.mesh.material.uniforms; MU.ringMap.value = rt; MU.ringR.value.set(RS.r0, RS.r1); MU.ringK.value = RS.shadow; }
       // seen from far enough that its disc is a pixel or two, a world is a point of light in its own colour
       const gc = new THREE.Color(pal.c[1] || pal.c[0] || '#cccccc').lerp(new THREE.Color(1, 1, 1), .35);
       v.glint = new THREE.Sprite(new THREE.SpriteMaterial({ map: TEX.glint, color: gc, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, depthTest: false, opacity: 0 })); v.glint.renderOrder = 5; v.glint.visible = false; bodiesG.add(v.glint);
