@@ -17,11 +17,15 @@ import { TAU, PI, rand, clamp, hyp, hex, angDiff } from './util.js';
 import { grav } from './physics.js';
 import { disabled, mainAmmo, needsService, groupList, defaultRally, worldUnderAttack, nukesOf } from './sim.js';
 import { generate, HI } from './planetgen.js';
+import { AU } from './solar.js';
 import { FOV, SE, CE, ELEV, AZ, setView, camDist, camOffset, screenAng, toWorld, projectTo, onScr, footprint } from './cam.js';
 export { toWorld, project } from './cam.js';
 
 let renderer, scene, camera, composer, bloomPass, ov, ctx, DPR = 1, ODPR = 1; // composer: the post-processing RenderPipeline; bloomPass: its bloom node
-let bgMesh, bodiesG, orbitL = [], rocksG, debrisM, shipsG, turretM = {}, missileM = {}, B = {};
+let bgMesh, bodiesG, orbitL = [], rocksG, debrisM, shipsG, turretM = {}, missileM = {}, B = {}, dustM = [];
+// the dust sheets fade in as the view pulls out to the system: the Belt below z .003, the Kuiper belt below 4e-4
+function beltDust(sunP, z, on) { const ks = [clamp((.003 - z) / .0015, 0, 1), clamp((4e-4 - z) / 2e-4, 0, 1)];
+  dustM.forEach((m, i) => { const k = on ? ks[i] : 0; m.visible = k > 0; if (!m.visible) return; m.position.copy(sunP); m.material.uniforms.k.value = k; }); }
 let nodesRef = null, fieldsRef = null, bodyVerSeen = -1, bodyVis = [], rockGroups = [];
 const O = { x: 0, y: 0 };
 const shipVis = new Map(), structVis = new Map();
@@ -196,7 +200,7 @@ function starC(count, maxSize, alpha, spikes = false) {
 // Each material carries a `uniforms` map shaped like the old ShaderMaterial's ({ name: { value } }), so the rest of
 // the renderer sets them exactly as before. Texture slots hold a 1×1 placeholder until a map arrives.
 // the shader block keeps its TSL names (clamp, mix, length …) to itself
-const { planetMat, cloudMat, sunMat, atmoMat, ringMat, bgMat, batchMat, orbitMat, SH } = (() => {
+const { planetMat, cloudMat, sunMat, atmoMat, ringMat, bgMat, batchMat, orbitMat, dustMat, SH } = (() => {
 const PH = (() => { const t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1); t.magFilter = t.minFilter = THREE.LinearFilter; t.needsUpdate = true; return t; })();
 // a texture uniform that may be sampled at several places in one shader: setting .value updates every sample
 function texU(init = null) {
@@ -233,8 +237,9 @@ const mkMat = (frag, o = {}) => { const m = new THREE.NodeMaterial(); Object.ass
 // terminator, and procedural fine ground detail that fades in as the camera closes (so a close pass never goes soft).
 // Gas giants are limb-darkened with a deep, soft terminator and pale polar hoods; a ringed world wears its ring's shadow.
 const planetMat = (atmo, o = {}) => {
-  const GAS = !!o.gas, AIR = o.air ? 1 : 0, BUMP = o.bump ?? 1, RING = !!o.ring;
-  const U = { map: texU(), night: texU(), hasNight: uniform(0), hmap: texU(), hasH: uniform(0), clouds: texU(), hasClouds: uniform(0), cloudOff: uniform(0),
+  const GAS = !!o.gas, AIR = o.air ? 1 : 0, BUMP = o.bump ?? 1, RING = !!o.ring, AUR = o.aurora, MOONS = !!o.moons;
+  const U = { map: texU(), night: texU(), m0: uniform(new THREE.Vector4(0, 0, 0, 1e-6)), m1: uniform(new THREE.Vector4(0, 0, 0, 1e-6)), m2: uniform(new THREE.Vector4(0, 0, 0, 1e-6)), m3: uniform(new THREE.Vector4(0, 0, 0, 1e-6)),
+    aurCol: uniform(new THREE.Color(...(AUR || [0, 0, 0]))), hasNight: uniform(0), hmap: texU(), hasH: uniform(0), clouds: texU(), hasClouds: uniform(0), cloudOff: uniform(0),
     texel: uniform(new THREE.Vector2(1 / 512, 1 / 256)), bumpK: uniform(BUMP), gas: uniform(GAS ? 1 : 0), hasAtmo: uniform(AIR),
     sunPos: uniform(new THREE.Vector3()), atmo: uniform(new THREE.Color().setRGB(...atmo.map(v => v / 255), THREE.SRGBColorSpace)),
     C: uniform(new THREE.Vector3()), pr: uniform(1), ringN: uniform(new THREE.Vector3(0, 1, 0)), ringR: uniform(new THREE.Vector2(1.35, 2.3)), ringK: uniform(1), ringMap: texU() };
@@ -277,6 +282,11 @@ const planetMat = (atmo, o = {}) => {
       const inR = step(0, tt).mul(step(U.ringR.x, rr)).mul(step(rr, U.ringR.y)), ra = U.ringMap.at(vec2(rr.sub(U.ringR.x).div(U.ringR.y.sub(U.ringR.x)), .5)).a;
       sh.mulAssign(one.sub(inR.mul(ra).mul(.82).mul(U.ringK)));
     }
+    // a moon between this world and the Sun throws its shadow on the disc: a dark spot with a soft penumbra (slots are filled each frame)
+    if (MOONS) for (const M of [U.m0, U.m1, U.m2, U.m3]) {
+      const dm = M.xyz.sub(positionWorld), tm = dot(dm, L), perp = length(dm.sub(L.mul(tm)));
+      sh.mulAssign(one.sub(smoothstep(M.w.mul(1.7), M.w.mul(.75), perp).mul(step(0, tm)).mul(.9)));
+    }
     const fr = pow(one.sub(mu), 2.6).toVar();
     const diff = GAS ? max(nl.add(.12), 0).div(1.12).mul(.95) : max(nl, 0).mul(.97); // a gas giant's thick air wraps the light a little round the terminator
     const col = base.mul(diff.mul(sh).add(.03).add(float(AIR * .03).mul(lum(U.atmo)))).toVar();
@@ -300,6 +310,12 @@ const planetMat = (atmo, o = {}) => {
     const nt = U.night.at(uvw).rgb.toVar();
     col.addAssign(nt.mul(one.sub(day)).mul(1.9).mul(one.sub(one.sub(sh).mul(.6))).mul(U.hasNight));
     col.addAssign(nt.mul(.5).mul(one.sub(day)).mul(pow(one.sub(mu), 1.5)).mul(U.hasNight)); // a little of the city light scatters in the air at the limb
+    if (AUR) { // the auroral oval round each pole, on the night side: curtains that drift and ripple, in the world's own colour
+      const q = positionGeometry, alat = abs(q.y).toVar(), band = smoothstep(.74, .83, alat).mul(one.sub(smoothstep(.87, .95, alat))).toVar();
+      const cur = n3(vec3(q.x.mul(9), SH.time.mul(.11), q.z.mul(9))).mul(.6).add(n3(vec3(q.x.mul(27).add(SH.time.mul(.17)), q.y.mul(6), q.z.mul(27))).mul(.4)).toVar();
+      const au = band.mul(pow(clamp(cur.add(.35), 0, 1.4), 2.2)).mul(one.sub(day)).toVar();
+      col.addAssign(U.aurCol.mul(au.mul(GAS ? .22 : .55).add(band.mul(GAS ? .02 : .07))).mul(one.sub(day)));
+    }
     return vec4(col, 1);
   })();
   const m = mkMat(frag); m.uniforms = U; return m;
@@ -369,13 +385,29 @@ const ringMat = map => {
   })();
   const m = mkMat(frag, { side: THREE.DoubleSide, transparent: true, depthWrite: false }); m.uniforms = U; return m;
 };
+// the Belt and the Kuiper belt as dust: a faint granular sheen along the annulus, seen only at system zoom. Coordinates are
+// scaled by the outer radius so the noise stays in a sane range; the fine grain fades where it would fall below a pixel
+const dustMat = (r0, r1, col) => {
+  const U = { k: uniform(0), col: uniform(new THREE.Color(col)) }, rn = r0 / r1;
+  const frag = Fn(() => {
+    const q = positionGeometry.xy.div(r1).toVar(), rr = length(q), fw = length(fwidth(q)).toVar();
+    const prof = smoothstep(rn, rn + (1 - rn) * .18, rr).mul(one.sub(smoothstep(1 - (1 - rn) * .3, 1, rr))).toVar();
+    const clump = n3(vec3(q.mul(7), 1.3)).mul(.5).add(.5).toVar(), lane = n3(vec3(rr.mul(60), q.x.mul(.5), 4)).mul(.5).add(.5);
+    const g1 = smoothstep(.5, 1.1, n3(vec3(q.mul(90), 2))).mul(one.sub(smoothstep(.004, .012, fw))), g2 = smoothstep(.6, 1.2, n3(vec3(q.mul(420), 5))).mul(one.sub(smoothstep(.0008, .0025, fw)));
+    const a = clamp(prof.mul(float(.15).add(clump.mul(.22)).add(lane.mul(clump).mul(.14)).add(g1.mul(.5).mul(clump.add(.3))).add(g2.mul(.55))).mul(U.k), 0, 1);
+    return vec4(U.col.mul(a), a);
+  })();
+  const m = mkMat(frag, { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }); m.uniforms = U; return m;
+};
 const bgMat = () => {
   const U = { neb: texU(), nk: uniform(1), s0: texU(), s1: texU(), s2: texU(), res: uniform(new THREE.Vector2(1, 1)), o01: uniform(new THREE.Vector4()), o2n: uniform(new THREE.Vector4()) };
   const frag = Fn(() => {
     const p = vec2(uv().x, one.sub(uv().y)).mul(U.res).toVar();
     const c = U.neb.at(p.sub(U.o2n.zw).div(1.4 * 1024)).rgb.mul(U.nk).toVar(); // nk: the Milky Way's strength, from the graphics menu
     const a0 = U.s0.at(p.sub(U.o01.xy).div(1024)), a1 = U.s1.at(p.sub(U.o01.zw).div(1024)), a2 = U.s2.at(p.sub(U.o2n.xy).div(1024));
-    return vec4(c.add(a0.rgb.mul(a0.a)).add(a1.rgb.mul(a1.a)).add(a2.rgb.mul(a2.a)), 1);
+    // the nearest stars scintillate a little: a slow noise per 5-px cell, so each star has its own rhythm
+    const st = p.sub(U.o2n.xy), tw = float(.88).add(n3(vec3(floor(st.div(5)), SH.time.mul(1.3))).mul(.14)), tw1 = float(.95).add(n3(vec3(floor(p.sub(U.o01.zw).div(4)).add(7), SH.time.mul(.9))).mul(.06));
+    return vec4(c.add(a0.rgb.mul(a0.a)).add(a1.rgb.mul(a1.a).mul(tw1)).add(a2.rgb.mul(a2.a).mul(tw)), 1);
   })();
   const m = mkMat(frag, { depthTest: false, depthWrite: false }); m.vertexNode = vec4(positionGeometry.xy, .99999, 1); m.uniforms = U; return m;
 };
@@ -408,7 +440,7 @@ const orbitMat = (col, op) => {
   const frag = Fn(() => { const t = abs(vT), core = one.sub(smoothstep(.1, .3, t)), halo = pow(one.sub(t), 2).mul(.1); return vec4(U.col.mul(U.op).mul(vA).mul(core.add(halo)), 1); })();
   const m = mkMat(frag, { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }); m.vertexNode = vtx; m.uniforms = U; return m;
 };
-return { planetMat, cloudMat, sunMat, atmoMat, ringMat, bgMat, batchMat, orbitMat, SH };
+return { planetMat, cloudMat, sunMat, atmoMat, ringMat, bgMat, batchMat, orbitMat, dustMat, SH };
 })();
 
 // ---------------------------------------------------------------- sprite batches: one draw call each
@@ -523,6 +555,8 @@ export async function initRender() {
   [[2600, 1, .5, false], [700, 2, .75, false], [200, 2, 1, true]].forEach(([n, m, a, sp], i) => { const t = tex(starC(n, m, a, sp), { wrap: 1 }); t.minFilter = t.magFilter = THREE.NearestFilter; t.generateMipmaps = false; bm.uniforms['s' + i].value = t; });
   bm.toneMapped = false; // the sky keeps its painted look; tone mapping is for lit things and flashes
   bgMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), bm); bgMesh.frustumCulled = false; bgMesh.renderOrder = -100; scene.add(bgMesh); bm.uniforms.nk.value = S.gx ? S.gx.sky : 1;
+  // the Belt (2.1–3.45 AU) and the Kuiper belt (30–50 AU) as dust sheets
+  for (const [r0, r1, col] of [[2.1 * AU, 3.45 * AU, 0xc8b49a], [30 * AU, 50 * AU, 0x9ab0d0]]) { const m = new THREE.Mesh(new THREE.RingGeometry(r0, r1, 256, 1), dustMat(r0, r1, col)); m.rotation.x = -PI / 2; m.renderOrder = -50; m.frustumCulled = false; m.visible = false; scene.add(m); dustM.push(m); }
   // light: the Sun lights the worlds in their own shaders; hulls get a key light from above, the Sun from the side and a cool fill
   scene.add(new THREE.AmbientLight(0x7a84a0, .42));
   const key = new THREE.DirectionalLight(0xfff2e0, 2.5); key.position.set(-.35, 1, -.45); scene.add(key); scene.add(key.target);
@@ -712,6 +746,18 @@ function ringUniforms(v, x, y, pr, sunP) {
   v.g.updateMatrixWorld(); v.g.getWorldQuaternion(GL_Q); GL_N.set(0, 1, 0).applyQuaternion(GL_Q); R.N.value.copy(GL_N);
   const U = v.mesh.material.uniforms; if (U.ringN) { U.ringN.value.copy(GL_N); const RS = v.ringSpec || RINGS.saturn; U.ringR.value.set(RS.r0, RS.r1); }
 }
+// auroral ovals: Earth's green, the giants' violet-blue (seen by Hubble in ultraviolet; here given a little visible colour)
+const AURORA = { earth: [.3, 1, .55], jupiter: [.55, .45, 1], saturn: [.5, .6, 1] };
+// fill a world's moon-shadow slots: moons on the sunward side, close enough to the Sun's line to fall on the disc
+const MS_L = new THREE.Vector3(), MS_D = new THREE.Vector3();
+function moonShadows(v, x, y, pr, sunP, posOf) {
+  const U = v.mesh.material.uniforms; if (!U.m0) return; const slots = [U.m0, U.m1, U.m2, U.m3]; let n = 0;
+  MS_L.set(sunP.x - x, 0, sunP.z - y).normalize();
+  for (const j of v.moons) { if (n >= 4) break; const m = BODIES[j], P = posOf(m); if (!P) continue; const mx = P.x - O.x, my = P.y - O.y;
+    MS_D.set(mx - x, 0, my - y); const t = MS_D.dot(MS_L); if (t <= 0) continue; MS_D.addScaledVector(MS_L, -t); if (MS_D.length() > pr * 1.05 + m.r * 2) continue;
+    slots[n++].value.set(mx, 0, my, m.r); }
+  for (; n < 4; n++) slots[n].value.w = 1e-6;
+}
 // the worlds' axes lean back from the camera so their equators, where the lore puts so much, face you;
 // Uranus rolls on its side
 const TILT = { uranus: -1.55, saturn: -.5, io: -.75, europa: -.7, ganymede: -.7, luna: -.95 };
@@ -730,7 +776,8 @@ function buildBodies() {
       const cm = new THREE.SpriteMaterial({ map: TEX.corona, color: 0xffd9a0, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, depthTest: false, opacity: .55 });
       v.corona = new THREE.Sprite(cm); v.corona.renderOrder = -1; bodiesG.add(v.corona); // the corona, behind everything but the sky
     } else {
-      v.mesh = new THREE.Mesh(sph, planetMat(pal.atmo || [180, 180, 190], { gas: b.gas, air: !!pal.atmo && !b.gas, ring: !!(RINGS[b.id] || pal.ring), bump: b.gas ? 0 : b.id === 'earth' || b.id === 'venus' || b.id === 'titan' ? .55 : 1 }));
+      v.moons = []; BODIES.forEach((m, j) => { if (m.kind === 'moon' && m.parent === i) v.moons.push(j); });
+      v.mesh = new THREE.Mesh(sph, planetMat(pal.atmo || [180, 180, 190], { gas: b.gas, air: !!pal.atmo && !b.gas, ring: !!(RINGS[b.id] || pal.ring), aurora: AURORA[b.id], moons: v.moons.length > 0, bump: b.gas ? 0 : b.id === 'earth' || b.id === 'venus' || b.id === 'titan' ? .55 : 1 }));
       if (pal.atmo && !b.dwarf && b.r > 250) { v.atmo = new THREE.Mesh(sph, atmoMat(pal.atmo, b.gas ? .75 : b.kind === 'moon' ? .55 : 1)); v.atmoK = b.gas ? 1.07 : 1.12; v.atmo.renderOrder = 3; bodiesG.add(v.atmo); }
       const RS = RINGS[b.id] || (pal.ring ? RINGS.saturn : null); // the four giants carry rings; a palette's ring flag means Saturn's
       if (RS) { const rg = new THREE.RingGeometry(RS.r0, RS.r1, 192, 1), rt = TEX.rings[b.id] || TEX.ring; v.ring = new THREE.Mesh(rg, ringMat(rt)); v.ringSpec = RS; const RU = v.ring.material.uniforms; RU.r0.value = RS.r0; RU.r1.value = RS.r1; RU.dust.value = RS.dust;
@@ -968,7 +1015,9 @@ function sceneFrame() {
     const U = v.mesh.material.uniforms; if (U.sunPos) U.sunPos.value.copy(sunP); if (U.C) { U.C.value.set(x, 0, y); U.pr.value = b.r; }
     if (v.atmo) { const R = b.r * v.atmoK; v.atmo.position.set(x, 0, y); v.atmo.scale.setScalar(R); const A = v.atmo.material.uniforms; A.C.value.set(x, 0, y); A.r.value = b.r; A.R.value = R; A.sunPos.value.copy(sunP); }
     if (v.ring) ringUniforms(v, x, y, b.r, sunP);
+    if (v.moons && v.moons.length) moonShadows(v, x, y, b.r, sunP, m => m);
   }
+  beltDust(sunP, z, false);
   // orbits and the Belt, only the arcs near the screen
   const fpz = footprint(); let reach = 0; for (const [wx, wy] of fpz) reach = Math.max(reach, hyp(wx - c.x, wy - c.y)); reach *= 1.15;
   for (const L of orbitL) L.n = 0;
@@ -1123,7 +1172,9 @@ function renderOrrery(L) {
     const U = v.mesh.material.uniforms; if (U.sunPos) U.sunPos.value.copy(sunP); if (U.C) { U.C.value.set(x, 0, y); U.pr.value = P.r; }
     if (v.atmo) { const R = P.r * v.atmoK; v.atmo.position.set(x, 0, y); v.atmo.scale.setScalar(R); const A = v.atmo.material.uniforms; A.C.value.set(x, 0, y); A.r.value = P.r; A.R.value = R; A.sunPos.value.copy(sunP); }
     if (v.ring) ringUniforms(v, x, y, P.r, sunP);
+    if (v.moons && v.moons.length) moonShadows(v, x, y, P.r, sunP, m => L.pos[m.id]);
   }
+  beltDust(sunP, z, true);
   const fpz = footprint(); let reach = 0; for (const [wx, wy] of fpz) reach = Math.max(reach, hyp(wx - c.x, wy - c.y)); reach *= 1.15;
   for (const Lr of orbitL) Lr.n = 0;
   for (const [cx, cy, R, k] of L.orbits) ring(orbitL[k], cx, cy, R, reach);
@@ -1728,6 +1779,12 @@ function sunGlare(sp = null) {
   // ghosts along the axis through the screen centre
   const ghosts = [[-.35, 18, 'rgba(255,170,110,'], [-.7, 10, 'rgba(255,220,160,'], [-1.2, 26, 'rgba(120,170,255,'], [.5, 8, 'rgba(255,240,200,'], [1.1, 14, 'rgba(255,190,120,']];
   for (const [t, r, c] of ghosts) { const gx = mx - dx * t, gy = my - dy * t, gr = ctx.createRadialGradient(gx, gy, 0, gx, gy, r); gr.addColorStop(0, c + (.14 * k) + ')'); gr.addColorStop(.7, c + (.06 * k) + ')'); gr.addColorStop(1, c + '0)'); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(gx, gy, r, 0, TAU); ctx.fill(); }
+  { const gx = mx + dx * .9, gy = my + dy * .9, r = 30 + sr * .1; ctx.strokeStyle = `rgba(255,200,140,${.09 * k})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(gx, gy, r, 0, TAU); ctx.stroke(); } // a hollow ring ghost
+  // the anamorphic streak: a thin blue-white line across the screen through the Sun, brightest at the Sun and fading out
+  const sw = S.W * (.4 + .25 * clamp(sr / 60, 0, 1)), ks = clamp(1.15 - dd, 0, 1) * clamp(sr / 6, .5, 1) * (sr > S.H * 2 ? .3 : 1);
+  for (const [h, a] of [[1.5, 1], [5, .4], [16, .12]]) { const gr = ctx.createLinearGradient(Q.x - sw, 0, Q.x + sw, 0);
+    for (const [t, f] of [[0, 0], [.12, .1], [.25, .3], [.38, .6], [.5, 1], [.62, .6], [.75, .3], [.88, .1], [1, 0]]) gr.addColorStop(t, `rgba(${f > .5 ? '225,238,255' : '150,190,255'},${a * ks * f})`);
+    ctx.fillStyle = gr; ctx.fillRect(Q.x - sw, Q.y - h, sw * 2, h * 2); }
   ctx.restore();
 }
 function drawScreen() {
