@@ -709,14 +709,18 @@ export const GROUND_SCALE = 10;
 export function groundSpec(fl) {
   const o = rainOdds(fl); if (o.err) return { err: o.err };
   const w = C.worlds[fl.at], ctx = assaultCtx(fl), k = ctx.mul; // the Rain bonus, halved when the walls still stand
-  let shells = 0, leech = 0, storks = 0;
+  let shells = 0, leech = 0, storks = 0, rip = 0, thunder = 0;
   for (const s of fl.ships) { const d = defsOf(fl.owner)[s.t] || DEFS[s.t], H = hangarOf(fl.owner, s), m = (s.fit && TE.FITS[s.fit] ? TE.FITS[s.fit].troops || 1 : 1) * (s.cls ? (TE.classSpec(fl.owner, s.cls) || { troops: 1 }).troops : 1);
-    if (H) { shells += H.cur.starshell * s.crew; leech += H.cur.boarder * troopsPer(fl.owner, 'boarder') * s.crew; storks += H.cur.stork * troopsPer(fl.owner, 'stork'); }
+    // the air over the field (ground battles chat; placeholder numbers for the campaign chat): every ripWing in the fleet and
+    // in its hangars; a flight of thunderWing bombers from each dreadnought or moonBreaker, until the campaign builds them
+    if (s.t === 'ripwing') rip++; if (s.t === 'dread' || s.t === 'moonbreaker') thunder += 4;
+    if (H) { rip += H.cur.ripwing * s.crew; shells += H.cur.starshell * s.crew; leech += H.cur.boarder * troopsPer(fl.owner, 'boarder') * s.crew; storks += H.cur.stork * troopsPer(fl.owner, 'stork'); }
     leech += ((d.troops || 0) * s.crew + (d.cmd ? (d.crew || 0) * .04 * s.crew : 0)) * m; }
   const c = CM.cmdrOf(fl), weeks = w.siege ? w.siege.turns || 0 : 0;
   return { world: w.id, storm: ctx.storm, maxT: 1800, fleet: fl.id,
-    att: { f: fl.owner, shells: Math.round(shells * k * GROUND_SCALE), leech: Math.round(leech * k * GROUND_SCALE), storks: Math.round(storks * k * GROUND_SCALE), cmdr: c ? c.name : null, total: Math.round(o.troops * GROUND_SCALE) },
-    def: { f: w.owner, men: Math.round(w.garrison * ctx.dmul * GROUND_FIELD * GROUND_SCALE), garrison: w.garrison, fort: w.lv.fort || 0, gun: w.gun || 0, shield: w.shield || 0, barracks: w.lv.barracks || 0, morale: clamp(1 - weeks * .02, .8, 1), cmdr: 'The Legate' } };
+    att: { f: fl.owner, shells: Math.round(shells * k * GROUND_SCALE), leech: Math.round(leech * k * GROUND_SCALE), storks: Math.round(storks * k * GROUND_SCALE), cmdr: c ? c.name : null, total: Math.round(o.troops * GROUND_SCALE), air: { rip: Math.round(rip * 2), thunder } }, // at legion scale a campaign ripWing stands for a pair
+    def: { f: w.owner, men: Math.round(w.garrison * ctx.dmul * GROUND_FIELD * GROUND_SCALE), garrison: w.garrison, fort: w.lv.fort || 0, gun: w.gun || 0, shield: w.shield || 0, barracks: w.lv.barracks || 0, morale: clamp(1 - weeks * .02, .8, 1), cmdr: 'The Legate',
+      air: { rip: 12 * Math.min(2, w.gun || 0), thunder: (w.lv.fort || 0) >= 2 ? 4 : 0 } } }; // the garrison's own squadrons (placeholder: the campaign keeps no planetary air yet)
 }
 // the drop is made: the Senate's vote is defied if it stood, the pods and Storks are spent
 export function groundDrop(fl) { const w = C.worlds[fl.at]; senateDefied(fl.owner, w.id); spendDrop(fl); C.fleets = C.fleets.filter(f => f.ships.length); }

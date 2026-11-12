@@ -56,12 +56,16 @@ const NN = 320, CN = MAP / NN;   // nav grid: 25 m cells, one per height cell, s
 export const WPN = {
   scorcher: { name: 'Scorchers', range: 170, rof: .45, acc: .3, dmg: 1, ap: 2, fx: 'scorch' },
   pulseRifle: { name: 'PulseRifles', range: 220, rof: .5, acc: .32, dmg: 1.1, ap: 3, fx: 'pulse' },
-  railRifle: { name: 'RailRifles', range: 420, rof: .16, acc: .4, dmg: 1.6, ap: 7, fx: 'rail', siege: .35 },
+  railRifle: { name: 'RailRifles', range: 420, rof: .16, acc: .4, dmg: 1.6, ap: 7, fx: 'rail', siege: .35, aaK: .12, aaR: 500 },
   pulseFist: { name: 'PulseFists', range: 130, rof: .5, acc: .45, dmg: 2.2, ap: 5, fx: 'pulse' },
   pulseCannon: { name: 'PulseCannons', range: 300, rof: .3, acc: .4, dmg: 3, ap: 5, splash: 1.6, fx: 'cannon', siege: 1 },
-  missiles: { name: 'Missile pods', range: 800, rof: .05, acc: .5, dmg: 4, ap: 6, splash: 3, fx: 'missile', ammo: 6, siege: 1 },
-  qr13: { name: 'QR-13 heavy guns', range: 620, rof: .9, acc: .2, dmg: 1.2, ap: 3.5, splash: 2, fx: 'heavy' },
-  sarissa: { name: 'Sarissa launchers', range: 300, rof: .1, acc: .4, dmg: 4, ap: 6, splash: 1.5, fx: 'missile', aa: 2200 },
+  missiles: { name: 'Missile pods', range: 800, rof: .05, acc: .5, dmg: 4, ap: 6, splash: 3, fx: 'missile', ammo: 6, siege: 1, aaK: .25, aaR: 900 },
+  qr13: { name: 'QR-13 heavy guns', range: 620, rof: .9, acc: .2, dmg: 1.2, ap: 3.5, splash: 2, fx: 'heavy', aaK: .35, aaR: 900 },
+  sarissa: { name: 'Sarissa launchers', range: 300, rof: .1, acc: .4, dmg: 4, ap: 6, splash: 1.5, fx: 'missile', aa: 2200, aaK: 1, aaR: 2200 },
+  // the aircraft's: chainguns strafe and dogfight; missiles for fighters and for the lines; a bomber's tail guns only keep fighters off
+  chaingun: { name: 'Chainguns', range: 700, rof: 2.4, acc: .16, dmg: .7, ap: 4, splash: 1.2, fx: 'heavy', aaK: 1, aaR: 700 },
+  airMissile: { name: 'Missiles', range: 1600, rof: .08, acc: .55, dmg: 7, ap: 7, splash: 2.5, fx: 'missile', ammo: 8, aaK: 1, aaR: 1600 },
+  tailGun: { name: 'Tail chainguns', range: 500, rof: 1.2, acc: .2, dmg: .6, ap: 3, fx: 'heavy', aaK: .6, aaR: 500, airOnly: true },
   plasma: { name: 'Plasma pistols', range: 70, rof: .4, acc: .35, dmg: 1.2, ap: 3, fx: 'plasma' },
 };
 // melee: attack and defence per man; charge: bonus on contact at the run; mass: how hard the unit hits a line
@@ -72,6 +76,11 @@ export const UT = {
   peerless: { name: 'Peerless Knights', short: 'Peerless', role: 'Golds in pulseArmor · razors and pulseFists · gravBoots: they fly', glyph: 'P', hp: 4, armor: 6, shield: 3, wpn: 'pulseFist', ammo: 999, mel: 15, def: 13, charge: 9, mass: 1.6, walk: 6, run: 16, morale: 90, resolve: .45, fear: 8, fly: true, aura: 10, fig: 1, sp: 2.2, size: 2.1 },
   starshell:{ name: 'StarShells', short: 'StarShell', role: '12-foot armoured suits · pulseCannons and missiles · only railRifles, razors and heavy guns hurt them', glyph: 'S', hp: 10, armor: 8, wpn: 'pulseCannon', wpn2: 'missiles', ammo: 80, mel: 8, def: 8, charge: 6, mass: 5, walk: 3, run: 4.8, morale: 80, resolve: .4, fear: 6, fig: 1, sp: 5, size: 3.7 },
   gravpod:  { name: 'QR-13 gravPods', short: 'gravPod', role: 'Floating gun platforms · long reach, cuts down infantry in the open', glyph: 'G', hp: 6, armor: 5, wpn: 'qr13', ammo: 200, mel: 1, def: 2, charge: 0, mass: 2, walk: 2.8, run: 2.8, morale: 45, fig: 1, sp: 7, size: 2.2, art: true, low: true },
+  // the air: a squadron or a flight is one unit, men = aircraft. They fly (fly, air), never melee or hold ground, take no
+  // cover, and only guns with an aaK can reach them. spd m/s, turn rad/s, alt metres above the ground. The books give
+  // the ripWing's look and its Blue pilots under a Gold; the speeds, squadron of 12 and flight of 4 are ours
+  ripwing:  { name: 'ripWing Squadron', short: 'ripWings', role: 'Blue-flown fighters under a Gold · chainguns and missiles · fight for the sky, strafe the lines', glyph: 'W', hp: 3, armor: 3, wpn: 'chaingun', wpn2: 'airMissile', ammo: 140, mel: 0, def: 0, charge: 0, mass: 0, walk: 0, run: 0, morale: 80, fig: 1, sp: 30, size: 6, fly: true, air: true, spd: 120, turn: .85, alt: 260, rearm: 60 },
+  thunderwing: { name: 'thunderWing Flight', short: 'thunderWings', role: 'Spider-shaped bombers · bunker-busters: walls, gun batteries and massed cohorts', glyph: 'T', hp: 5, armor: 4, wpn: 'tailGun', ammo: 80, mel: 0, def: 0, charge: 0, mass: 0, walk: 0, run: 0, morale: 80, fig: 1, sp: 40, size: 9, fly: true, air: true, spd: 85, turn: .5, alt: 420, bombs: 2, rearm: 90 },
   sarissa:  { name: 'Sarissa Batteries', short: 'Sarissa', role: 'Anti-air launchers · shoot the drop out of the sky · kill them before the Storks come', glyph: 'A', hp: 5, armor: 4, wpn: 'sarissa', ammo: 60, mel: 1, def: 2, charge: 0, mass: 2, walk: 1.6, run: 1.6, morale: 40, fig: 1, sp: 6, size: 2, aa: true, low: true },
 };
 const PEN = (ap, ar) => ap >= ar ? 1 : Math.max(.04, Math.pow(ap / ar, 1.5)); // massed scorcher fire still wears a pulseShield down
@@ -351,9 +360,10 @@ function mkUnit(team, type, men, x, y, a, o = {}) {
     ammo: T.ammo, ammo2: T.wpn2 ? WPN[T.wpn2].ammo : 0, state: 'idle', order: null, path: null, run: false, fire: true, target: null, cd: R(), cd2: R() * 4,
     melee: null, chargeT: -99, lossLog: [], routs: 0, rallyT: 0, leader: !!o.leader, cmdr: o.cmdr || null, exp: o.exp || 0, stam: 1, fall: o.fall || null, gone: false, kills: 0, eq: o.eq || 1, wave: o.wave || 0, hold: !!o.hold, home: o.home || null };
   u.wpn = WPN[T.wpn]; u.wpn2 = T.wpn2 ? WPN[T.wpn2] : null; u.width = defaultWidth(u);
+  if (T.air) { u.alt = o.alt != null ? o.alt : T.alt; u.spd = T.spd; u.bank = 0; u.pitch = 0; u.bombs = (T.bombs || 0) * men; u.ammo2 = T.wpn2 ? WPN[T.wpn2].ammo * men : 0; u.away = false; }
   return u;
 }
-const defaultWidth = u => u.T.art || u.T.aa ? Math.min(u.men, 6) : u.type === 'peerless' ? Math.min(u.men, 12) : u.type === 'starshell' ? Math.min(u.men, 8) : clamp(Math.round(Math.sqrt(u.men * 3.2)), 4, 60);
+const defaultWidth = u => u.T.air ? u.men : u.T.art || u.T.aa ? Math.min(u.men, 6) : u.type === 'peerless' ? Math.min(u.men, 12) : u.type === 'starshell' ? Math.min(u.men, 8) : clamp(Math.round(Math.sqrt(u.men * 3.2)), 4, 60);
 // the ground a unit covers: frontage across, depth behind
 export function footprint(u) { const files = Math.max(1, Math.min(u.men, u.width)), ranks = Math.max(1, Math.ceil(u.men / files)); return { files, ranks, w: files * u.T.sp, d: ranks * u.T.sp * 1.15 }; }
 export const radiusOf = u => { const f = footprint(u); return Math.max(6, Math.max(f.w, f.d) * .5); };
@@ -375,7 +385,7 @@ export function setup(spec, opts = {}) {
   for (const k in G) delete G[k];
   Object.assign(G, { army: null, on: true, spec, t: 0, phase: 'deploy', units: [], fx: [], feed: [], pods: [], zones: [], over: null, speed: 1, paused: false, stats: [{ killed: 0, lost: 0 }, { killed: 0, lost: 0 }], storkT: 100, storksDone: false, holdT: 0, maxT: spec.maxT || 1800, leaderLost: [false, false], aaCover: [], human: opts.human == null ? 0 : opts.human, broke: [false, false] });
   cAcc = 0; aiAcc = [0, 0]; mAcc = 0; // each battle starts its clocks from zero
-  G.map = buildMap(spec); buildNav();
+  G.map = buildMap(spec); buildNav(); G.bombs = [];
   deployDefender(spec);
   return G;
 }
@@ -415,8 +425,139 @@ function deployDefender(spec) {
     u.post = { x, y }; G.units.push(u);
   }
   G.drop = buildDrop(spec);
+  G.airQ = []; // the air: the garrison's squadrons scramble from the city as the Rain begins; the fleet's arrive behind the first wave
+  airWing(1, D.air, 20); airWing(0, spec.att.air, 50); G.air0 = [0, 1].map(t => G.airQ.filter(q => q.team === t).reduce((a, q) => a + q.men, 0));
   // the anti-air umbrella: the city's guns, and each Sarissa battery's own reach
   G.aaCity = (D.gun || 0) * .12 + (D.shield || 0) * .05;
+}
+
+// ---------------------------------------------------------------- the air
+// Squadrons of 12 ripWings, flights of 4 thunderWings: a wing's aircraft arrive over the field in turn
+function airWing(team, A, t0) {
+  if (!A) return; let i = 0;
+  for (const m of unitize(Math.round(A.rip || 0), 12, 8)) G.airQ.push({ team, type: 'ripwing', men: m, t: t0 + i++ * 7 });
+  for (const m of unitize(Math.round(A.thunder || 0), 4, 4)) G.airQ.push({ team, type: 'thunderwing', men: m, t: t0 + 30 + i++ * 9 });
+}
+export const isAir = u => !!(u && u.T.air);
+export const present = u => fighting(u) && !u.away; // an aircraft gone home to rearm is not over the field
+const altOf = u => u.T.air ? u.alt : 0;
+function airThreat(x, y, team) {
+  let k = 0;
+  for (const u of G.units) { if (u.team === team || !present(u) || u.T.air) continue; const W = u.wpn.aaK ? u.wpn : u.wpn2 && u.wpn2.aaK ? u.wpn2 : null; if (!W) continue;
+    const d = hyp(u.x - x, u.y - y); if (d < W.aaR + 400) k += (u.T.aa ? .16 : .06 * W.aaK) * Math.min(1, u.men / (u.T.aa ? u.men0 : 25)); }
+  return k;
+}
+const d3 = (u, e) => hyp(u.x - e.x, u.y - e.y, altOf(u) - altOf(e));
+const airEdge = t => t === 0 ? -1400 : MAP + 1400; // where each side's aircraft come from and go home to
+function launch() {
+  if (!G.airQ || !G.airQ.length) return;
+  const due = G.airQ.filter(q => G.t >= q.t); if (!due.length) return; G.airQ = G.airQ.filter(q => G.t < q.t);
+  for (const q of due) {
+    const c = G.map.city, x = q.team === 1 ? c.x + (R() - .5) * 400 : MAP * (.3 + R() * .4), y = q.team === 1 ? c.y : airEdge(0);
+    const u = mkUnit(q.team, q.type, q.men, x, y, q.team === 1 ? -PI / 2 : PI / 2, { alt: q.team === 1 ? 60 : UT[q.type].alt });
+    const nth = G.units.filter(v => v.team === q.team && v.type === q.type).length; u.name = `${q.team === 0 ? 'Fleet' : 'Garrison'} ${u.T.short} ${['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'][nth] || nth + 1}`;
+    G.units.push(u);
+    log(q.team === 1 ? `${u.men} ${u.T.short} scramble from ${G.map.B.city}.` : `${u.men} ${u.T.short} come down out of the sky behind the Rain.`, u.team === G.human ? 'good' : 'bad');
+  }
+}
+// The flight: an aircraft cannot stop. It turns at its rate (banking into the turn), climbs and dives toward the
+// height its task wants, and holds its speed; a strafing run comes down to 90 m and passes over, extends, comes round
+function flyAir(u, dt) {
+  const T = u.T;
+  if (u.away) { if (G.t >= u.awayT) { // back from the carriers, rearmed and with the losses made good no more than they were
+      u.away = false; u.rtb = false; u.sortie = u.men; u.ammo = T.ammo; u.ammo2 = T.wpn2 ? WPN[T.wpn2].ammo * u.men : 0; u.bombs = (T.bombs || 0) * u.men; u.x = MAP * (.3 + R() * .4); u.y = airEdge(u.team); u.a = u.team === 0 ? PI / 2 : -PI / 2; u.alt = T.alt; u.order = null; u.target = null;
+      log(`${u.name} ${u.team === G.human ? 'are' : 'is'} back over the field.`, u.team === G.human ? 'good' : ''); }
+    return; }
+  const g = airGoal(u); let want = u.a, alt = T.alt;
+  if (g) { want = Math.atan2(g.y - u.y, g.x - u.x); alt = g.alt; }
+  if (u.ext > G.t) want = u.a; // extending after a pass: straight on before coming round
+  const turn = clamp(angDiff(u.a, want), -T.turn * dt, T.turn * dt); u.a += turn; u.bank += (clamp(turn / (T.turn * dt || 1), -1, 1) * .9 - u.bank) * Math.min(1, dt * 3);
+  const gh = heightAt(clamp(u.x, 0, MAP), clamp(u.y, 0, MAP)), floor = T.bombs ? 180 : 60, da = clamp(Math.max(alt, floor) - u.alt, -35 * dt, 30 * dt); u.alt += da; u.pitch = da / dt / u.spd;
+  u.alt = Math.max(u.alt, floor * .8); void gh;
+  u.vx = Math.cos(u.a) * u.spd; u.vy = Math.sin(u.a) * u.spd; u.x += u.vx * dt; u.y += u.vy * dt;
+  if (u.rtb && (u.team === 0 ? u.y < airEdge(0) + 200 : u.y > airEdge(1) - 200)) { u.away = true; u.order = null; u.target = null;
+    if (u.men < u.men0 * .34) { u.awayT = Infinity; log(`${u.name}: too few left to send back. The survivors stay with the ${u.team === 0 ? 'carriers' : 'reserve'}.`, ''); } // a squadron cut to a third is withdrawn
+    else { u.awayT = G.t + T.rearm; log(`${u.name} ${u.team === G.human ? 'go' : 'goes'} home to rearm.`, ''); } }
+  u.state = u.firing ? 'fire' : 'move';
+}
+// where the aircraft is headed, and how high: home, an order, or its own choice
+function airGoal(u) {
+  const T = u.T, out = u.x < -2500 || u.y < -2500 || u.x > MAP + 2500 || u.y > MAP + 2500;
+  if (u.rtb) return { x: u.x, y: airEdge(u.team) + (u.team === 0 ? -400 : 400), alt: T.alt };
+  const o = u.order || u.auto;
+  if (o && o.type === 'attack') { const t = o.t; if (!present(t)) { if (u.order === o) u.order = null; else u.auto = null; return airGoal(u); }
+    const d = hyp(t.x - u.x, t.y - u.y);
+    if (t.T.air) { const lead = Math.min(2.5, d / 300); return { x: t.x + t.vx * lead, y: t.y + t.vy * lead, alt: Math.max(160, t.alt) }; } // pursuit, leading the target (two squadrons chasing each other's height would spiral down to the floor)
+    if (T.bombs) return bombGoal(u, t.x, t.y);
+    if (d < 140 && !(u.ext > G.t)) u.ext = G.t + 4.5; // over the target: extend, then come round for the next pass
+    return { x: t.x, y: t.y, alt: d < 2200 ? 90 : T.alt }; }
+  if (o && o.type === 'bomb') return bombGoal(u, o.x, o.y);
+  if (o && o.type === 'move') { const r = 650, a = Math.atan2(u.y - o.y, u.x - o.x) + .7; return hyp(u.x - o.x, u.y - o.y) > r * 1.6 ? { x: o.x, y: o.y, alt: T.alt } : { x: o.x + Math.cos(a) * r, y: o.y + Math.sin(a) * r, alt: T.alt }; } // a patrol: circle the point
+  if (out) return { x: MAP / 2, y: MAP / 2, alt: T.alt };
+  const c = G.units.filter(v => v.team === u.team && fighting(v) && !v.T.air); const p = c.length ? cen(c) : G.map.city; // nothing to do: circle over the army
+  const a = Math.atan2(u.y - p.y, u.x - p.x) + .6; return { x: p.x + Math.cos(a) * 900, y: p.y + Math.sin(a) * 900, alt: T.alt };
+}
+// a bomb run: line up on the target and let go so the stick falls across it
+const fallTime = alt => Math.sqrt(2 * alt / (9.8 * G.map.B.g)) * .6; // dropped in a shallow dive, retarded: quicker than a free fall
+function bombGoal(u, x, y) {
+  const d = hyp(x - u.x, y - u.y), lead = u.spd * fallTime(u.alt), ang = Math.abs(angDiff(u.a, Math.atan2(y - u.y, x - u.x)));
+  if (u.bombs > 0 && ang < .25 && Math.abs(d - lead) < u.spd * .6) dropBombs(u);
+  if (d < lead * .6 && !(u.ext > G.t)) u.ext = G.t + 6;
+  return { x, y, alt: u.T.alt };
+}
+function dropBombs(u) {
+  if ((u.dropT || -9) > G.t - 3) return; u.dropT = G.t;
+  const per = Math.min(u.bombs, u.men), ft = fallTime(u.alt); u.bombs -= per; u.firing = true;
+  const px = -Math.sin(u.a), py = Math.cos(u.a);
+  for (let i = 0; i < per; i++) { const side = ((i % u.men) - (u.men - 1) / 2) * 22, along = Math.floor(i / u.men) * 35 + (R() - .5) * 20, x0 = u.x + px * side - Math.cos(u.a) * along, y0 = u.y + py * side - Math.sin(u.a) * along;
+    G.bombs.push({ x0, y0, z0: u.alt, vx: u.vx, vy: u.vy, t0: G.t, t1: G.t + ft + i * .05, team: u.team, by: u }); }
+  log(`${u.name} ${u.team === G.human ? 'drop' : 'drops'} ${per} bombs.`, '');
+  if (u.bombs <= 0) u.rtb = true;
+}
+// bombs that reach the ground: a blast that kills what stands near it and breaks the wall it lands on
+function bombsLand() {
+  if (!G.bombs || !G.bombs.length) return;
+  const keep = [];
+  for (const b of G.bombs) {
+    if (G.t < b.t1) { keep.push(b); continue; }
+    const ft = b.t1 - b.t0, x = clamp(b.x0 + b.vx * ft, 5, MAP - 5), y = clamp(b.y0 + b.vy * ft, 5, MAP - 5), R0 = 45;
+    for (const t of G.units) { if (!live(t) || t.T.air || t.team === b.team) continue; const d = hyp(t.x - x, t.y - y) - radiusOf(t) * .6; if (d > R0) continue; // the bombers know where their own men stand
+      const k = 1 - Math.max(0, d) / R0, dens = clamp(t.men / Math.max(40, footprint(t).w * footprint(t).d) * 6, .4, 3);
+      harm(t, 40 * k * dens, 9, b.by && live(b.by) ? b.by : null, 'bomb'); t.underFire = G.t; t.morale -= 6 * k * (t.T.low ? 1.4 : 1) * (1 - (t.T.resolve || 0)); }
+    if (b.team === 0) for (const w of G.map.wl) if (segDist(x, y, w) < 40) { w.hp -= 1100; w.hitT = G.t; if (w.hp <= 0) breakWall(w); } // bunker-busters: four or five on a stretch bring it down
+    G.fx.push({ k: 'land', x, y, big: true });
+  }
+  G.bombs = keep;
+}
+// The air commander, for both sides and for the player's own aircraft that have no orders: win the sky first; then
+// fighters strafe what is fighting the army (wide of the Sarissas), bombers break the wall before the army, the
+// Sarissas, then the thickest of the enemy; out of ammunition, or half the squadron down, go home and rearm
+function airThink() {
+  for (const u of G.units) {
+    if (!u.T.air || !present(u) || u.rtb) continue;
+    if ((u.T.bombs ? u.bombs <= 0 : u.ammo <= 0 && u.ammo2 <= 0) || u.men < (u.sortie || u.men0) * .5) { u.rtb = true; u.order = null; u.auto = null; continue; }
+    if (u.team === G.human && u.order) continue;
+    const foes = G.units.filter(v => v.team !== u.team && present(v)), mine = G.units.filter(v => v.team === u.team && fighting(v) && !v.T.air);
+    const enemyAir = foes.filter(v => v.T.air), here = mine.length ? cen(mine) : G.map.city;
+    if (!u.T.bombs && enemyAir.length) { const e = enemyAir.reduce((b, v) => !b || d3(u, v) < d3(u, b) ? v : b, null);
+      if (d3(u, e) < 4500 || hyp(e.x - here.x, e.y - here.y) < 3000) { if (!u.auto || u.auto.t !== e) u.auto = { type: 'attack', t: e }; continue; } }
+    const cap = u.team === 0 ? { x: here.x, y: Math.min(here.y - 1500, G.map.city.y - G.map.city.r - 2600) } : here; // the fleet's station: back from the city's guns
+    if (!u.T.bombs && G.airQ.some(q => q.team !== u.team && q.type === 'ripwing' && q.t < G.t + 60)) { u.auto = { type: 'move', x: cap.x, y: cap.y }; continue; } // their fighters are coming: hold the sky over the army
+    if (u.auto && u.auto.type === 'attack' && present(u.auto.t) && !u.auto.t.T.air && G.t - u.auto.at < 40 && airThreat(u.auto.t.x, u.auto.t.y, u.team) < .5) continue; // keep at a target for a while
+    const ground = foes.filter(v => !v.T.air);
+    if (u.T.bombs) {
+      const A = G.army, city = G.map.city; let tgt = null;
+      if (u.team === 0 && G.map.wl.length && mine.length && hyp(here.x - city.x, here.y - city.y) < city.r * .78 + 2500 && !G.map.walls.some(w => w.down && hyp((w.x0 + w.x1) / 2 - here.x, (w.y0 + w.y1) / 2 - here.y) < city.r)) {
+        const ids = A && A.breach ? A.breach : null, ws = ids ? ids.map(i => G.map.walls[i]).filter(w => !w.down) : G.map.wl.slice().sort((a, b) => hyp((a.x0 + a.x1) / 2 - here.x, (a.y0 + a.y1) / 2 - here.y) - hyp((b.x0 + b.x1) / 2 - here.x, (b.y0 + b.y1) / 2 - here.y));
+        if (ws.length) tgt = { type: 'bomb', x: (ws[0].x0 + ws[0].x1) / 2, y: (ws[0].y0 + ws[0].y1) / 2 }; }
+      if (!tgt) { const aa = ground.filter(v => v.T.aa); const pick = (aa.length ? aa : ground).reduce((b, v) => { const s = v.men * v.eq * (v.T.aa ? 50 : v.T.art ? 8 : 1) * (hyp(v.vx, v.vy) < 1 ? 1.5 : .6) / (1 + hyp(v.x - u.x, v.y - u.y) / 4000); return !b || s > b.s ? { v, s } : b; }, null);
+        if (pick) tgt = { type: 'bomb', x: pick.v.x, y: pick.v.y }; }
+      if (tgt) u.auto = tgt; continue; }
+    // fighters: strafe what fights the army, wide of the guns; with no army on the field, whatever is closest
+    const pick = ground.reduce((b, v) => { const dArmy = mine.length ? Math.min(...mine.map(m => hyp(m.x - v.x, m.y - v.y))) : 0, aa = airThreat(v.x, v.y, u.team);
+      if (aa > .45 || v.T.aa) return b; const pen = PEN(u.wpn.ap, v.T.armor) * v.T.hp ** -.5, s = v.men * v.eq * pen * (v.melee ? 1.6 : 1) * (1 - aa) / (1 + dArmy / 1500) / (1 + hyp(v.x - u.x, v.y - u.y) / 4000); return !b || s > b.s ? { v, s } : b; }, null);
+    if (pick && (!u.auto || u.auto.t !== pick.v)) u.auto = { type: 'attack', t: pick.v, at: G.t }; else if (!pick) u.auto = { type: 'move', x: cap.x, y: cap.y };
+  }
 }
 
 // ---------------------------------------------------------------- drop zones and the Rain
@@ -473,7 +614,7 @@ function touchDown(u) {
   G.fx.push({ k: 'land', x: u.x, y: u.y, big: u.type === 'starshell' });
 }
 // the Storks: they land only on a zone the attackers hold
-export const zoneHeld = z => { let a = 0, d = 0; for (const u of G.units) { if (u.gone || u.state === 'rout' || u.state === 'fall') continue; const r = hyp(u.x - z.x, u.y - z.y); if (r < ZONE_HOLD) { if (u.team === 0) a += u.men * u.eq; else d += u.men * u.eq; } } return a > 30 && a > d * 1.2; };
+export const zoneHeld = z => { let a = 0, d = 0; for (const u of G.units) { if (u.gone || u.state === 'rout' || u.state === 'fall' || u.T.air) continue; const r = hyp(u.x - z.x, u.y - z.y); if (r < ZONE_HOLD) { if (u.team === 0) a += u.men * u.eq; else d += u.men * u.eq; } } return a > 30 && a > d * 1.2; };
 function storks() {
   if (G.storksDone || G.t < G.storkT) return;
   const held = G.zones.filter(zoneHeld), W = G.drop[1];
@@ -487,7 +628,9 @@ function storks() {
 // ---------------------------------------------------------------- orders
 export function order(u, o) {
   if (u.gone || u.state === 'rout' || u.state === 'fall') return;
+  if (o.type === 'attack' && o.t && o.t.T.air && !u.T.air) return; // men on the ground cannot chase an aircraft: those with the guns for it fire on it as it comes
   u.order = o; u.path = null; u.hold = false;
+  if (u.T.air) { u.auto = null; u.target = o.type === 'attack' ? o.t : null; if (o.type === 'halt' || (o.type === 'bomb' && !u.T.bombs) || o.type === 'breach') u.order = null; return; } // the flight model steers; there is no halting in the air
   if (o.type === 'move') { u.path = findPath(u.x, u.y, o.x, o.y, u.T.fly); if (o.width) u.width = clamp(Math.round(o.width / u.T.sp), 1, Math.max(1, u.men)); if (o.run != null) u.run = o.run; u.target = null; }
   if (o.type === 'attack') { u.target = o.t; if (o.run != null) u.run = o.run; u.path = null; }
   if (o.type === 'breach') { if (!canBreach(u)) { u.order = null; return; } u.target = null; if (o.run != null) u.run = o.run; u.path = null; }
@@ -525,12 +668,13 @@ function tick(dt) {
   G.t += dt;
   for (const p of G.pods) if (p.u.state === 'fall' && G.t >= p.t1) touchDown(p.u);
   G.pods = G.pods.filter(p => p.u.state === 'fall' || G.t < p.t1 + 3);
-  storks();
-  for (const u of G.units) if (live(u)) move(u, dt);
+  storks(); launch();
+  for (const u of G.units) if (live(u)) { if (u.T.air) flyAir(u, dt); else move(u, dt); }
+  bombsLand();
   separate(dt);
   cAcc += dt; if (cAcc >= CSTEP) { combat(cAcc); cAcc = 0; }
   mAcc += dt; if (mAcc >= .5) { morale(mAcc); objectives(mAcc); mAcc = 0; }
-  for (const t of [0, 1]) { aiAcc[t] += dt; if (aiAcc[t] >= 2) { aiAcc[t] = 0; if (G.human !== t) ai(t); else autoUnits(t); } }
+  for (const t of [0, 1]) { aiAcc[t] += dt; if (aiAcc[t] >= 2) { aiAcc[t] = 0; if (G.human !== t) ai(t); else autoUnits(t); if (t === 1) airThink(); } }
   checkEnd();
 }
 
@@ -601,7 +745,7 @@ function move(u, dt) {
 function escapeOf(u) { if (u.team === 1) return { x: u.x, y: MAP + 50 }; return { x: u.x, y: -50 }; }
 // units of the same side do not stand in each other; enemies who touch are in melee
 function separate(dt) {
-  const L = G.units.filter(live);
+  const L = G.units.filter(u => live(u) && !u.T.air);
   for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length; j++) {
     const a = L[i], b = L[j], dx = b.x - a.x, dy = b.y - a.y, d = hyp(dx, dy) || .01, city = G.map.bld.any && (isUrban(a.x, a.y) || isUrban(b.x, b.y)), ra = city ? Math.min(radiusOf(a), 14) : radiusOf(a), rb = city ? Math.min(radiusOf(b), 14) : radiusOf(b), R0 = (ra + rb) * .75; // in the streets a unit closes into a column
     if (d >= R0) continue;
@@ -615,17 +759,22 @@ function separate(dt) {
 }
 
 // ---------------------------------------------------------------- fire and steel
-function enemiesOf(t) { return G.units.filter(u => u.team !== t && fighting(u)); }
+function enemiesOf(t) { return G.units.filter(u => u.team !== t && present(u)); }
 function pickTarget(u, foes) {
   if (u.target && fighting(u.target) && u.order && u.order.type === 'attack') return u.target;
-  let best = null, bs = Infinity; const R0 = u.wpn.range;
-  for (const e of foes) { const d = Math.sqrt(dist2(u, e)); if (d > R0) continue; const ang = Math.abs(angDiff(u.a, Math.atan2(e.y - u.y, e.x - u.x)));
-    const pref = (u.wpn.ap >= 6 && e.T.armor >= 6 ? .5 : 1) * (e.melee ? 1.4 : 1) * (ang > 1.3 ? 1.5 : 1); const s = d * pref; if (s < bs && los(u.x, u.y, e.x, e.y)) { bs = s; best = e; } }
+  let best = null, bs = Infinity; const R0 = u.wpn.range, W2 = u.wpn2;
+  for (const e of foes) {
+    if (e.T.air ? !(u.wpn.aaK || (W2 && W2.aaK && u.ammo2 > 0)) : u.wpn.airOnly) continue; // only guns that can reach an aircraft fire at one
+    const d = e.T.air || u.T.air ? d3(u, e) : Math.sqrt(dist2(u, e)), reach = e.T.air ? Math.max(u.wpn.aaK ? u.wpn.aaR : 0, W2 && W2.aaK && u.ammo2 > 0 ? W2.aaR : 0) : R0; if (d > reach) continue;
+    const ang = Math.abs(angDiff(u.a, Math.atan2(e.y - u.y, e.x - u.x)));
+    if (u.T.air && ang > (e.T.air ? .5 : .7)) continue; // an aircraft's guns look ahead
+    const pref = (u.wpn.ap >= 6 && e.T.armor >= 6 ? .5 : 1) * (e.melee ? 1.4 : 1) * (ang > 1.3 ? 1.5 : 1) * (e.T.air && u.T.aa ? .3 : 1); const s = d * pref;
+    if (s < bs && (e.T.air || u.T.air || los(u.x, u.y, e.x, e.y))) { bs = s; best = e; } }
   return best;
 }
 function hitsOn(u, w, t, shooters, dt, d) {
-  const fall = clamp(1.25 - d / w.range * .7, .35, 1.1), cov = 1 - (t.T.fly ? 0 : coverAt(t.x, t.y)) * (t.team === 1 && nearWall(t.x, t.y, 30) ? 1.4 : 1),
-    size = t.T.size / 1.7, mv = hyp(t.vx, t.vy) > 1 ? .8 : 1, wav = u.morale < 30 ? .7 : 1, vet = 1 + u.exp * .08;
+  const air = t.T.air, fall = clamp(1.25 - d / (air ? w.aaR || w.range : w.range) * .7, .35, 1.1), cov = 1 - (t.T.fly ? 0 : coverAt(t.x, t.y)) * (t.team === 1 && nearWall(t.x, t.y, 30) ? 1.4 : 1),
+    size = air ? 1 : t.T.size / 1.7, mv = air ? (u.T.air ? .55 : w.aa ? .5 : .35) * (w.aaK || 1) : hyp(t.vx, t.vy) > 1 ? .8 : 1, wav = u.morale < 30 ? .7 : 1, vet = 1 + u.exp * .08; // a fast mover is hard to hit, but a Sarissa's missile seeks
   return shooters * w.rof * FIRE_K * dt * w.acc * fall * clamp(cov, .2, 1) * clamp(size, .6, 2) * mv * wav * vet;
 }
 function harm(t, dmg, ap, by, kind) {
@@ -634,14 +783,14 @@ function harm(t, dmg, ap, by, kind) {
   let d = dmg * PEN(ap, t.T.armor);
   if (t.sh > 0) { const s = Math.min(t.sh, d * .9); t.sh -= s; d -= s; t.shHit = G.t; }
   t.wound += d; const per = t.T.hp; let k = Math.floor(t.wound / per);
-  if (k > 0) { k = Math.min(k, t.men); t.men -= k; t.wound -= k * per; t.lossLog.push([G.t, k]); t.lostNow = (t.lostNow || 0) + k; G.stats[t.team].lost += k * t.eq; G.stats[1 - t.team].killed += k * t.eq; if (by) by.kills += k;
+  if (k > 0) { k = Math.min(k, t.men); if (t.T.air) G.fx.push({ k: 'crash', id: t.id, x: t.x + (Math.random() - .5) * 80, y: t.y + (Math.random() - .5) * 80, z: t.alt, a: t.a, v: t.spd, team: t.team, n: k, type: t.type }); t.men -= k; t.wound -= k * per; t.lossLog.push([G.t, k]); t.lostNow = (t.lostNow || 0) + k; G.stats[t.team].lost += k * t.eq; G.stats[1 - t.team].killed += k * t.eq; if (by) by.kills += k;
     if (t.men <= 0) { t.gone = true; t.state = 'dead'; t.melee = null; log(`${t.name} ${t.team === G.human ? 'are' : 'is'} destroyed.`, t.team === G.human ? 'bad' : 'good'); if (t.leader) leaderDown(t); } }
   return k;
 }
 function combat(dt) {
   const foesOf = [enemiesOf(0), enemiesOf(1)];
   for (const u of G.units) {
-    if (!fighting(u)) { u.firing = false; continue; }
+    if (!fighting(u) || u.away) { u.firing = false; continue; }
     u.firing = false; u.sieging = false;
     // shields cool and recharge when not hit for a while
     if (u.T.shield && G.t - (u.shHit || -99) > 4) u.sh = Math.min(u.T.shield * u.men, u.sh + u.men * .25 * dt);
@@ -651,25 +800,31 @@ function combat(dt) {
     // the Society's arms are smart-sighted: infantry fires on the move, less surely walking and much less at the run;
     // starShells, knights and gravPods fire on the move at no cost
     const moving = hyp(u.vx, u.vy) > .5, mobileFire = u.T.fly || u.type === 'starshell' || u.T.art;
-    if (!u.fire || u.ammo <= 0) continue;
+    if (!u.fire || (u.ammo <= 0 && !(u.T.air && u.ammo2 > 0))) continue;
     const mk = !moving || mobileFire ? 1 : (u.run || u.state === 'rout' ? MOVE_FIRE.run : MOVE_FIRE.walk);
     const t = pickTarget(u, foes); u.aim = t;
     if (u.order && u.order.type === 'breach' && (!t || dist2(u, t) > 200 * 200) && siegeFire(u, dt, mk)) continue; // the wall first, unless the enemy is close
     if (!t) continue;
-    const d = Math.sqrt(dist2(u, t)); if (d > u.wpn.range) continue;
+    const d = t.T.air || u.T.air ? d3(u, t) : Math.sqrt(dist2(u, t)), air = t.T.air, W1ok = u.ammo > 0 && (air ? u.wpn.aaK && d <= u.wpn.aaR : !u.wpn.airOnly && d <= u.wpn.range);
+    if (!W1ok && !(u.wpn2 && u.ammo2 > 0 && (air ? u.wpn2.aaK && d <= u.wpn2.aaR : d <= u.wpn2.range))) continue;
     if (!u.T.fly && !u.T.art && !u.T.aa && Math.abs(angDiff(u.a, Math.atan2(t.y - u.y, t.x - u.x))) > (moving ? 1.6 : 1.1)) continue; // still wheeling to face it (on the march, men fire over the shoulder)
-    const front = Math.min(u.men, u.width * 2); // the first two ranks shoot
-    const hits = hitsOn(u, u.wpn, t, u.T.art || u.T.aa ? u.men : front, dt, d) * mk, dens = clamp(t.men / Math.max(40, footprint(t).w * footprint(t).d) * 6, .4, 3);
-    harm(t, hits * u.wpn.dmg * (u.wpn.splash ? u.wpn.splash * dens : 1), u.wpn.ap, u, u.wpn.fx);
-    u.ammo -= dt * .5; u.firing = true; t.underFire = G.t; if (u.T.fear) t.feared = Math.max(t.feared || 0, u.T.fear);
-    fxShot(u, t, u.wpn.fx, Math.min(6, Math.ceil(front / 40)));
-    if (u.wpn2 && u.ammo2 > 0 && (u.cd2 -= dt) <= 0 && d < u.wpn2.range) { u.cd2 = 1 / u.wpn2.rof / Math.max(1, u.men / 4); u.ammo2--; harm(t, u.men * u.wpn2.dmg * u.wpn2.acc * u.wpn2.splash * dens * .25, u.wpn2.ap, u); fxShot(u, t, 'missile', 2); }
+    const front = u.T.air ? u.men : Math.min(u.men, u.width * 2); // the first two ranks shoot; every aircraft in the pass
+    const dens = air ? 1 : clamp(t.men / Math.max(40, footprint(t).w * footprint(t).d) * 6, .4, 3);
+    if (W1ok) { const hits = hitsOn(u, u.wpn, t, u.T.art || u.T.aa ? u.men : front, dt, d) * mk;
+      harm(t, hits * u.wpn.dmg * (u.wpn.splash && !air ? u.wpn.splash * dens : 1), u.wpn.ap, u, u.wpn.fx);
+      u.ammo -= dt * (u.T.air ? 1.5 : .5); u.firing = true; t.underFire = G.t; if (u.T.fear) t.feared = Math.max(t.feared || 0, u.T.fear);
+      fxShot(u, t, u.wpn.fx, Math.min(6, Math.ceil(front / (u.T.air ? 3 : 40)))); }
+    if (u.wpn2 && u.ammo2 > 0 && (u.cd2 -= dt) <= 0 && (air ? u.wpn2.aaK && d <= u.wpn2.aaR : d < u.wpn2.range)) {
+      // a squadron's missiles go in salvoes, one from each aircraft; a ground unit's at an aircraft, a few at a time
+      const W2 = u.wpn2, n = u.T.air ? Math.min(u.men, u.ammo2) : air ? Math.min(u.men, 4) : u.men;
+      if (u.T.air) { u.cd2 = 1 / W2.rof; u.ammo2 -= n; } else { u.cd2 = 1 / W2.rof / Math.max(1, u.men / 4); u.ammo2--; }
+      harm(t, n * W2.dmg * W2.acc * (air ? (W2.aaK || 1) * (u.T.air ? .23 : .1) : W2.splash * dens * .25), W2.ap, u); u.firing = true; fxShot(u, t, 'missile', u.T.air ? Math.min(6, n) : 2); }
   }
   // melee: enemies who touch fight; whoever ran in hits harder for the first seconds; a blow on the flank or rear hurts more
   const L = G.units.filter(fighting);
   for (const u of L) u.melee = null;
   for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length; j++) {
-    const a = L[i], b = L[j]; if (a.team === b.team) continue;
+    const a = L[i], b = L[j]; if (a.team === b.team || a.T.air || b.T.air) continue;
     const d = Math.sqrt(dist2(a, b)), R0 = (radiusOf(a) + radiusOf(b)) * .8 + 4; if (d > R0) continue;
     if (!a.melee) a.melee = b; if (!b.melee) b.melee = a;
     if (!a.engT || G.t - a.engT > CSTEP * 2.5) { if (hyp(a.vx, a.vy) > a.T.walk * 1.15) a.chargeT = G.t; } if (!b.engT || G.t - b.engT > CSTEP * 2.5) { if (hyp(b.vx, b.vy) > b.T.walk * 1.15) b.chargeT = G.t; }
@@ -691,7 +846,9 @@ function blow(a, b, dt) {
 function fxShot(u, t, kind, n) {
   for (let q = 0; q < n; q++) { const f = footprint(u), ft = footprint(t), ox = (Math.random() - .5) * f.w, oy = (Math.random() - .5) * f.d, tx = (Math.random() - .5) * ft.w, ty = (Math.random() - .5) * ft.d;
     const c = Math.cos(u.a + PI / 2), s = Math.sin(u.a + PI / 2), c2 = Math.cos(t.a + PI / 2), s2 = Math.sin(t.a + PI / 2);
-    G.fx.push({ k: 'shot', f: kind, x0: u.x + c * ox, y0: u.y + s * ox, x1: t.x + c2 * tx, y1: t.y + s2 * tx, team: u.team, d: Math.random() * .5 }); }
+    const sh = { k: 'shot', f: kind, x0: u.x + c * ox, y0: u.y + s * ox, x1: t.x + c2 * tx, y1: t.y + s2 * tx, team: u.team, d: Math.random() * .5 };
+    if (u.T.air) { sh.z0 = u.alt; sh.x0 = u.x + (Math.random() - .5) * 60; sh.y0 = u.y + (Math.random() - .5) * 60; } if (t.T.air) { sh.z1 = t.alt; sh.x1 = t.x + (Math.random() - .5) * 50; sh.y1 = t.y + (Math.random() - .5) * 50; } // heights above the ground
+    G.fx.push(sh); }
 }
 
 // ---------------------------------------------------------------- morale
@@ -701,7 +858,7 @@ function leaderDown(u) {
   for (const v of G.units) if (v.team === side && fighting(v)) { v.morale -= 15 * (1 - (v.T.resolve || 0)); v.m0 = Math.max(20, v.m0 - 8); }
 }
 function morale(dt) {
-  const L = G.units.filter(live);
+  const L = G.units.filter(u => live(u) && !u.T.air);
   for (const u of L) {
     // recent losses: the share of the unit lost in the last ten seconds
     // losses shake a unit as they happen; a unit that keeps bleeding cannot steady itself
@@ -739,7 +896,7 @@ function morale(dt) {
 
 // ---------------------------------------------------------------- the sites
 function objectives(dt) {
-  const L = G.units.filter(fighting);
+  const L = G.units.filter(u => fighting(u) && !u.T.air);
   for (const s of G.map.sites) {
     let a = 0, d = 0; for (const u of L) if (hyp(u.x - s.x, u.y - s.y) < s.r + radiusOf(u) * .5) { if (u.team === 0) a += u.men * u.eq; else d += u.men * u.eq; }
     s.a = a; s.d = d;
@@ -756,7 +913,7 @@ export const HOLD_WIN = 120;
 export const NEED = () => Math.floor(G.map.sites.length / 2) + 1; // a majority of the sites
 
 // ---------------------------------------------------------------- the end
-function strengthOf(t, fall = false) { return G.units.reduce((a, u) => a + (u.team === t && !u.gone && u.men > 0 && (fall || u.state !== 'fall') && u.state !== 'rout' ? u.men * u.eq : 0), 0); }
+function strengthOf(t, fall = false) { return G.units.reduce((a, u) => a + (u.team === t && !u.T.air && !u.gone && u.men > 0 && (fall || u.state !== 'fall') && u.state !== 'rout' ? u.men * u.eq : 0), 0); }
 function checkEnd() {
   if (G.over) return;
   const a = strengthOf(0, true) + (G.storksDone ? 0 : G.drop[1].reduce((s, x) => s + x[1], 0)), d = strengthOf(1);
@@ -770,9 +927,10 @@ export function finish(win, why) {
   log(why, win === G.human ? 'good' : 'bad');
 }
 export function result() {
-  const left = t => G.units.reduce((a, u) => a + (u.team === t && !u.gone && u.men > 0 ? u.men * u.eq : 0), 0) + ((G.escaped || [0, 0])[t]) * (t === 1 ? .5 : 0);
+  const left = t => G.units.reduce((a, u) => a + (u.team === t && !u.T.air && !u.gone && u.men > 0 ? u.men * u.eq : 0), 0) + ((G.escaped || [0, 0])[t]) * (t === 1 ? .5 : 0);
   const won = G.over ? G.over.win === 0 : false;
-  return { won, why: G.over ? G.over.why : '', t: G.t, att0: G.att0, def0: G.def0, attLeft: Math.round(left(0)), defLeft: Math.round(left(1)), sky: Math.round(G.skyLost || 0), killed: [Math.round(G.stats[0].killed), Math.round(G.stats[1].killed)],
+  const airLeft = t => G.units.reduce((a, u) => a + (u.team === t && u.T.air && !u.gone ? u.men : 0), 0) + (G.airQ || []).reduce((a, q) => a + (q.team === t ? q.men : 0), 0); // and the squadrons not yet come
+  return { won, why: G.over ? G.over.why : '', t: G.t, air: [airLeft(0), airLeft(1)], air0: G.air0 || [0, 0], att0: G.att0, def0: G.def0, attLeft: Math.round(left(0)), defLeft: Math.round(left(1)), sky: Math.round(G.skyLost || 0), killed: [Math.round(G.stats[0].killed), Math.round(G.stats[1].killed)],
     storks: G.storksDone && G.units.some(u => u.wave === 1), leaderLost: G.leaderLost.slice(), city: G.map.B.city, sites: G.map.sites.map(s => ({ name: s.name, own: s.own })) };
 }
 export function log(msg, cls) { G.feed.unshift({ t: G.t, msg, cls: cls || '' }); if (G.feed.length > 40) G.feed.pop(); }
@@ -826,7 +984,7 @@ const steady = (u, bx, by) => {
 const strOf = L => L.reduce((a, u) => a + u.men * u.eq * (u.T.mel + u.wpn.dmg * u.wpn.rof * 10) / 10, 0); // fighting worth, not just heads
 const within = (L, x, y, r) => L.filter(u => hyp(u.x - x, u.y - y) < r);
 function ai(t) {
-  const mine = G.units.filter(u => u.team === t && fighting(u)), foes = G.units.filter(u => u.team !== t && fighting(u));
+  const mine = G.units.filter(u => u.team === t && fighting(u) && !u.T.air), foes = G.units.filter(u => u.team !== t && fighting(u) && !u.T.air); // the aircraft are airThink's (ground battles chat)
   if (!mine.length) return;
   G.aistat = G.aistat || {}; const st = k => { G.aistat[k] = (G.aistat[k] || 0) + 1; }; G.aist = st;
   return t === 1 ? defend(mine, foes) : attack(mine, foes);
@@ -1038,8 +1196,8 @@ function attack(mine, foes) {
 // the player's own units still look after themselves a little: a halted unit turns to face what shoots it,
 // and melee units the player left idle go for an enemy that walks up to them
 function autoUnits(t) {
-  for (const u of G.units) { if (u.team !== t || !fighting(u) || u.melee || u.order) continue;
-    const near = nearest(u, enemiesOf(t)); if (!near) continue; const d = Math.sqrt(dist2(u, near));
+  for (const u of G.units) { if (u.team !== t || !fighting(u) || u.melee || u.order || u.T.air) continue;
+    const near = nearest(u, enemiesOf(t).filter(v => !v.T.air)); if (!near) continue; const d = Math.sqrt(dist2(u, near));
     if (d < u.wpn.range && !u.firing && u.fire) { u.a += clamp(angDiff(u.a, Math.atan2(near.y - u.y, near.x - u.x)), -.6, .6); }
     if (u.T.mel >= 8 && d < 120 && !u.hold) order(u, { type: 'attack', t: near, run: true }); }
 }
