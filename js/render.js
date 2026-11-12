@@ -154,6 +154,12 @@ function neptuneRingC() { // 1.6..2.7 R: Galle broad and faint, Le Verrier narro
     let adams = .12; for (const [c, w, k] of arcs) adams += .36 * k * Math.max(0, 1 - Math.abs(az - c) / w); a += adams * gauss(r, 2.541, .005); return [a, 1]; }); }
 // which worlds carry rings, their radii in planet radii, the painter, and whether the ring is seen by its dust (brightens when backlit) or its ice
 const RINGS = { saturn: { r0: 1.35, r1: 2.3, tex: ringTexC, dust: 0, shadow: 1 }, jupiter: { r0: 1.25, r1: 2.6, tex: jupiterRingC, dust: 1, shadow: .3 }, uranus: { r0: 1.4, r1: 2.1, tex: uranusRingC, dust: .5, shadow: .5 }, neptune: { r0: 1.6, r1: 2.7, tex: neptuneRingC, dust: 1, shadow: .3 } };
+// lens dirt: faint specks, a few smears and a soft vignette-shaped haze, for the bloom to light up
+function dirtC() { const [c, g] = canvas(512, 512); g.fillStyle = '#000'; g.fillRect(0, 0, 512, 512);
+  for (let i = 0; i < 260; i++) { const x = Math.random() * 512, y = Math.random() * 512, r = .6 + Math.random() * 2.4, a = .25 + Math.random() * .5, gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, `rgba(255,255,255,${a})`); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); }
+  for (let i = 0; i < 18; i++) { const x = Math.random() * 512, y = Math.random() * 512, r = 6 + Math.random() * 20, gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, 'rgba(255,255,255,.14)'); gr.addColorStop(.6, 'rgba(255,255,255,.05)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); }
+  for (let i = 0; i < 9; i++) { g.save(); g.translate(Math.random() * 512, Math.random() * 512); g.rotate(Math.random() * PI); const L = 20 + Math.random() * 50, gr = g.createLinearGradient(-L, 0, L, 0); gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(.5, 'rgba(255,255,255,.12)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(-L, -1.2, L * 2, 2.4); g.restore(); }
+  return c; }
 // the Sun's corona for the map: a soft wide glow with faint radial streamers, drawn additive behind the disc
 function coronaC() { const [c, g] = canvas(512, 512), R = seeded(5); const gr = g.createRadialGradient(256, 256, 0, 256, 256, 256); gr.addColorStop(0, 'rgba(255,245,225,.9)'); gr.addColorStop(.1, 'rgba(255,225,170,.55)'); gr.addColorStop(.3, 'rgba(255,200,130,.16)'); gr.addColorStop(.6, 'rgba(255,180,110,.04)'); gr.addColorStop(1, 'rgba(255,170,100,0)'); g.fillStyle = gr; g.fillRect(0, 0, 512, 512);
   g.globalCompositeOperation = 'lighter'; g.translate(256, 256);
@@ -611,7 +617,7 @@ export async function initRender() {
   missileM.std = new Inst(missileGeoOf('std'), missileMaterial(), 2000, true); missileM.emp = new Inst(missileGeoOf('emp'), missileMaterial(), 600, true); missileM.nuke = new Inst(missileGeoOf('nuke'), missileMaterial(), 300, true);
   for (const m of Object.values(missileM)) { m.m.castShadow = false; scene.add(m.m); }
   for (const t of Object.values(turretM)) scene.add(t.m);
-  B.smoke = new Batch(TEX.smoke, { add: false, order: 8 }); B.dot = new Batch(TEX.dot, { order: 12 }); B.glow = new Batch(TEX.glow, { order: 13, cap: 3000 });
+  B.smoke = new Batch(TEX.smoke, { add: false, order: 8 }); B.soot = new Batch(TEX.smoke, { add: false, ground: true, order: 12, cap: 3000 }); /* scorch marks on hulls */ B.dot = new Batch(TEX.dot, { order: 12 }); B.glow = new Batch(TEX.glow, { order: 13, cap: 3000 });
   B.streak = new Batch(TEX.streak, { ground: true, ax: -.5, order: 11 }); B.plume = new Batch(TEX.plume, { ground: true, ax: -.5, order: 10, cap: 3000 }); B.missile = new Batch(TEX.missile, { add: false, ground: true, order: 11, cap: 2000 }); B.fins = new Batch(TEX.fins, { add: false, ground: true, order: 11, cap: 2000 }); B.anam = new Batch(TEX.anam, { order: 13, cap: 300 }); B.sglow = new Batch(TEX.sunglow, { order: 13, cap: 1500 }); // the soft wide glow of a flash or a fireball
   B.fire = new Batch(TEX.fire, { order: 14, cap: 2000 }); B.shock = new Batch(TEX.shock, { ground: true, order: 9, cap: 600 }); B.hex = new Batch(TEX.hex, { order: 13, cap: 600 }); B.spark = new Batch(TEX.spark, { ground: true, ax: -.5, order: 11, cap: 4000 });
   for (const b of Object.values(B)) scene.add(b.mesh);
@@ -635,7 +641,9 @@ function buildPost() {
     // tone mapping and sRGB at the end (renderOutput), then SMAA on Ultra over the display image
     const finish = n => P.smaa ? smaa(TSL.renderOutput(n)) : n;
     composer.outputColorTransform = !P.smaa;
-    composer.outs = { on: finish(col.add(bloomPass)), off: finish(col) };
+    // lens dirt: a faint field of specks and smears that only shows where the bloom is bright
+    const dirt = TSL.texture(TEX.dirt || (TEX.dirt = tex(dirtC()))), dirtK = TSL.smoothstep(.05, .6, TSL.luminance ? TSL.luminance(bloomPass.rgb) : bloomPass.r.add(bloomPass.g).add(bloomPass.b).div(3));
+    composer.outs = { on: finish(col.add(bloomPass).add(bloomPass.mul(dirt.r).mul(dirtK).mul(.9))), off: finish(col) };
     composer.outputNode = composer.outs.off;
   } catch (e) { console.warn('post-processing unavailable', e); composer = null; bloomPass = null; }
   setBloom(S.bloom);
@@ -973,7 +981,15 @@ let inPip = false, FLARE_C = null;
 let GDT = 0, RCLK = 0, RLAST = 0;
 // renderer-side battle punch: shield shatters, hull-flip pulses and the camera shake, all driven from state the sim
 // already keeps (downP/downS/shDown, team changes, big fire flashes) — the sim is never touched for them
-const PUNCH = { shards: [], pulses: [], seen: new Map(), shake: 0, shx: 0, shy: 0 };
+const PUNCH = { shards: [], pulses: [], seen: new Map(), shake: 0, shx: 0, shy: 0, puffs: [], glows: [], seenW: new Set() };
+// a slug passing close over a hull: a sonic-boom ring, once per slug per ship (renderer side; the sim knows nothing of it)
+function slugBooms(p) { if (p._boomed === undefined) p._boomed = new Set(); for (const o of S.ships) { if (o.dead || o.def.static || p._boomed.has(o.id)) continue; const d = hyp(o.x - p.x, o.y - p.y); if (d > o.r + 30 || d < o.r * .3) continue; p._boomed.add(o.id);
+  PUNCH.pulses.push({ x: p.x, y: p.y, vx: p.vx * .3, vy: p.vy * .3, r: Math.max(8, o.r * .25), life: .32, max: .32, col: 0xdfe8f0, kind: 'ring' }); } }
+// flak bursts leave grey puffs that hang for a few seconds, so a point-defence screen reads as a wall
+function flakPuff(x, y, vx, vy) { const life = 3.5 + Math.random() * 2; PUNCH.puffs.push({ x, y, vx: vx * .05 + rand(-6, 6), vy: vy * .05 + rand(-6, 6), life, max: life, sz: 10 + Math.random() * 8, a: Math.random() * TAU, spin: rand(-.4, .4) }); if (PUNCH.puffs.length > 600) PUNCH.puffs.shift(); }
+// a ship's death leaves a cooling cloud: embers scattered through the wreck's volume and a smear of frozen vapour, both fading over twelve seconds
+function wreckGlow(w) { const R = Math.max(w.def.r || 20, 20), n = Math.min(40, 8 + R * .4), em = []; for (let i = 0; i < n; i++) { const a = Math.random() * TAU, d = Math.sqrt(Math.random()) * R * 1.3; em.push({ ox: Math.cos(a) * d, oy: Math.sin(a) * d, vx: Math.cos(a) * rand(4, 18), vy: Math.sin(a) * rand(4, 18), f: rand(3, 9), p: Math.random() * TAU, s: .5 + Math.random() * 1.1 }); }
+  PUNCH.glows.push({ x: w.x, y: w.y, vx: w.vx, vy: w.vy, R, life: 12, max: 12, em, a: Math.random() * TAU }); }
 function shatter(s, side, R) { // a shield half (or the whole bubble, side 0) breaks into hex cells that fly outward, spin and fade
   const a0 = side ? s.a + side * PI / 2 : s.a, span = side ? 1.3 : PI, n = side ? 22 : 40, vx = s.vx || 0, vy = s.vy || 0;
   for (let i = 0; i < n; i++) { const a = a0 + (i / (n - 1) - .5) * 2 * span + rand(-.05, .05), sp = rand(90, 240) * Math.max(.5, R / 40), x = s.x + Math.cos(a) * R, y = s.y + Math.sin(a) * R;
@@ -1002,9 +1018,18 @@ function punchTick(z, px) {
   const dt = GDT; if (dt > 0) {
     for (const d of PUNCH.shards) { d.x += d.vx * dt; d.y += d.vy * dt; d.a += d.av * dt; d.life -= dt; d.vx *= 1 - dt * .9; d.vy *= 1 - dt * .9; }
     for (const p of PUNCH.pulses) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
-    PUNCH.shards = PUNCH.shards.filter(d => d.life > 0); PUNCH.pulses = PUNCH.pulses.filter(p => p.life > 0);
+    for (const q of PUNCH.puffs) { q.x += q.vx * dt; q.y += q.vy * dt; q.life -= dt; q.a += q.spin * dt; }
+    for (const g of PUNCH.glows) { g.x += g.vx * dt; g.y += g.vy * dt; g.life -= dt; for (const e of g.em) { e.ox += e.vx * dt; e.oy += e.vy * dt; } }
+    PUNCH.shards = PUNCH.shards.filter(d => d.life > 0); PUNCH.pulses = PUNCH.pulses.filter(p => p.life > 0); PUNCH.puffs = PUNCH.puffs.filter(q => q.life > 0); PUNCH.glows = PUNCH.glows.filter(g => g.life > 0);
+    for (const L of [S.wrecks, S.hulks]) for (const w of L || []) if (!PUNCH.seenW.has(w.id)) { PUNCH.seenW.add(w.id); if (S.time - (w.t0 ?? w.born ?? S.time) < 1) wreckGlow(w); } // a new wreck: light its afterglow
+    if (PUNCH.seenW.size > 4000) PUNCH.seenW.clear();
     PUNCH.shake *= Math.exp(-dt * 7); if (PUNCH.shake < .05) PUNCH.shake = 0;
   }
+  for (const q of PUNCH.puffs) { if (!onScr(q.x, q.y, 40)) continue; const k = q.life / q.max, sz = Math.max(q.sz * (1.6 - k * .6), px * 6); B.smoke.add(q.x, q.y, 3, sz, sz, q.a, 0x6a6a70, Math.min(1, k * 3) * .38 * Math.min(1, (1 - k) * 8 + .3), 1); }
+  for (const g of PUNCH.glows) { if (!onScr(g.x, g.y, g.R * z * 3 + 60)) continue; const k = g.life / g.max, gk = 1 - k, vs = g.R * (2 + gk * 3);
+    B.sglow.add(g.x, g.y, 2.5, vs, vs * .7, g.a, 0x9fb4cc, k * k * .16, 1.2); B.smoke.add(g.x, g.y, 2.4, vs * .8, vs * .8, g.a + gk, 0x3a3634, k * .35, 1); // the vapour, spreading and thinning
+    for (const e of g.em) { const fl = .55 + .45 * Math.sin(RCLK * e.f + e.p), heat = k * k, col = heat > .5 ? 0xffc070 : heat > .2 ? 0xff6a2a : 0x7a2010, sz = Math.max(e.s * (1 + fl * .3), px * 2);
+      B.glow.add(g.x + e.ox, g.y + e.oy, 2.6, sz * 1.8, sz * 1.8, 0, col, (.3 + .7 * heat) * fl * Math.min(1, k * 4), 1.5); } } // embers cooling from white to dull red
   for (const d of PUNCH.shards) { if (!onScr(d.x, d.y, 40)) continue; const k = d.life / d.max, sz = Math.max(d.sz, px * 3); B.hex.add(d.x, d.y, 3.2, sz, sz, d.a, d.col, k * k * .9, 1.6); if (k > .6) B.glow.add(d.x, d.y, 3.2, sz * .9, sz * .9, 0, 0xcfefff, (k - .6) * 1.2, 1.5); }
   for (const p of PUNCH.pulses) { if (!onScr(p.x, p.y, p.r * z * 2 + 60)) continue; const k = p.life / p.max, g = 1 - k;
     if (p.kind === 'arc') { const n = 6; for (let i = 0; i < n; i++) { const a = p.a0 + (i / (n - 1) - .5) * 2 * p.span * .9, rr = p.r * (1 + g * .3), sz = p.r * (.9 + g * .5); B.sglow.add(p.x + Math.cos(a) * rr, p.y + Math.sin(a) * rr, 3.1, sz, sz, 0, p.col, k * k * .3, 2); } }
@@ -1103,6 +1128,7 @@ function sceneFrame() {
         B.plume.add(bx + ox, by + oy, 0, pl * fl, pw, s.a, pc, al * .9, 1.4); /* the tail */
         B.plume.add(bx + ox, by + oy, 1, pl * .42 * fl, pw * .55, s.a, 0xffffff, al, 2.2); /* the white throat */
         if (vz > 20) B.glow.add(bx + ox - ca * pw * .3, by + oy - sa * pw * .3, 1, pw * 1.2, pw * 1.2, 0, pc, thr * .35, 1.4); } /* and its glare on the stern */
+      if (vz > 24) B.sglow.add(bx + ca * vr * .22, by + sa * vr * .22, 1.2, vr * .9, vr * .55, s.a, pc, thr * .16 * fl, 1.2); /* the torch lighting her aft quarter, a warm wash on the hull */
     }
     turrets(s, z, v.T * vr / 2, vr, v);
   }
@@ -1139,6 +1165,7 @@ function sceneFrame() {
     if (D.kind === 'slug') { // a rail slug: a hot tracer you can follow across the field, with a fading trail behind it
       const L = Math.max(sv * (D.huge ? .07 : D.big ? .05 : .03), (D.huge ? 46 : D.big ? 32 : 20) * px), th = Math.max(D.huge ? 9 : D.big ? 5 : 2.2, (D.huge ? 5 : D.big ? 3.2 : 2) * px), ca = Math.cos(ang), sa = Math.sin(ang);
       B.streak.add(p.x - ca * L * 1.1, p.y - sa * L * 1.1, 3, L * 2.2, th * .55, ang, D.col, .22, 2.2); B.streak.add(p.x, p.y, 3, L, th, ang, D.col, 1, 2.2); B.glow.add(p.x + ca * L * .45, p.y + sa * L * .45, 3, th * 3.2, th * 3.2, 0, D.big ? 0xffb080 : 0xd8f2ff, .55, 1.6);
+      slugBooms(p); if (sv > 900) { const wl = L * (1.2 + Math.sin(S.time * 37 + p.x * .01) * .15); B.streak.add(p.x - ca * L * .9, p.y - sa * L * .9, 2.98, wl * 2.2, th * 2.2, ang, 0xffd0a0, .07, 1); } // the heat wake, wide and faint behind the slug
       if (D.big) { // a lance round: a white-hot core inside a wide coloured sheath, a bow wave of light ahead of it, and the muzzle still shimmering with heat behind it
         B.streak.add(p.x, p.y, 2.99, L * 1.2, th * 2.6, ang, D.col, .32, 1.5); B.streak.add(p.x + ca * L * .08, p.y + sa * L * .08, 3.01, L * .85, th * .45, ang, 0xffffff, 1, 2.8);
         B.sglow.add(p.x + ca * L * .55, p.y + sa * L * .55, 3, th * 9, th * 9, 0, D.col, .3, 1.8);
@@ -1146,6 +1173,7 @@ function sceneFrame() {
           B.plume.add(mx, my, 3.1, Math.max(th * 9, 30 * px) * f * wob, th * (2.5 + 2 * f), ang + PI, D.col, f * .65, 1.8); B.sglow.add(mx, my, 3.1, th * (3 + 5 * f) * wob, th * (3 + 5 * f) * wob, 0, 0xfff0d8, f * f * .7, 2); } } }
     else if (D.kind === 'flak') { const L = Math.max(sv * .012, 8 * px); B.streak.add(p.x, p.y, 3, L, Math.max(2.2, px * 2), ang, D.col, 1, 2.6); B.glow.add(p.x, p.y, 3, Math.max(4, px * 5), Math.max(4, px * 5), 0, D.col, .5, 1.8); } // a flak round: a short bright dash with a hot head
     else { const L = Math.max(sv * .02, 12 * px), th = Math.max(2, px * 1.8); B.streak.add(p.x - Math.cos(ang) * L * .9, p.y - Math.sin(ang) * L * .9, 3, L * 1.8, th * .5, ang, D.col, .3, 2); B.streak.add(p.x, p.y, 3, L, th, ang, D.col, 1, 2.6); } // a gun round: a tracer with a fading tail, so a broadside reads as a volley
+    if (D.kind === 'flak' && p.life < .1 && !p._puffed) { p._puffed = true; flakPuff(p.x, p.y, p.vx, p.vy); } // the round bursting at the end of its run
     if ((D.kind === 'bullet' || D.kind === 'flak') && D.life) { // the muzzle flash: a short bright cone at the gun for the round's first few frames, sized to the calibre
       const T = D.kind === 'flak' ? .05 : .09, age = D.life - p.life; if (age >= 0 && age < T) { const f = 1 - age / T, mx = p.x - p.vx * age, my = p.y - p.vy * age, Lm = Math.max(D.kind === 'flak' ? 12 : D.big ? 44 : 26, (D.kind === 'flak' ? 7 : 13) * px) * (.5 + .5 * f), Wm = Lm * .34;
         B.plume.add(mx, my, 3.2, Lm, Wm, ang + PI, D.kind === 'flak' ? D.col : 0xffd9a0, f * .85, 2.2); B.plume.add(mx, my, 3.21, Lm * .55, Wm * .45, ang + PI, 0xffffff, f, 2.6); B.glow.add(mx, my, 3.2, Wm * 1.4, Wm * 1.4, 0, 0xfff0d0, f * f * .7, 2); } }
@@ -1386,6 +1414,7 @@ function shipFx(s, v, vr, vz, dark) {
       if (lx >= v.xlo - .05 && lx <= v.xmax + .05 && Math.abs(ly) <= skinW(v, lx) * 1.2 + .02) { h.lx = lx; h.ly = ly; } else scarAt(v, th, h); } else scarAt(v, th, h);
     h.hz = v.deck ? Math.max(.02, v.deck(clamp(h.lx, v.xlo ?? -1, v.xmax ?? 1), h.ly * .9) * .6) : .12; // up her side, not on the waterline of the plane
     v.hits.push(h); if (v.hits.length > 6) v.hits.shift();
+    (v.scorch || (v.scorch = [])).push({ lx: h.lx, ly: h.ly, hz: h.hz, r: .05 + .12 * k, a: Math.random() * TAU, k }); if (v.scorch.length > 18) v.scorch.shift(); // and the burn stays on her skin
     // she is knocked away from the blow: a hit on one flank rolls her off it, and one forward or aft of her middle slews her
     const sd = h.ly < 0 ? -1 : 1, lever = clamp(h.lx, -1, 1);
     v.krv -= sd * (.035 + .02 * Math.random()) * k * w0; v.kyv += sd * lever * .03 * k * w0; v.kpv += (h.lx > 0 ? -1 : 1) * .008 * k * w0 * (Math.abs(lever) > .5 ? 1 : 0);
@@ -1417,7 +1446,14 @@ function shipFxDraw(s, v, vr, z) {
   if (!v.hits) return; const ca = Math.cos(s.a), sa = Math.sin(s.a), mn = 3 / Math.max(z, 1e-9);
   for (const h of v.hits) { const k = 1 - (RCLK - h.t) / .35; if (k <= 0) continue; const wx = s.x + (h.lx * ca - h.ly * sa) * vr, wy = s.y + (h.lx * sa + h.ly * ca) * vr, gs = Math.max(mn * (1 + h.k * 2), vr * (.07 + .2 * h.k)) * (1.5 - k * .5);
     B.glow.add(wx, wy, vr * (h.hz ?? .12), gs, gs, 0, k > .6 ? 0xffd8b0 : 0xff9a50, k * k * (.35 + .4 * h.k), 1.7); } // the scorch on her skin (the strike's own flash is the ring's, in the fx pass)
-  if (s.hp / s.def.hp < .35) for (const q of v.scars) { const wx = s.x + (q.lx * ca - q.ly * sa) * vr, wy = s.y + (q.lx * sa + q.ly * ca) * vr, fl = Math.sin(RCLK * q.f + q.p), gs = Math.max(mn, vr * (.13 + .03 * fl + .015 * Math.sin(RCLK * q.f * 2.3 + q.p)));
+  const hp = s.hp / s.def.hp;
+  if (v.scorch && vr * z > 10) for (const q of v.scorch) { const wx = s.x + (q.lx * ca - q.ly * sa) * vr, wy = s.y + (q.lx * sa + q.ly * ca) * vr, gs = vr * q.r * 2.4; // soot where each blow landed, darker on a hurt ship
+    B.soot.add(wx, wy, vr * (q.hz ?? .12) + .01, gs * 1.6, gs * 1.3, q.a + s.a, 0x8a8078, .22 * (.5 + q.k), 1); B.soot.add(wx, wy, vr * (q.hz ?? .12) + .012, gs, gs * .8, q.a + s.a, 0x070605, (.5 + .35 * q.k), 1); } // an ash-pale ring round a black heart
+  if (hp < .6) for (const q of v.scars) { // cracks glowing round each breach: three short jagged lines, pulsing with the fire inside
+    if (!q.cr) q.cr = [0, 1, 2].map(i => ({ a: q.p + i * 2.1 + Math.random() * .7, l: .07 + Math.random() * .09, w: .5 + Math.random() * .5 }));
+    const wx = s.x + (q.lx * ca - q.ly * sa) * vr, wy = s.y + (q.lx * sa + q.ly * ca) * vr, fl = .6 + .4 * Math.sin(RCLK * q.f * .7 + q.p), heat = hp < .35 ? 1 : (.6 - hp) / .25;
+    for (const c of q.cr) B.streak.add(wx, wy, vr * .15, vr * c.l * (1 + heat * .4), Math.max(mn * .8, vr * .022 * c.w), c.a + s.a, fl > .7 ? 0xffb060 : 0xff6a28, (.5 + .5 * fl) * heat, 2); }
+  if (hp < .35) for (const q of v.scars) { const wx = s.x + (q.lx * ca - q.ly * sa) * vr, wy = s.y + (q.lx * sa + q.ly * ca) * vr, fl = Math.sin(RCLK * q.f + q.p), gs = Math.max(mn, vr * (.13 + .03 * fl + .015 * Math.sin(RCLK * q.f * 2.3 + q.p)));
     B.glow.add(wx, wy, vr * .14, gs, gs, 0, fl > .3 ? 0xffc070 : 0xff8a3c, .45 + .15 * fl, 1.4); } // fires burning in the breaches
 }
 
