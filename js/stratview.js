@@ -26,6 +26,7 @@ import * as SR from './starts.js';
 import * as QS from './quests.js';
 import { initAudio, sfx } from './audio.js';
 import { OPTS, saveOpts } from './ui.js';
+import { toggleGfx, gfxOpen } from './gfxmenu.js';
 import { DEFS } from './data.js';
 import * as SV from './save.js';
 
@@ -1195,8 +1196,8 @@ function warUI(f) {
     .then(v => { if (v === 'war') { if (council) { P.react(me, 'war', 3); toastS('The council is against it: the Moon Lords will not forget', 'bad'); } const e = K.declareWar(me, f, !!tl); if (e) toastS('The truce holds', 'bad'); else toastS(`${K.BLOC_NAME[me]} is at war with ${K.BLOC_NAME[f]}`, 'bad'); } refresh(); });
 }
 function menuUI() {
-  modal(`<h2>Campaign</h2><p class="dim">${date(C.turn)} · ${K.BLOC_NAME[C.player]}</p><div class="keys"><b>Click</b> select a world or fleet · <b>Right-click</b> send the selected fleet · <b>Wheel</b> zoom · <b>Drag / WASD</b> pan · <b>Tab</b> next fleet · <b>Space</b> home · <b>F</b> faction · <b>P</b> diplomacy · <b>H</b> ledger and chronicle · <b>L</b> lists · <b>R</b> dispatches · <b>Q</b> lay down a hull · <b>Enter</b> end turn · <b>Ctrl+S</b> save</div>`, [['back', 'Back to the war', 'go'], ['save', 'Save'], ['load', 'Load'], ['quit', 'Quit to the main menu']], { esc: 'back' })
-    .then(v => { if (v === 'quit') quitToMenu(); else if (v === 'save' || v === 'load') savesUI(v); });
+  modal(`<h2>Campaign</h2><p class="dim">${date(C.turn)} · ${K.BLOC_NAME[C.player]}</p><div class="keys"><b>Click</b> select a world or fleet · <b>Right-click</b> send the selected fleet · <b>Wheel</b> zoom · <b>Drag / WASD</b> pan · <b>Tab</b> next fleet · <b>Space</b> home · <b>F</b> faction · <b>P</b> diplomacy · <b>H</b> ledger and chronicle · <b>L</b> lists · <b>R</b> dispatches · <b>Q</b> lay down a hull · <b>Enter</b> end turn · <b>Ctrl+S</b> save · <b>F10</b> graphics</div>`, [['back', 'Back to the war', 'go'], ['save', 'Save'], ['load', 'Load'], ['gfx', 'Graphics'], ['quit', 'Quit to the main menu']], { esc: 'back' })
+    .then(v => { if (v === 'quit') quitToMenu(); else if (v === 'save' || v === 'load') savesUI(v); else if (v === 'gfx' && !gfxOpen()) toggleGfx(); });
 }
 // the save slots: an autosave written every week, three of the player's own, and files for safe keeping
 const SIDE_NAME = { rep: 'The Solar Republic', soc: 'The Society Remnant', rim: 'The Rim Dominion' };

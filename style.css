@@ -1271,7 +1271,8 @@ body.ground #c,body.ground #ov{visibility:hidden}
 #gfxp .gx-opts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:3px}
 #gfxp .gx-opts .btn.sm{font-size:10px;padding:3px 7px;letter-spacing:.08em}
 #gfxp .gx-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px;border-top:1px solid var(--line);font-size:11px;opacity:.85}
-body.strat #gfxp{display:none!important}
+/* on the campaign map (Menu ▸ Graphics, or F10) it sits under the top bar, over the map's own panels */
+body.strat #gfxp{top:64px;right:12px;z-index:45;max-height:calc(100vh - 84px)}
 
 /* ================================================================ campaign map UI v2 (Nov 2026 design-panel overhaul)
    One block, appended last so it overrides the older campaign rules without touching them. */

@@ -58,7 +58,7 @@ export function newCampaign(player, difficulty = 1, start = null, opts = {}) {
     // per-campaign bookkeeping that must not leak from an earlier campaign in the same session
     stats: {}, spyOps: {}, spyTry: {}, incidents: 0, opsLog: 0, opsMulti: 0, crisisT: {}, secrets: [], capStreak: {}, _own: null, _shipN: null, lawT: {}, warned: {}, bombards: {}, tribute: [], truce: {},
     threats: [], risings: [], takePend: [], crewPend: null, fear: {}, levyT: {}, start: null, ahist: false, wrecks: {}, moves0: {}, quests: {}, heir: {} });
-  C.moving = !!(opts && opts.moving); placePlanets(1); /* the moving-planets option: the worlds go round their orbits, a week a turn */
+  C.moving = true; placePlanets(1); /* the planets always move: the worlds go round their orbits, a week a turn */
   for (const f of ['rep', 'soc', 'rim']) C.fac[f] = { key: f, ai: f !== player, alive: true, res: { he: 900, ore: 700, ord: 1200, man: 20000, food: 0, alloy: 0, rare: 0, inf: 0, sci: 0 }, lastInc: {} };
   C.fac.neu = { key: 'neu', ai: true, alive: true, res: { he: 0, ore: 0, ord: 0, man: 0, food: 0 }, lastInc: {} };
   for (const w of WORLDS) {

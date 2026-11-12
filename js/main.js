@@ -9,7 +9,6 @@ import { disbandGroup, groupOrder, FORMATIONS, STANCES, HELMS } from './sim.js';
 import { initAudio, audio } from './audio.js';
 import { startCampaign, stratFrame, setQuitHandler, loadCampaign, slotsHTML } from './stratview.js';
 import * as SV from './save.js';
-import { STARTS } from './starts.js';
 import { FACTIONS } from './data.js';
 import { battleTick } from './battle.js';
 import { ffStop } from './tactics.js';
@@ -93,16 +92,9 @@ async function boot() {
   $('wstrip').addEventListener('dblclick', e => { const b = e.target.closest('[data-world]'); if (!b) return; clearTimeout(wClickT); worldJump(b.dataset.world, true); });
   $('log').addEventListener('click', e => { const r = e.target.closest('[data-log]'); if (!r) return; if (r.dataset.log === 'toggle') toggleLog(); else jumpTo((S.log || [])[+r.dataset.log]); forceUI(); });
   buildMenu();
-  // the legendary starts: the selected power's commanders, each with a place and a rule of their own
-  const POWOF = { rising: 'rep', core: 'soc', rim: 'rim' }; S.startSel = S.startSel || {}; S.ahist = false;
-  const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const buildStarts = () => { const f = POWOF[S.choice.player] || 'rep', L = STARTS[f] || [], cur = S.startSel[f] || L[0].id, col = FACTIONS[S.choice.player] ? FACTIONS[S.choice.player].col.main : '#f2c14e';
-    $('starts').innerHTML = L.map(st => `<button class="start ${st.id === cur ? 'on' : ''}" data-start="${st.id}" style="--fc:${col}" title="${esc(st.rule.name + ': ' + st.rule.desc)}"><b>${esc(st.name)}</b><i>${esc(st.cmdr)} · ${esc(st.where)}</i><span>${esc(st.blurb)}</span><em>${esc(st.rule.name)}</em></button>`).join(''); };
-  $('starts').addEventListener('click', e => { const b = e.target.closest('[data-start]'); if (!b) return; S.startSel[POWOF[S.choice.player] || 'rep'] = b.dataset.start; buildStarts(); });
-  $('facP').addEventListener('click', () => setTimeout(buildStarts, 0));
+  // a campaign is begun by choosing a power: its ruler's start (the first in starts.js) is the one played
+  const POWOF = { rising: 'rep', core: 'soc', rim: 'rim' }; S.ahist = false;
   $('bAhist').onclick = () => { S.ahist = !S.ahist; $('bAhist').classList.toggle('on', S.ahist); };
-  $('bMove').onclick = () => { S.moving = !S.moving; $('bMove').classList.toggle('on', S.moving); };
-  buildStarts();
   $('closeHelp').onclick = () => { showHelp(false); if (S.paused) togglePause(); };
   for (const b of document.querySelectorAll('#diffs .btn')) b.onclick = () => { S.difficulty = +b.dataset.d; for (const o of document.querySelectorAll('#diffs .btn')) o.classList.toggle('on', o === b); };
   S.cam0 = S.cam; S.menuMode = 'camp';
@@ -110,7 +102,7 @@ async function boot() {
   for (const b of document.querySelectorAll('#modes .btn')) b.onclick = () => setMode(b.dataset.mode);
   setMode('camp');
   setQuitHandler(() => { S.cam = S.cam0; $('menu').classList.remove('hide'); S.gameState = 'menu'; setLowRes(true); attract(); if (S.menuSaves) S.menuSaves(); });
-  $('start').onclick = () => { initAudio(); setLowRes(false); $('menu').classList.add('hide'); if (S.menuMode === 'camp') { const f = POWOF[S.choice.player] || 'rep'; startCampaign(S.choice.player, S.difficulty, S.startSel[f] || null, { ahist: !!S.ahist, moving: !!S.moving }); return; } S.cam = S.cam0; S.gameState = 'play'; newGame(); document.body.dataset.fac = { rising: 'rep', core: 'soc', rim: 'rim' }[S.choice.player] || 'rep'; buildUI(); S.paused = false; $('pauseTag').classList.add('hide'); $('bSnd').classList.toggle('on', !audio.muted); };
+  $('start').onclick = () => { initAudio(); setLowRes(false); $('menu').classList.add('hide'); if (S.menuMode === 'camp') { const f = POWOF[S.choice.player] || 'rep'; startCampaign(S.choice.player, S.difficulty, null, { ahist: !!S.ahist }); return; } S.cam = S.cam0; S.gameState = 'play'; newGame(); document.body.dataset.fac = { rising: 'rep', core: 'soc', rim: 'rim' }[S.choice.player] || 'rep'; buildUI(); S.paused = false; $('pauseTag').classList.add('hide'); $('bSnd').classList.toggle('on', !audio.muted); };
   // saved campaigns: Continue picks up the latest; Load lists the slots and takes a file
   const go = d => { initAudio(); setLowRes(false); $('menu').classList.add('hide'); $('loadp').classList.add('hide'); loadCampaign(d); };
   const saves = () => { const L = SV.listSlots(), camp = S.menuMode === 'camp'; $('bCont').classList.toggle('hide', !L.length || !camp); $('bLoad').classList.toggle('hide', !camp); if (!camp) $('loadp').classList.add('hide'); return L; };

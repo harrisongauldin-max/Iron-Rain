@@ -50,7 +50,7 @@ export function restore(d) {
   for (const k of Object.keys(C)) delete C[k];
   Object.assign(C, d.C); C.defs = {}; C.on = true;
   Object.assign(CAPITAL, d.cap || {});
-  placePlanets(C.moving ? C.turn : 1);
+  C.moving = true; placePlanets(C.turn); // the planets always move, saves from before that rule included
   ST.afterLoad(); RU.afterLoad();
   return C;
 }
