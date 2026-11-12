@@ -39,6 +39,7 @@ Needs Python 3 with Playwright (`pip install playwright && playwright install ch
 
 - `bash tests/run_tournament.sh` also takes `OLD_AI=path/to/enemyai.js` (compare against another version, e.g. `git show main:js/enemyai.js > /tmp/old.js`), `SCEN="even attack"` and `AIS=new`. Results vary a lot from run to run: use 4+ seeds.
 - `node tests/ground_ai.mjs [--seeds 8] [--modes OO,NN,NO,ON]` fights whole ground battles headless in Node (no browser, no server) with the AI on both sides, the old AI (main's, from git) grafted beside the new: both old, both new, new attacker against old defender, old attacker against new defender.
+- `node tests/ground_paths.mjs [--trips 40] [--battles 2]` checks ground pathfinding headless: units of every kind sent across each world's field (into walled cities, from the waterline), on the real movement rules, then stalls counted in whole AI battles. Fails on any step through a wall or into deep water, more than 2% of trips not arriving, or more than 1% of units stalled two minutes.
 - `python3 tests/campaign_ai.py --runs 3` plays all-AI campaigns; it also reports how many battles the forecast called close (10–90%), feints and fleets that fell back.
 
 Headless Chrome renders through SwiftShader on WebGL2, so the tests check behaviour, not looks. Graphics need checking on a real GPU.

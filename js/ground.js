@@ -162,7 +162,8 @@ function buildNav() {
     const x = (i + .5) * CN, y = (j + .5) * CN, k = j * NN + i;
     if (isWater(x, y)) { cost[k] = Infinity; continue; }
     const s = Math.abs(heightAt(x + 20, y) - heightAt(x - 20, y)) + Math.abs(heightAt(x, y + 20) - heightAt(x, y - 20));
-    cost[k] = 1 + (isUrban(x, y) ? .5 : 0) + (G.map.veg[cellOf(x, y)] ? .25 : 0) + clamp(s / 40, 0, 3);
+    const shore = G.map.seaH >= 0 && [[-20, -20], [20, -20], [-20, 20], [20, 20]].some(([ox, oy]) => isWater(x + ox, y + oy)); // a cell with water in a corner: the path keeps off the waterline, where the deep is a step away
+    cost[k] = 1 + (isUrban(x, y) ? .5 : 0) + (G.map.veg[cellOf(x, y)] ? .25 : 0) + clamp(s / 40, 0, 3) + (shore ? 1.3 : 0);
   }
   // walls block the moves between cells that cross them (8 directions per cell)
   const edge = new Uint8Array(NN * NN);
@@ -226,7 +227,15 @@ export function findPath(x0, y0, x1, y1, fly, raw) { // raw: cell by cell, no co
     for (let r = 1; r < 8 && best < 0; r++) for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) { const i = gi + di, j = gj + dj; if (i < 0 || j < 0 || i >= NN || j >= NN) continue; const k = j * NN + i; if (navOK(k) && di * di + dj * dj < bd) { bd = di * di + dj * dj; best = k; } }
     if (best < 0) return [{ x: x1, y: y1 }]; g = best; x1 = (g % NN + .5) * CN; y1 = (((g / NN) | 0) + .5) * CN;
   }
-  if (!navOK(s, false)) return [{ x: x1, y: y1 }]; // already off the grid's open ground: walk straight
+  let lead = null;
+  if (!navOK(s, false)) { // standing in the shallows or on a dry sliver of a wet cell: first to the nearest open cell it can wade to
+    let best = -1, bd = Infinity; const si = s % NN, sj = (s / NN) | 0;
+    for (let r = 1; r < 10 && best < 0; r++) for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) { if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue; const i = si + di, j = sj + dj; if (i < 0 || j < 0 || i >= NN || j >= NN) continue; const k = j * NN + i; if (!navOK(k)) continue;
+      const cx = (i + .5) * CN, cy = (j + .5) * CN, d = hyp(cx - x0, cy - y0); if (d >= bd || (G.map.wl.length && crossesWall(x0, y0, cx, cy))) continue;
+      let dry = true; for (let q = 1, n = Math.ceil(d / 10); q < n && dry; q++) if (isDeep(lerp(x0, cx, q / n), lerp(y0, cy, q / n))) dry = false; if (!dry && !isDeep(x0, y0)) continue; // wade out by the shallows, not across the deep
+      best = k; bd = d; }
+    if (best < 0) return [{ x: x1, y: y1 }]; // nothing open near: walk straight
+    s = best; lead = { x: (s % NN + .5) * CN, y: (((s / NN) | 0) + .5) * CN }; }
   const N = NN * NN, gs = new Float32Array(N).fill(Infinity), from = new Int32Array(N).fill(-1), closed = new Uint8Array(N);
   const heap = [], push = (k, f) => { heap.push([f, k]); let i = heap.length - 1; while (i) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
   const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = i * 2 + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
@@ -240,15 +249,16 @@ export function findPath(x0, y0, x1, y1, fly, raw) { // raw: cell by cell, no co
       if (di && dj && (!navOK(j * NN + ii) || !navOK(jj * NN + i))) continue;
       const c = gs[k] + (di && dj ? 1.414 : 1) * (NAV.cost[k] + NAV.cost[q]) * .5; if (c < gs[q]) { gs[q] = c; from[q] = k; push(q, c + hh(q)); } }
   }
-  if (from[g] < 0 && g !== s) return [{ x: x1, y: y1 }];
+  if (from[g] < 0 && g !== s) return lead ? [lead, { x: x1, y: y1 }] : [{ x: x1, y: y1 }];
   const cells = []; for (let k = g; k >= 0 && k !== s; k = from[k]) cells.push(k); cells.reverse();
   // string-pull: drop waypoints that a straight walk can skip
   const pts = cells.map(k => ({ x: (k % NN + .5) * CN, y: (((k / NN) | 0) + .5) * CN }));
   if (pts.length) pts[pts.length - 1] = { x: x1, y: y1 };
   const sc = { x: (s % NN + .5) * CN, y: (((s / NN) | 0) + .5) * CN };
   if (pts.length && G.map.wl.length && crossesWall(x0, y0, pts[0].x, pts[0].y) && !crossesWall(x0, y0, sc.x, sc.y)) pts.unshift(sc); // a wall between the unit and the next cell: round by the start cell's centre, on its side
+  if (lead) pts.unshift(lead);
   if (raw) return pts.length ? pts : [{ x: x1, y: y1 }];
-  const out = []; let ax = x0, ay = y0, i = 0;
+  const out = lead ? [lead] : []; let ax = lead ? lead.x : x0, ay = lead ? lead.y : y0, i = lead ? 1 : 0;
   while (i < pts.length) { let j = pts.length - 1; while (j > i && !straight(ax, ay, pts[j].x, pts[j].y)) j--; out.push(pts[j]); ax = pts[j].x; ay = pts[j].y; i = j + 1; }
   return out.length ? out : [{ x: x1, y: y1 }];
 }
@@ -465,26 +475,35 @@ function move(u, dt) {
       else { u.path = null; face = Math.atan2(t.y - u.y, t.x - u.x); } }
   } else if (u.order && u.order.type === 'breach') { // to a post within reach of the wall, then stand and shoot
     const w = G.map.walls[u.order.w];
-    if (!w || w.down) { u.order = null; u.path = null; }
+    if (!w || w.down || (u.ammo <= 0 && !(u.ammo2 > 0))) { u.order = null; u.path = null; } // the wall is down, or nothing left to shoot at it with
     else { const d = segDist(u.x, u.y, w), m = wallMid(w);
       if (d > u.wpn.range * .85) { if ((u.repath || 0) < G.t) { const p = breachPost(u, w); u.path = findPath(u.x, u.y, p.x, p.y, u.T.fly); u.repath = G.t + 4; } }
       else { u.path = null; face = Math.atan2(m.y - u.y, m.x - u.x); } }
   } else if (u.aim && fighting(u.aim) && !u.path) face = Math.atan2(u.aim.y - u.y, u.aim.x - u.x);
-  // arriving in a crowd: a unit that has made no headway for six seconds close to the end of its move has arrived
-  if (u.path && u.path.length && u.order && u.order.type === 'move') { const e = u.path[u.path.length - 1]; if (!u.prog || hyp(u.x - u.prog.x, u.y - u.prog.y) > 4) u.prog = { x: u.x, y: u.y, t: G.t };
-    else if (G.t - u.prog.t > 6 && hyp(e.x - u.x, e.y - u.y) < 70 + radiusOf(u)) { u.path = null; u.faceTo = u.order.a; u.order = null; u.prog = null; }
+  // headway is measured along the path, toward its next waypoint, not as movement: a unit jostled back and forth in a
+  // crowd is not getting anywhere, while one walking a detour round the water is. Arriving in a crowd: no headway for
+  // six seconds close to the end of a move is arriving
+  if (u.path && u.path.length && u.order && (u.order.type === 'move' || u.order.type === 'attack' || u.order.type === 'breach') && !u.melee) { const e = u.path[u.path.length - 1], p0 = u.path[0], d0 = hyp(p0.x - u.x, p0.y - u.y), de = hyp(e.x - u.x, e.y - u.y);
+    if (!u.prog || hyp(u.prog.px - p0.x, u.prog.py - p0.y) > 25 || d0 < u.prog.d - 4) u.prog = { d: Math.min(d0, u.prog && hyp(u.prog.px - p0.x, u.prog.py - p0.y) <= 25 ? u.prog.d : Infinity), px: p0.x, py: p0.y, t: G.t }; // a new waypoint (or a target that has moved on) starts the count again; headway is a new best, not a step back in after a shove
+    else if (u.order.type === 'move' && de < 70 + radiusOf(u) && (G.t - u.prog.t > 6 || G.units.some(v => v !== u && v.team === u.team && live(v) && !v.order && hyp(v.x - e.x, v.y - e.y) < radiusOf(v) + 20))) { u.path = null; u.faceTo = u.order.a; u.order = null; u.prog = null; } // nearly there and the place is taken: stand beside it
     else if (G.t - u.prog.t > 8) { // no headway, far from the end: sidestep out of the jam, and after a few tries ford whatever water is in the way
-      const side = (u.side = -(u.side || 1)), p0 = u.path[0], a = Math.atan2(p0.y - u.y, p0.x - u.x) + side * PI / 2; u.path.unshift({ x: clamp(u.x + Math.cos(a) * 60, 10, MAP - 10), y: clamp(u.y + Math.sin(a) * 60, 10, MAP - 10) });
-      u.unstick = (u.unstick || 0) + 1; if (u.unstick > 1) u.ford = G.t + 12; u.prog = { x: u.x, y: u.y, t: G.t }; } }
+      while (u.path.length > 1 && u.path[0].side) u.path.shift(); // the last sidestep did not help: no pile of stale ones
+      const q0 = u.path[0], ok = (x, y) => !isDeep(x, y) && !(G.map.wl.length && crossesWall(u.x, u.y, x, y));
+      let side = (u.side = -(u.side || 1)), a = Math.atan2(q0.y - u.y, q0.x - u.x) + side * PI / 2, sx = clamp(u.x + Math.cos(a) * 60, 10, MAP - 10), sy = clamp(u.y + Math.sin(a) * 60, 10, MAP - 10);
+      if (!ok(sx, sy)) { side = u.side = -side; a = Math.atan2(q0.y - u.y, q0.x - u.x) + side * PI / 2; sx = clamp(u.x + Math.cos(a) * 60, 10, MAP - 10); sy = clamp(u.y + Math.sin(a) * 60, 10, MAP - 10); } // not into the water or the wall: the other side
+      if (ok(sx, sy)) u.path.unshift({ x: sx, y: sy, side: true });
+      u.unstick = (u.unstick || 0) + 1; if (u.unstick > 1) u.ford = G.t + 12; if (u.order.type !== 'move') u.repath = G.t + 6; u.prog = null; } }
   if (u.path && u.path.length) { const p = u.path[0]; tx = p.x; ty = p.y; if (hyp(tx - u.x, ty - u.y) < 8) { u.path.shift(); if (!u.path.length) { u.path = null; tx = null; if (u.order && u.order.type === 'move') { if (u.order.a != null) face = u.order.a; u.faceTo = u.order.a; u.order = null; } } } }
   if (tx != null) {
     const dx = tx - u.x, dy = ty - u.y, v = speedOf(u), want = Math.atan2(dy, dx), turn = (u.T.fly ? 4 : 1.6) * dt;
     u.a += clamp(angDiff(u.a, want), -turn, turn);
     const k = Math.max(.15, Math.cos(angDiff(u.a, want))); u.vx = Math.cos(want) * v * k; u.vy = Math.sin(want) * v * k;
-    let nx = u.x + u.vx * dt, ny = u.y + u.vy * dt;
+    let nx = u.x + u.vx * dt, ny = u.y + u.vy * dt; const nx0 = nx, ny0 = ny;
     if (!u.T.fly && ((isDeep(nx, ny) && !isDeep(u.x, u.y) && !(u.ford > G.t)) || crossesWall(u.x, u.y, nx, ny))) { // blocked: find a way round (a unit already in the water may wade out)
       nx = u.x; ny = u.y; u.vx = u.vy = 0; const last = u.path[u.path.length - 1];
-      if ((u.blockT || 0) < G.t) { u.path = findPath(u.x, u.y, last.x, last.y, false, true); u.blockT = G.t + 1.5; u.stuck = (u.stuck || 0) + 1; if (u.stuck > 4 && u.state === 'rout') { u.path = null; u.stuck = 0; } } }
+      if ((u.blockT || 0) < G.t) { const water = !crossesWall(u.x, u.y, nx0, ny0); u.path = findPath(u.x, u.y, last.x, last.y, false, true); u.blockT = G.t + 1.5; u.stuck = (u.stuck || 0) + 1;
+        if (water && u.stuck > 3) { u.ford = G.t + 10; u.stuck = 0; } // the water will not be walked round: wade it (slowly), as a last resort
+        else if (u.stuck > 4 && u.state === 'rout') { u.path = null; u.stuck = 0; } } }
     else u.stuck = 0;
     u.x = clamp(nx, 5, MAP - 5); u.y = clamp(ny, 5, MAP - 5);
     if (u.run || u.state === 'rout') u.stam = Math.max(0, u.stam - dt * .006); else u.stam = Math.min(1, u.stam + dt * .004);
@@ -682,7 +701,10 @@ export function log(msg, cls) { G.feed.unshift({ t: G.t, msg, cls: cls || '' });
 //  slowest; leaves a holding force on every site it takes, and once it holds two, turns to keep them.
 const keepOrSwitch = (u, tg) => { const cur = u.target && fighting(u.target) && u.order && u.order.type === 'attack' ? u.target : null;
   if (!cur) return tg; if (!tg || tg === cur) return cur; return dist2(u, tg) < dist2(u, cur) * .45 ? tg : cur; };
-const strike = (u, tg, run) => { const k = keepOrSwitch(u, tg); if (k && (k !== u.target || !u.order || u.order.type !== 'attack')) order(u, { type: 'attack', t: k, run }); return k; };
+const strike = (u, tg, run) => { const k = keepOrSwitch(u, tg); if (k && (k !== u.target || !u.order || u.order.type !== 'attack')) { order(u, { type: 'attack', t: k, run }); u.ordT = G.t; } return k; };
+// a unit sent at an enemy goes on with it for a while: a fight that flickers in and out of sight must not have it turn
+// back to its march and out again every two seconds, getting nowhere
+const committed = u => u.order && u.order.type === 'attack' && fighting(u.order.t) && G.t - (u.ordT || 0) < 20 && dist2(u, u.order.t) < Math.max(700, u.wpn.range * 1.6) ** 2;
 const goTo = (u, x, y, o = {}) => { if (u.order && u.order.type === 'move' && hyp(u.order.x - x, u.order.y - y) < 80) return; if (!u.order && hyp(u.x - x, u.y - y) < 40) return; order(u, Object.assign({ type: 'move', x, y }, o)); };
 // the pin and the flank, as in any field battle since the Iron Age: a shock unit whose target is already locked in a
 // fight (in melee, or shooting at someone else) does not walk into its face, it swings wide and comes in on its flank or
@@ -863,11 +885,12 @@ function attack(mine, foes) {
       if (near && dn < u.wpn.range && sees) { if (u.order && u.order.type === 'move') order(u, { type: 'halt' }); continue; }
       if (near && dn < 320 && u.T.mel >= 8) { strike(u, near, true); continue; }
       if (z && hyp(u.x - z.x, u.y - z.y) > 450) goTo(u, z.x + (u.id % 5 - 2) * 100, z.y + (u.id % 3 - 1) * 100); continue; }
+    if (committed(u)) continue;
     if (u.type === 'peerless') {
       if (u.leader) { const p = { x: A.x - fx * 260, y: A.y - fy * 260 }; if (near && dn < 160) strike(u, near, false); else goTo(u, p.x, p.y, { a: face }); continue; }
       const pool = foes.filter(f => hyp(f.x - A.x, f.y - A.y) < 900 || (f.T.aa || f.leader) && hyp(f.x - A.x, f.y - A.y) < 1800); const tg = pool.length ? bestStrike(u, pool, 2000) : null;
       if (tg) charge(u, tg); else goTo(u, A.x - fx * 150 + (u.id % 3 - 1) * 90, A.y - fy * 150, { a: face }); continue; }
-    if (u.type === 'starshell' && A.breach && !(near && dn < 220)) { const wid = A.breach[u.id % A.breach.length]; if (!u.order || u.order.type !== 'breach' || u.order.w !== wid) order(u, { type: 'breach', w: wid }); continue; }
+    if (u.type === 'starshell' && A.breach && !(near && dn < 220) && (u.ammo > 0 || u.ammo2 > 0)) { const wid = A.breach[u.id % A.breach.length]; if (!u.order || u.order.type !== 'breach' || u.order.w !== wid) order(u, { type: 'breach', w: wid }); continue; }
     if (u.type === 'obsidian' || u.type === 'starshell') { const pool = front.length ? front : foes.filter(f => pinned(u, f) && hyp(f.x - A.x, f.y - A.y) < 900), tg = pool.length ? (u.type === 'obsidian' ? bestStrike(u, pool, 700) : nearest(u, pool)) : null; if (tg && Math.sqrt(dist2(u, tg)) < 700) { if (u.type === 'obsidian') charge(u, tg); else strike(u, tg, false); continue; } }
     if (near && dn < u.wpn.range * .95 && sees) { if (u.order && u.order.type === 'move') order(u, { type: 'halt' }); continue; } // in reach and in sight: the line stands and shoots
     if (near && dn < u.wpn.range * 1.3 && !sees && (A.stall || 0) > 20) { strike(u, near, false); continue; } // dig them out of the buildings
