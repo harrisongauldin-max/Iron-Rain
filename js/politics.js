@@ -3,7 +3,7 @@
 // the war leaves it and jumps with what you do; every number here can be explained, part by part. Each power passes
 // laws through its own body. Between the powers: opinions that remember, war goals, and peace bought item by item
 // with war score: worlds, prisoners, yards, alliances, tribute, a captured ruler.
-import { C, note, hostile, relOf, setRel, BLOC_NAME, CAPITAL, fleetsAt, fleetStr, declareWar, travel, chron, human, nearDead } from './camp.js';
+import { C, note, hostile, relOf, setRel, BLOC_NAME, CAPITAL, fleetsAt, fleetStr, declareWar, travel, chron, human, nearDead, runaway } from './camp.js';
 import * as CM from './command.js';
 import * as EC from './economy.js';
 import * as RU from './rulers.js';
@@ -517,7 +517,7 @@ function aiDiplo() {
         if (sue && rnd() < .15 && cool) { const items = aiOfferItems(f, o, Math.max(0, -s - 8 + (wf - 40) / 3)); C.pendingOffer = { from: f, kind: 'deal', items }; C.lastOffer = C.turn; }
         else if (s > 45 - D.peace * .3 && rnd() < .06 && cool) { const items = aiOfferItems(o, f, s * .6); if (items.length) { C.pendingOffer = { from: f, kind: 'demand', items }; C.lastOffer = C.turn; } }
       }
-      else if (!finish && (s < -40 + D.peace * .6 + op / 10 || wf > 80) && rnd() < .08 && !(f === 'soc' && o === 'rep' && supportOf('soc') > 60)) { const items = aiOfferItems(f, o, Math.max(0, -s * .6)); applyDeal(f, o, items); }
+      else if (!finish && (s < -40 + D.peace * .6 + op / 10 || wf > 80 || (POW.some(x => x !== f && x !== o && runaway(x) && hostile(f, x)) && s < 20)) && rnd() < .08 && !(f === 'soc' && o === 'rep' && supportOf('soc') > 60)) { const items = aiOfferItems(f, o, Math.max(0, -s * .6)); applyDeal(f, o, items); }
     }
     aiWar(f, D);
     // the Republic and the Remnant are enemies to the death: a truce between them holds only as long as it must
@@ -551,9 +551,9 @@ function aiWar(f, D) {
     const edge = warEdge(f, o), hate = clamp(-opinionOf(f, o) / 100, 0, 1);
     // the chance a patient ruler waits for: a power at war elsewhere, its capital lost, its people tired. The Republic's
     // war with the Remnant is the given of the campaign, so against the player it counts only once that war tells
-    const tired = (C.weary[o] || 0) > (human(o) ? 40 : 30), chance = (atWarWith(o).length && (!human(o) || tired) ? 1 : 0) + (capLostOf(o) ? 1 : 0) + (tired ? 1 : 0);
+    const tired = (C.weary[o] || 0) > (human(o) ? 40 : 30), big = runaway(o), chance = (atWarWith(o).length && (!human(o) || tired || big) ? 1 : 0) + (capLostOf(o) ? 1 : 0) + (tired ? 1 : 0) + (big ? 1 : 0); // a power running away with the war is everyone's chance
     if (D.truce === 0 && !chance) continue; // a patient ruler waits for the moment
-    const need = D.sup * 1.15 * (fronts ? 1.7 : 1) * (1 - hate * .2) * (chance ? .9 : 1);
+    const need = D.sup * 1.15 * (fronts && !atWarWith(f).every(x => x === o || runaway(x)) ? 1.7 : 1) * (1 - hate * .2) * (chance ? .9 : 1) * (big ? .75 : 1);
     if (edge < need) continue;
     // the player hears of it first: once, when a power at peace begins to look for its chance
     C.warWarn = C.warWarn || {}; if (human(o) && !C.warWarn[f]) { C.warWarn[f] = C.turn; note(`Our agents report that ${(RU.actingOf(f) || { name: 'the ruler of ' + BLOC_NAME[f] }).name.split(',')[0]} is counting our fleets. ${BLOC_NAME[f]} may not keep the peace much longer.`, 'bad', CAPITAL[f], { title: 'A peace in doubt', kind: 'war' }); continue; }

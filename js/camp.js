@@ -941,7 +941,27 @@ function targetVal(f, fl, id, D, agg) {
   const w = C.worlds[id], g = P.goalOf(f, w.owner), op = w.owner !== 'neu' ? P.opinionOf(f, w.owner) : 0;
   return 1 + (fl && w.siege && w.siege.by === f && troopsOf(fl) > 60 ? 4 : 0) + (id === CAPITAL[w.owner] ? 1.5 : 0) + (w.owner === C.player ? (C.turn < [8, 4, 2][C.difficulty] ? -.6 : .35 * agg) : 0) + (WORLDS.find(x => x.id === id).prod.he > 10 ? .4 : 0)
     + (g && g.w === id ? 2.5 : 0) + D.revenge * Math.max(0, -op - 30) / 40 + (w.lv.yard >= 2 ? .3 * D.ops : 0)
-    + (nearDead(w.owner) ? (id === CAPITAL[w.owner] ? 3.5 : 1.5) : 0) + (w.owner === 'neu' && w.home === f ? 1.5 : 0); /* the finishing blow; our own worlds in revolt */
+    + (nearDead(w.owner) ? (id === CAPITAL[w.owner] ? 3.5 : 1.5) : 0) + (w.owner === 'neu' && w.home === f ? 1.5 : 0) /* the finishing blow; our own worlds in revolt */
+    + (w.owner !== 'neu' ? farFrom(f, w.owner, id) * (D.dark >= .5 ? 1.1 : .7) : 0) + (runaway(w.owner) && w.owner !== f ? .6 : 0); /* where their fleets are not; the power that is winning */
+}
+// the fog of war: what a power's agents make of a world's defenders is never quite right. Each power reads each world
+// with its own error, which holds for a month at a time and is smaller for a ruler who spies first (rulers.js agents):
+// an offensive gathered to half again what it thinks it needs may find a fair fight, or wait for strength it did not need
+const misread = (f, id) => { if (C.difficulty < 1 || f === C.player) return 1; const D = RU.docOf(f), amp = clamp(.32 - ((D.agents || {}).spy || .3) * .4, .1, .25), h = ((f + id + Math.floor(C.turn / 4)).split('').reduce((a, c) => Math.imul(a ^ c.charCodeAt(0), 16777619), 2166136261) >>> 0) / 4294967296; return 1 + (h * 2 - 1) * amp; };
+// how long the owner's known battle fleets would take to come to a world's aid, as power f sees them: a world four weeks
+// from any fleet that could save it is worth more than one under the guns of the enemy's main fleet (0 to 1)
+function farFrom(f, o, id) {
+  let best = 99; for (const x of C.fleets) { if (x.owner !== o || x.levy || fleetStr(x) < 900 || !IN.levelOf(f, x)) continue; const at = x.transit ? x.transit.to : x.at; if (!at) continue; best = Math.min(best, travel(at, id) + (x.transit ? x.transit.left || 0 : 0)); }
+  return best >= 99 ? .6 : clamp((best - 1.5) / 4, 0, 1);
+}
+// the power that is running away with the war: half again the worlds of the next power, and fourteen or more. The others
+// see it too, and the common enemy draws them together (politics.js aiWar / aiDiplo)
+export const runaway = o => { if (!o || o === 'neu' || !C.fac[o] || !C.fac[o].alive) return false; const n = x => Object.values(C.worlds).filter(w => w.owner === x).length, me = n(o); return me >= 14 && ['rep', 'soc', 'rim'].every(x => x === o || !C.fac[x].alive || me >= n(x) * 1.5); };
+// a world to fall back on: one of ours within three weeks, not besieged, with the most of our strength already there
+function regroupAt(f, from) {
+  let best = null, bs = 0; for (const id in C.worlds) { const w = C.worlds[id]; if (w.owner !== f || id === from || w.siege) continue; const t = travel(from, id); if (t > 3) continue;
+    const v = (fleetsAt(id, f).reduce((a, x) => a + fleetStr(x), 0) + defStr(w)) * (id === CAPITAL[f] ? 1.4 : 1) / (1 + t * .3); if (v > bs) { bs = v; best = id; } }
+  return best;
 }
 // the offensive: pick a target worth the whole strike force, a muster world near it, and the fleets to send
 function aiOps(f, D, agg, avail) {
@@ -952,18 +972,22 @@ function aiOps(f, D, agg, avail) {
     if (!avail.length || (!kill && rnd() > .6 * D.ops)) return null;
     const pool = avail.reduce((a, fl) => a + fleetStr(fl), 0), mine = Object.values(C.worlds).filter(w => w.owner === f && !w.siege); if (!mine.length) return null;
     const lift = avail.reduce((a, fl) => a + troopsOf(fl), 0);
-    let best = null, bs = 0;
+    let best = null, bs = 0; const cands = [];
     for (const id in C.worlds) {
       const w = C.worlds[id]; if (!hostile(f, w.owner) || (w.owner === 'neu' && w.home === 'neu' && !w.asco)) continue;
       if (w.owner === C.player && C.turn < [8, 4, 2][C.difficulty]) continue;
-      const enemy = IN.knownStrAt(f, id, fleetStr) + defStr(w), need = Math.max(800, enemy * D.sup);
+      const enemy = (IN.knownStrAt(f, id, fleetStr) + defStr(w)) * misread(f, id), need = Math.max(800, enemy * D.sup);
       if (pool * agg < need) continue;
       if (aiStalled(f, id) && !enoughTroops(f, w, lift)) continue; // fought there before and the world still holds: not again without the troops to take it
       if (aiLostAt(f, id) && pool * agg < need * 1.5) continue;
       const mu = mine.slice().sort((a, b) => travel(a.id, id) - travel(b.id, id) + (b.lv.yard - a.lv.yard) * .3)[0], t = travel(mu.id, id);
-      const sc = targetVal(f, null, id, D, agg) / (t + 1) / (1 + enemy / pool); if (sc > bs) { bs = sc; best = { tgt: id, muster: mu.id, need, t: C.turn }; }
+      const sc = targetVal(f, null, id, D, agg) / (t + 1) / (1 + enemy / pool); cands.push({ id, sc, need, mu: mu.id }); if (sc > bs) { bs = sc; best = { tgt: id, muster: mu.id, need, t: C.turn }; }
     }
     if (!best) return null;
+    // the feint, after Darrow's way of war: the muster is in plain sight and the agents read the blow from it, but a ruler
+    // who runs dark sends the strike force at another world within the same reach of the muster
+    const alt = cands.filter(c => c.id !== best.tgt && c.sc >= bs * .45 && travel(best.muster, c.id) <= travel(best.muster, best.tgt) + 1 && c.need <= best.need * 1.25).sort((a, b) => b.sc - a.sc)[0];
+    if (alt && rnd() < (D.dark >= .5 ? .55 : D.ops >= 1.4 ? .25 : .12) * (C.difficulty >= 1 ? 1 : .4)) best.feint = alt.id;
     // gather half again what the target needs, and everything close to the muster up to twice it: an offensive goes in
     // to win, not to trade blows. A world with a garrison needs troops with the strike force.
     let got = 0, lifted = 0; best.ids = [];
@@ -978,8 +1002,14 @@ function aiOps(f, D, agg, avail) {
   const fls = op.ids.map(id => C.fleets.find(x => x.id === id && x.owner === f)).filter(Boolean); op.ids = fls.map(x => x.id); if (!fls.length) { C.ops[f] = null; return null; }
   opIntel(f, op, fls);
   const at = fls.filter(x => !x.transit && x.at === op.muster), str = at.reduce((a, x) => a + fleetStr(x), 0);
-  const enemy = IN.knownStrAt(f, op.tgt, fleetStr) + defStr(C.worlds[op.tgt]); op.need = Math.max(800, enemy * D.sup);
+  const enemy = (IN.knownStrAt(f, op.tgt, fleetStr) + defStr(C.worlds[op.tgt])) * misread(f, op.tgt); op.need = Math.max(800, enemy * D.sup);
   if (str * agg >= op.need * (aiLostAt(f, op.tgt) ? 1.5 : 1) || (C.turn - op.t >= 8 && str * agg >= op.need * .8 && at.length && !aiLostAt(f, op.tgt))) {
+    // the feint is sprung: the blow falls on the other world, if it is still worth the strike force
+    if (op.feint && C.worlds[op.feint] && hostile(f, C.worlds[op.feint].owner) && str * agg >= (IN.knownStrAt(f, op.feint, fleetStr) + defStr(C.worlds[op.feint])) * D.sup) {
+      const decoy = op.tgt; op.tgt = op.feint; stat('feint');
+      for (const th of C.threats || []) if (th.f === f && th.tgt === decoy && !th.launched) { th.launched = C.turn; th.until = C.turn + 2; }
+      if (C.worlds[op.tgt].owner === C.player && at.some(x => IN.levelOf(C.player, x) >= 1)) note(`A feint! The offensive massed at ${bodyOf(op.muster).name} has turned away from ${bodyOf(decoy).name}: it is bound for ${bodyOf(op.tgt).name}.`, 'bad', op.tgt, { title: 'The blow falls elsewhere', kind: 'war' });
+    }
     // launch: every fleet at the muster sets out together, at the pace of the slowest
     const n = Math.max(...at.map(x => moveWeeks(x, op.tgt))); for (const x of at) { x.run = !globalThis.__FOG_OFF && n >= 3 && rnd() < D.dark ? 'dark' : null; if (!moveFleet(x, op.tgt)) { x.transit.left = x.transit.total = Math.max(x.transit.total, n); } }
     if (at[0] && at[0].transit) CQ.aiRising(f, at[0], op.tgt);
@@ -1059,10 +1089,18 @@ function aiTurn(f) {
     if (here && hostile(f, here.owner) && here.siege && here.siege.by === f && (aiStalled(f, here.id) ? enoughTroops(f, here, troopsOf(fl)) : troopsOf(fl) > 60 || here.siege.turns < 6)) { const o = rainOdds(fl); if (!(here.siege.turns > 12 && (o.err || o.chance < .25))) continue; }
     // a strike force that has just won the orbit of an enemy world stays for the siege to form, if it came to take it
     if (here && hostile(f, here.owner) && !(here.siege && here.siege.by === f) && !fleetsAt(here.id).some(o => hostile(f, o.owner) && !bottled(o)) && (aiStalled(f, here.id) ? enoughTroops(f, here, troopsOf(fl)) : troopsOf(fl) > 60 || nearDead(here.owner))) continue;
+    // a fleet does not wait at a lesser world to be crushed: before a known force far stronger than everything of ours
+    // there, it falls back on the strength nearest it, to strike back together (the capital's guard and a world's own
+    // garrison stand; a Reckless ruler never gives ground)
+    if (here && here.owner === f && !here.siege && here.id !== CAPITAL[f] && !fl.holdFast && D.sup > 1.1 && C.difficulty >= 1) {
+      const inc = IN.knownBoundFor(f, here.id).reduce((a, o) => a + fleetStr(o), 0), ours = fleetsAt(here.id, f).reduce((a, x) => a + fleetStr(x), 0) + defStr(here);
+      if (inc > ours * 1.45) { const to = regroupAt(f, here.id); if (to && (fleetsAt(to, f).reduce((a, x) => a + fleetStr(x), 0) + defStr(C.worlds[to]) + str) * agg > inc * .9) { moveFleet(fl, to); stat('evade'); continue; } }
+    }
     const homeThreat = here && here.owner === f && IN.knownBoundFor(f, fl.at).length > 0;
     // intercept a tracked enemy bound for one of our worlds, when we can catch it and beat it
     if (here && here.owner === f && !fl.garrison && !globalThis.__FOG_OFF) { let pick = null;
-      for (const o of C.fleets) { if (!hostile(f, o.owner) || !o.transit || o.engage || o.owner === 'neu' || !C.worlds[o.transit.to] || C.worlds[o.transit.to].owner !== f || IN.levelOf(f, o) < 1) continue;
+      for (const o of C.fleets) { if (!hostile(f, o.owner) || !o.transit || o.engage || o.owner === 'neu' || !C.worlds[o.transit.to] || IN.levelOf(f, o) < 1) continue;
+        if (C.worlds[o.transit.to].owner !== f && !(troopsOf(o) >= 60 && C.difficulty >= 1 && travel(fl.at, o.transit.to) <= 3)) continue; // bound for us, or a troop convoy on its way to a Rain: the legions die easiest in their ships
         const p = planIntercept(fl, o); if (typeof p === 'string' || p.chance < .45) continue; if (fleetStr(fl) * agg < fleetStr(o) * D.sup * .95) continue; if (!pick || p.w < pick.p.w) pick = { o, p }; }
       if (pick && rnd() < .75) { orderIntercept(fl, pick.o); continue; } }
     if (homeThreat && here.id === CAPITAL[f]) continue;
@@ -1077,7 +1115,7 @@ function aiTurn(f) {
       const w = C.worlds[id]; if (!hostile(f, w.owner)) continue;
       if (w.owner === C.player && C.turn < [8, 4, 2][C.difficulty]) continue; // the player gets a few weeks before the counterattack
       if (C.ops && C.ops[f] && C.ops[f].tgt === id) continue; // the offensive will take it
-      const enemy = IN.knownStrAt(f, id, fleetStr) + defStr(w);
+      const enemy = (IN.knownStrAt(f, id, fleetStr) + defStr(w)) * misread(f, id);
       const t = travel(fl.at, id), val = targetVal(f, fl, id, D, agg);
       if (aiStalled(f, id) && !enoughTroops(f, w, troopsOf(fl))) continue; // three battles there and the world still holds: not without the troops to take it
       if (aiLostAt(f, id) && str * agg < enemy * D.sup * 1.5) continue; // beaten there lately: no feeding fleets in one by one
