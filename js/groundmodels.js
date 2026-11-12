@@ -532,34 +532,138 @@ function standard() {
 }
 
 // the city: a kit of building types placed per block and merged into one static mesh. Each block is {i, j, h} on the
-// CH grid; the caller gives heightAt and the world's stone colour (a THREE.Color). Vertex colours carry the paint; the
-// windows carry an emissive mask, so staticMaterial() lights them.
-const BK = { stone: 1.0, dark: .72, light: 1.18, roof: .6, win: '#ffd9a0' };
-export function cityGeo(blocks, CH, heightAt, stone) {
-  const F = new Fig(), w = CH * .86, base = new THREE.Color();
-  const paint = (k, v) => base.copy(stone).multiplyScalar(k * v).getStyle();
-  for (const b of blocks) {
-    const x = (b.i + .5) * CH, z = (b.j + .5) * CH, y0 = heightAt(x, z) - 2, h = b.h + 2, hsh = ((b.i * 31 + b.j * 17) % 10) / 10, v = .78 + hsh * .3, h2 = ((b.i * 7 + b.j * 13) % 10) / 10;
-    const P = paint(BK.stone, v), D = paint(BK.dark, v), L = paint(BK.light, v), R = paint(BK.roof, v);
-    const win = (cx, cy, cz, sx, sz, rows) => { for (let r = 0; r < rows; r++) { const yy = cy + (r + .5) * 4.2; if (yy > y0 + h - 2) break; F.box(sx + .3, 1.4, sz + .3, cx, yy, cz, BK.win, 0, 0, 0, 0, .45); } };
-    if (h > 34 && h2 < .5) {                                                                      // tower: stepped shaft with a spire
-      const w1 = w * .7, w2 = w * .5, w3 = w * .34, hA = h * .55, hB = h * .3, hC = h * .15;
-      F.rbox(w, 4, w, .6, 2, x, y0 + 2, z, D); F.rbox(w1, hA, w1, 1.0, 2, x, y0 + hA / 2, z, P); win(x, y0, z, w1 * .92, w1 * .92, Math.floor(hA / 4.2));
-      F.rbox(w2, hB, w2, .8, 2, x, y0 + hA + hB / 2, z, L); win(x, y0 + hA, z, w2 * .92, w2 * .92, Math.floor(hB / 4.2));
-      F.rbox(w3, hC, w3, .6, 2, x, y0 + hA + hB + hC / 2, z, P); F.cyl(.3, 1.2, 14, 8, x, y0 + h + 7, z, D); F.sph(.8, 8, 6, x, y0 + h + 14, z, '#ff4040', 0, 1, 1, 1.0);
-    } else if (h > 22 && h2 < .3) {                                                                // dome: drum and half-dome, a lantern on top
-      const r = w * .42, hd = h * .55;
-      F.rbox(w, hd, w, 1.0, 2, x, y0 + hd / 2, z, P); win(x, y0, z, w * .92, w * .92, Math.floor(hd / 4.2));
-      F.cyl(r, r * 1.05, 3, 20, x, y0 + hd + 1.5, z, D); F.sph(r, 20, 10, x, y0 + hd + 3, z, L, 0, (h - hd - 3) / r, 1);
-      F.cyl(1.5, 2, 4, 8, x, y0 + h + 1, z, D);
-    } else if (h > 14 && h2 >= .3 && h2 < .55) {                                                  // hab stack: offset slabs with ledges
-      const n = 2 + Math.floor(h2 * 4), hs = h / n;
-      for (let k = 0; k < n; k++) { const ox = (k % 2 ? .08 : -.08) * w, oz = (k % 3 ? .06 : -.1) * w, wk = w * (.92 - k * .06); F.rbox(wk, hs, wk, .8, 2, x + ox, y0 + hs * (k + .5), z + oz, k % 2 ? L : P); F.box(wk + 1.4, .8, wk + 1.4, x + ox, y0 + hs * (k + 1) - .4, z + oz, D); win(x + ox, y0 + hs * k, z + oz, wk * .92, wk * .92, Math.floor(hs / 4.2)); }
-    } else {                                                                                       // block: a plain building with a parapet and roof clutter
-      F.rbox(w, h, w, .8, 2, x, y0 + h / 2, z, P); win(x, y0, z, w * .92, w * .92, Math.floor(h / 4.2));
-      F.box(w + 1, 1.4, w + 1, x, y0 + h, z, D); F.box(w * .9, .4, w * .9, x, y0 + h + .1, z, R);   // parapet; the roof recessed inside it
-      if (h2 > .5) F.box(w * .3, 3, w * .25, x + w * .2, y0 + h + 1.5, z - w * .15, D); if (h2 > .75) F.cyl(1.2, 1.2, 2.5, 8, x - w * .2, y0 + h + 1.2, z + w * .2, L);
+// CH grid; the caller gives heightAt, the world's stone colour (a THREE.Color, used only where a style has no palette
+// of its own) and the world id, which picks the style. Vertex colours carry the paint; windows carry an emissive mask,
+// so staticMaterial() lights them.
+//
+// Each world builds differently, from the books:
+//   luna     Hyperion: an ecumenopolis "built and layered on top of itself", a Promenade as its uppermost pedestrian
+//            layer, spires like the Zenith Spire — stacked promenade tiers with railings and skybridges, slender spires
+//            with lit crowns, white metal and gilt, dense warm windows (a rain-drenched city)
+//   mars     Agea: "a network of white and red spires", neoclassical Gold ideals — banded white-and-red spires with
+//            pointed caps, colonnaded blocks, domes, stepped terraces in red stone
+//   mercury  Heliopolis: "Corinthian-inspired office spires ... parks, viaducts, amphitheaters" — fluted sandstone
+//            towers with capitals and entablatures, amphitheatre rings, viaduct arcades, low domes
+//   venus    the Isles: the Carthii "built the Columns of Venus" — monumental colonnade pavilions with roof gardens,
+//            terraces in coral stone, slender lantern spires, sea-glass
+//   earth    the old lands: a backwater built over for centuries — masonry blocks with cornices, industrial stacks
+//            and chimneys, the odd old tower
+//   phobos   the Hive: "a jigsaw city formed according to raw economics uninhibited by gravity", "dark metal with white
+//            glyphs and blinking red lights", "spiked towers" — cantilevered jigsaw stacks, spikes, scaffolds, red lights
+//   deimos   the Battle Moon, a fleet base — bunkers with glacis plates, gun batteries, blast walls, radar masts
+//   _ice     a Rim colony: "very minimalistic and serene" — low pavilions with wide eaves, glass domes, thin white spires
+const CITY = {
+  luna:    { base: '#d4d6dc', dark: '#9a9ea8', light: '#eceef2', trim: '#c9a24c', roof: '#6c7078', win: '#ffd9a0' },
+  mars:    { base: '#8e3f2a', dark: '#5a2618', light: '#e8e2d8', trim: '#e8e2d8', roof: '#4a2016', win: '#ffd9a0' },
+  mercury: { base: '#c9a76a', dark: '#8c7044', light: '#e6d2a4', trim: '#f0e0b8', roof: '#7a6038', win: '#ffe4b0' },
+  venus:   { base: '#d9c3b0', dark: '#9c8370', light: '#f0e4d8', trim: '#8fd0c0', roof: '#4b7a4a', win: '#fff0c8' },
+  earth:   { base: '#7a6e64', dark: '#4a403a', light: '#a09488', trim: '#7a4a3a', roof: '#3a322e', win: '#ffd09a' },
+  phobos:  { base: '#2e3036', dark: '#1a1b1f', light: '#4a4d55', trim: '#d8dce4', roof: '#202226', win: '#ffb070', red: '#ff3a24' },
+  deimos:  { base: '#4a4c52', dark: '#2c2e33', light: '#656870', trim: '#7a7e88', roof: '#33353a', win: '#ffc890' },
+  _ice:    { base: '#d0d8e0', dark: '#8a96a4', light: '#eef2f6', trim: '#b8c6d4', roof: '#9aa6b2', win: '#ffe8c0' },
+};
+export function cityGeo(blocks, CH, heightAt, stone, world) {
+  const F = new Fig(), PI2 = PI * 2;
+  const S = CITY[world] || CITY._ice; if (!CITY[world]) world = '_ice';
+  // how each world builds: hx scales every height, core lifts the heart further, grand is the chance a whole 3x3 block between streets
+  // becomes one great structure, split the chance an outer block is broken into several small buildings, open the chance it is left as a
+  // plaza or garden instead, rot the twist of organic cities off the street grid
+  const LAY = { luna:    { hx: 1.9, core: 1.5, grand: .7, split: .15, open: .05, rot: 0, min: 24, jit: 40 },
+                mars:    { hx: 1.2, core: 1.3, grand: .5, split: .25, open: .15, rot: .08, min: 12, jit: 24 },
+                mercury: { hx: .95, core: 1.2, grand: .4, split: .35, open: .12, rot: .15, min: 8, jit: 16 },
+                venus:   { hx: 1.0, core: 1.1, grand: .3, split: .3, open: .3, rot: .3, min: 8, jit: 20 },
+                phobos:  { hx: 1.5, core: 1.4, grand: .5, split: .5, open: 0, rot: 0, min: 16, jit: 36 },
+                deimos:  { hx: .6, core: 1.0, grand: .2, split: .2, open: .35, rot: 0, min: 4, jit: 6 },
+                earth:   { hx: .9, core: 1.2, grand: .3, split: .6, open: .1, rot: .1, min: 8, jit: 14 },
+                _ice:    { hx: .7, core: 1.0, grand: .2, split: .2, open: .4, rot: .05, min: 6, jit: 10 } }[world];
+  const V = (c, v) => { const k = new THREE.Color(c); k.multiplyScalar(v); return k.getStyle(); };
+  const hashf = (a, b, m) => (((a * 73856093) ^ (b * 19349663) ^ m) >>> 0) % 1000 / 1000;
+  // the plots: the blocks regrouped by position in the city
+  let cx0 = 0, cz0 = 0; for (const b of blocks) { cx0 += b.i + .5; cz0 += b.j + .5; } cx0 /= blocks.length || 1; cz0 /= blocks.length || 1;
+  let R = 1; for (const b of blocks) R = Math.max(R, Math.hypot(b.i + .5 - cx0, b.j + .5 - cz0));
+  const cell = new Map(); for (const b of blocks) cell.set(b.i + ',' + b.j, b);
+  const used = new Set(), plots = [];
+  // whole blocks between the streets (3x3 cells) in the heart become one grand structure
+  for (const b of blocks) { if (b.i % 4 !== 1 || b.j % 4 !== 1) continue; const d = Math.hypot(b.i + 1.5 - cx0, b.j + 1.5 - cz0) / R; if (d > .45 || hashf(b.i, b.j, 11) > LAY.grand) continue;
+    let ok = true, hm = 0; for (let a = 0; a < 3 && ok; a++) for (let c = 0; c < 3; c++) { const q = cell.get((b.i + a) + ',' + (b.j + c)); if (!q) { ok = false; break; } hm = Math.max(hm, q.h); }
+    if (!ok) continue; for (let a = 0; a < 3; a++) for (let c = 0; c < 3; c++) used.add((b.i + a) + ',' + (b.j + c));
+    plots.push({ i: b.i, j: b.j, x: (b.i + 1.5) * CH, z: (b.j + 1.5) * CH, w: CH * 2.6, h: hm * 1.5, d, grand: true }); }
+  for (const b of blocks) { if (used.has(b.i + ',' + b.j)) continue; const d = Math.hypot(b.i + .5 - cx0, b.j + .5 - cz0) / R, x = (b.i + .5) * CH, z = (b.j + .5) * CH, u = hashf(b.i, b.j, 23);
+    if (d > .55 && u < LAY.open) { plots.push({ i: b.i, j: b.j, x, z, w: CH * .86, h: b.h, d, open: true }); continue; } // a plaza, garden or yard
+    if (d > .4 && u < LAY.open + LAY.split) { const n = 2 + (hashf(b.i, b.j, 37) < .4 ? 1 : 0); // small buildings, two or three a side
+      for (let a = 0; a < n; a++) for (let c = 0; c < n; c++) { if (hashf(b.i * n + a, b.j * n + c, 41) < .18) continue; const sw = CH / n; plots.push({ i: b.i * 4 + a, j: b.j * 4 + c, x: x - CH / 2 + (a + .5) * sw, z: z - CH / 2 + (c + .5) * sw, w: sw * .78, h: b.h * (.45 + hashf(a, c + b.i, 43) * .5), d, small: true }); } continue; }
+    plots.push({ i: b.i, j: b.j, x, z, w: CH * .86, h: b.h, d }); }
+  for (const b of plots) {
+    const x = b.x, z = b.z, w = b.w, y0 = heightAt(x, z) - 2, h = (Math.max(b.h * LAY.hx, LAY.min * (b.small ? .5 : 1)) + hashf(b.i, b.j, 61) * LAY.jit * (b.small ? .4 : 1) * (1.2 - b.d * .6)) * (1 + (LAY.core - 1) * Math.max(0, 1 - b.d / .4)) + 2, hsh = ((b.i * 31 + b.j * 17) % 10) / 10, v = .84 + hsh * .22, h2 = b.grand ? 0 : ((b.i * 7 + b.j * 13) % 10) / 10, h3 = ((b.i * 11 + b.j * 5) % 10) / 10;
+    const n0 = F.parts.length, rot = LAY.rot ? (hashf(b.i, b.j, 53) - .5) * 2 * LAY.rot : 0;
+    const P = V(S.base, v), D = V(S.dark, v), L = V(S.light, v), R = V(S.roof, v), T = S.trim, W = S.win;
+    const win = (cx, cy, cz, sx, sz, rows, step = 4.2, em = .45) => { for (let r = 0; r < rows; r++) { const yy = cy + (r + .5) * step; if (yy > y0 + h - 2) break; F.box(sx + .3, 1.4, sz + .3, cx, yy, cz, W, 0, 0, 0, 0, em); } };
+    const winR = (cx, cy, cz, r, rows, step = 4.2, em = .45) => { for (let k = 0; k < rows; k++) { const yy = cy + (k + .5) * step; if (yy > y0 + h - 2) break; F.cyl(r + .15, r + .15, 1.4, 16, cx, yy, cz, W, 0, 0, 0, 0, true, em); } }; // a lit band round a tower
+    const parapet = (cx, cy, cz, sx, sz) => { F.box(sx + 1, 1.4, sz + 1, cx, cy, cz, D); F.box(sx * .9, .4, sz * .9, cx, cy + .1, cz, R); };
+    const columns = (cx, cy, cz, sx, sz, n, ch, r, paint) => { for (let i = 0; i < n; i++) { const t = (i + .5) / n; F.cyl(r, r * 1.08, ch, 8, cx - sx / 2 + t * sx, cy + ch / 2, cz + sz / 2, paint); F.cyl(r, r * 1.08, ch, 8, cx - sx / 2 + t * sx, cy + ch / 2, cz - sz / 2, paint); if (i > 0 && i < n - 1) { F.cyl(r, r * 1.08, ch, 8, cx - sx / 2, cy + ch / 2, cz - sz / 2 + t * sz, paint); F.cyl(r, r * 1.08, ch, 8, cx + sx / 2, cy + ch / 2, cz - sz / 2 + t * sz, paint); } } };
+    // the everyday buildings: never a plain cube. slab, L-plan, round tower, setback tiers or twin towers with a bridge, by hash
+    const tower = (kind, cap = 'parapet', ww = w, hh = h, paintA = P, paintB = L) => {
+      const wr = Math.floor(h3 * 5 + hsh * 2) % 5 || kind, yt = y0 + hh, swap = hsh > .5;
+      if (wr === 0) { const a = ww, c = ww * .55; F.rbox(swap ? c : a, hh, swap ? a : c, .8, 2, x, y0 + hh / 2, z, paintA); win(x, y0, z, (swap ? c : a) * .92, (swap ? a : c) * .92, Math.floor(hh / 4.2)); if (cap === 'parapet') parapet(x, yt, z, swap ? c : a, swap ? a : c); } // a slab
+      else if (wr === 1) { const a = ww * .55; F.rbox(ww, hh, a, .7, 2, x, y0 + hh / 2, z - ww / 2 + a / 2, paintA); F.rbox(a, hh * (.6 + h3 * .4), ww, .7, 2, x - ww / 2 + a / 2, y0 + hh * (.3 + h3 * .2), z, paintB); win(x, y0, z - ww / 2 + a / 2, ww * .92, a * .92, Math.floor(hh / 4.2)); win(x - ww / 2 + a / 2, y0, z, a * .92, ww * .92, Math.floor(hh * (.6 + h3 * .4) / 4.2)); if (cap === 'parapet') parapet(x, yt, z - ww / 2 + a / 2, ww, a); } // an L-plan
+      else if (wr === 2) { const r = ww * .42; F.cyl(r * .92, r, hh, 16, x, y0 + hh / 2, z, paintA); winR(x, y0, z, r, Math.floor(hh / 4.2)); F.cyl(r * 1.06, r * 1.06, 1.4, 16, x, yt + .7, z, D); F.cyl(r * .5, r * .55, 3, 12, x, yt + 2.5, z, paintB); } // a round tower
+      else if (wr === 3) { const n = 3, f = [1, .78, .55]; let yy = y0; for (let k = 0; k < n; k++) { const th = hh * (k === 0 ? .5 : k === 1 ? .3 : .2), wk = ww * f[k]; F.rbox(wk, th, wk * (k === 1 ? .8 : 1), .7, 2, x + (k ? ww * .08 * (k % 2 ? 1 : -1) : 0), yy + th / 2, z, k % 2 ? paintB : paintA); win(x + (k ? ww * .08 * (k % 2 ? 1 : -1) : 0), yy, z, wk * .92, wk * .92, Math.floor(th / 4.2)); yy += th; } if (cap === 'parapet') parapet(x + ww * .08, yy, z, ww * .55, ww * .55); } // setback tiers
+      else { const a = ww * .4; for (const sgn of [-1, 1]) { const th = hh * (sgn < 0 ? 1 : .7 + h3 * .3); F.rbox(a, th, a, .6, 2, x + sgn * ww * .28, y0 + th / 2, z, sgn < 0 ? paintA : paintB); win(x + sgn * ww * .28, y0, z, a * .92, a * .92, Math.floor(th / 4.2)); if (cap === 'parapet') parapet(x + sgn * ww * .28, y0 + th, z, a, a); } F.box(ww * .56, 2.4, 3.5, x, y0 + hh * .5, z, D); F.box(ww * .56, .5, 3.5, x, y0 + hh * .5 + 1.4, z, T); } // twin towers and a bridge
+    };
+    const spire = (cx, cz, tiers, caps) => { let yy = y0, ww = w * .72; for (let k = 0; k < tiers.length; k++) { const th = h * tiers[k]; F.rbox(ww, th, ww, Math.min(1, ww * .08), 2, cx, yy + th / 2, cz, k % 2 ? L : P); win(cx, yy, cz, ww * .92, ww * .92, Math.floor(th / 4.2)); yy += th; ww *= .68; } return yy; };
+
+    if (b.open) { // open ground: a plaza, garden, yard or pad, in the city's own manner
+      if (world === 'venus' || world === 'earth') { F.cyl(w * .4, w * .44, 1.2, 16, x, y0 + .6, z, R); for (let k = 0; k < 6; k++) F.sph(2 + hashf(k, b.i, 7) * 2, 6, 5, x + Math.cos(k * 1.05 + b.j) * w * .28, y0 + 3, z + Math.sin(k * 1.05 + b.j) * w * .28, V(S.roof, 1.2)); F.cyl(1.5, 1.5, 4, 8, x, y0 + 2, z, L); } // a garden with a fountain
+      else if (world === 'deimos') { F.rbox(w, 1.6, w, .4, 2, x, y0 + .8, z, D); for (const s of [-1, 1]) F.box(w * .9, 4, 1.2, x, y0 + 2, z + s * w * .42, P); F.box(3, 2, 3, x, y0 + 2.6, z, D); } // a hardstand
+      else if (world === 'mercury') { F.cyl(w * .42, w * .46, 2, 16, x, y0 + 1, z, L); for (let k = 0; k < 8; k++) F.cyl(.6, .7, 8, 6, x + Math.cos(k * PI / 4) * w * .36, y0 + 5, z + Math.sin(k * PI / 4) * w * .36, P); F.cyl(w * .4, w * .4, .6, 16, x, y0 + 9.3, z, T); } // a shaded court
+      else { F.rbox(w, 1.2, w, .3, 2, x, y0 + .6, z, L); F.box(w * .2, .8, w * .2, x, y0 + 1.6, z, T); F.cyl(.5, .6, 7, 6, x, y0 + 4.6, z, D); F.sph(.6, 6, 5, x, y0 + 8.2, z, W, 0, 1, 1, .8); } // a plaza with a lamp
+      continue; }
+    if (world === 'luna') { // Hyperion: tiers and promenades, spires, skybridges
+      if (h > 34 && h2 < .5) { const top = spire(x, z, [.45, .3, .25]); F.cyl(w * .12, w * .12, 1.2, 12, x, top + .6, z, T, 0, 0, 0, 0, true); F.cyl(.4, 1.2, 10, 8, x, top + 5, z, D); F.sph(.9, 8, 6, x, top + 10, z, W, 0, 1, 1, 1.0); F.cyl(w * .13, w * .13, .6, 12, x, top + .3, z, W, 0, 0, 0, 0, false, .8);
+        if (b.grand) for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) { const tw = w * .22, th = h * (.45 + hashf(sx + 2, sz + 2 + b.i, 71) * .25); F.rbox(tw, th, tw, .8, 2, x + sx * w * .42, y0 + th / 2, z + sz * w * .42, L); win(x + sx * w * .42, y0, z + sz * w * .42, tw * .92, tw * .92, Math.floor(th / 4.2), 3.6, .55); parapet(x + sx * w * .42, y0 + th, z + sz * w * .42, tw, tw); F.box(w * .3, 2, 3, x + sx * w * .27, y0 + th * .7, z + sz * w * .42, L); } } // spire with a lit crown and beacon; a grand one has four lesser towers bridged to it
+      else if (h > 14 && h2 < .8) { const n = 2 + Math.floor(h3 * 3), hs = h / n; for (let k = 0; k < n; k++) { const wk = w * (.92 - k * .1), yk = y0 + hs * k; F.rbox(wk, hs, wk, .8, 2, x, yk + hs / 2, z, k % 2 ? L : P); win(x, yk, z, wk * .92, wk * .92, Math.floor(hs / 4.2), 3.6, .55);
+          F.box(wk + 4, .6, wk + 4, x, yk + hs, z, D); F.box(wk + 4, 1.2, .3, x, yk + hs + .9, z + wk / 2 + 1.85, T); F.box(wk + 4, 1.2, .3, x, yk + hs + .9, z - wk / 2 - 1.85, T); F.box(.3, 1.2, wk + 4, x + wk / 2 + 1.85, yk + hs + .9, z, T); F.box(.3, 1.2, wk + 4, x - wk / 2 - 1.85, yk + hs + .9, z, T); } // promenade decks with gilt railings
+        if (h3 > .5) F.box(CH * .5, 1.2, 3, x + CH * .45, y0 + hs * 1.0 + .6, z, L); parapet(x, y0 + h, z, w * (.92 - (n - 1) * .1), w * (.92 - (n - 1) * .1)); } // a skybridge east
+      else { tower(3); F.box(w * .5, .5, w * .5, x, y0 + h * .5, z, T); }
+    } else if (world === 'mars') { // Agea: white and red spires, colonnades, domes, terraces
+      if (h > 34 && h2 < .45) { let yy = y0, r = w * .34; for (let k = 0; k < 6; k++) { const th = h / 7; F.cyl(r * (1 - k * .06), r * (1 - (k - 1) * .06), th, 12, x, yy + th / 2, z, k % 2 ? L : P); winR(x, yy, z, r * (1 - k * .06), Math.floor(th / 4.2)); yy += th; } F.cyl(0, r * .68, h / 7 + 6, 12, x, yy + (h / 7 + 6) / 2, z, L); F.sph(.8, 8, 6, x, yy + h / 7 + 6.6, z, T, 0, 1, 1, .8); } // banded spire, pointed cap
+      else if (h > 18 && h2 < .7) { const ph = Math.min(6, h * .25), ch = h - ph - 4; F.rbox(w, ph, w, .6, 2, x, y0 + ph / 2, z, P); columns(x, y0 + ph, z, w * .82, w * .82, 5, ch, 1.1, L); F.rbox(w, 4, w, .4, 2, x, y0 + ph + ch + 2, z, L); F.rbox(w * .6, 3, w * .6, .4, 2, x, y0 + h + 1.5, z, P); F.rbox(w * .7, ch * .9, w * .7, .6, 2, x, y0 + ph + ch * .45, z, D); win(x, y0 + ph, z, w * .64, w * .64, Math.floor(ch / 4.2)); } // colonnaded block, cella inside
+      else if (h > 22 && h2 >= .7) { const r = w * .42, hd = h * .55; F.rbox(w, hd, w, 1.0, 2, x, y0 + hd / 2, z, P); win(x, y0, z, w * .92, w * .92, Math.floor(hd / 4.2)); F.cyl(r, r * 1.05, 3, 20, x, y0 + hd + 1.5, z, D); F.sph(r, 20, 10, x, y0 + hd + 3, z, L, 0, (h - hd - 3) / r, 1); F.cyl(1.5, 2, 4, 8, x, y0 + h + 1, z, T); }
+      else if (h3 > .5) tower(2, 'none', w, h, P, L);
+      else { const n = 3, hs = h / n; for (let k = 0; k < n; k++) { const wk = w * (1 - k * .22); F.rbox(wk, hs, wk, .6, 2, x, y0 + hs * (k + .5), z, k % 2 ? D : P); win(x, y0 + hs * k, z, wk * .92, wk * .92, Math.floor(hs / 4.2)); } parapet(x, y0 + h, z, w * .56, w * .56); } // stepped terrace
+    } else if (world === 'mercury') { // Heliopolis: Corinthian towers, amphitheatres, viaducts, low domes
+      if (h > 30 && h2 < .55) { const r = w * .3, sh = h * .78; F.rbox(w, 3, w, .4, 2, x, y0 + 1.5, z, D); F.cyl(r, r * 1.06, sh, 14, x, y0 + 3 + sh / 2, z, P); for (let k = 0; k < 8; k++) F.box(1.2, sh * .96, .6, x + Math.cos(k * PI2 / 8) * r * 1.0, y0 + 3 + sh / 2, z + Math.sin(k * PI2 / 8) * r * 1.0, L, 0, -k * PI2 / 8); // flutes
+        F.cyl(r * 1.35, r * 1.05, h * .08, 14, x, y0 + 3 + sh + h * .04, z, L); F.rbox(r * 2.9, h * .1, r * 2.9, .5, 2, x, y0 + 3 + sh + h * .13, z, P); win(x, y0 + 3 + sh + h * .08, z, r * 2.6, r * 2.6, 2, 3.5); F.rbox(r * 1.6, 3, r * 1.6, .4, 2, x, y0 + h + 1.5, z, D); } // capital and entablature on top
+      else if (h < 16 && h2 < .15 && !b.small) { const r = w * .46; for (let k = 0; k < 14; k++) { const a = k * PI2 / 14, hh = 6 + 5 * Math.sin(a) ** 2; F.box(4.2, hh, w * .2, x + Math.cos(a) * r * .9, y0 + hh / 2, z + Math.sin(a) * r * .9, P, 0, -a + PI / 2); } F.cyl(r * .55, r * .6, 1.2, 14, x, y0 + .6, z, L); } // amphitheatre
+      else if (h < 20 && h2 < .7) { for (let k = 0; k < 5; k++) F.box(2.4, 10, 2.4, x - w / 2 + (k + .5) * w / 5, y0 + 5, z, P); F.rbox(w, 2.4, 5, .4, 2, x, y0 + 11.2, z, L); for (let k = 0; k < 4; k++) F.box(.8, 4, 4.6, x - w / 2 + (k + 1) * w / 5, y0 + 8, z, D); } // viaduct arcade
+      else if (h3 > .55) tower(0, 'parapet', w, h, P, L);
+      else { const r = w * .44, hd = h * .5; F.rbox(w, hd, w, .8, 2, x, y0 + hd / 2, z, P); win(x, y0, z, w * .92, w * .92, Math.floor(hd / 4.2)); F.sph(r, 18, 9, x, y0 + hd, z, L, 0, Math.max(.3, (h - hd) / r), 1); F.cyl(1.2, 1.8, 3, 8, x, y0 + h + .8, z, D); } // low dome
+    } else if (world === 'venus') { // the Isles: the Columns of Venus, roof gardens, lantern spires
+      if (h > 16 && h2 < .5) { const ph = 3, ch = Math.min(h - 8, 26); F.rbox(w, ph, w, .5, 2, x, y0 + ph / 2, z, P); columns(x, y0 + ph, z, w * .9, w * .9, 6, ch, 1.3, L); F.rbox(w, 3, w, .5, 2, x, y0 + ph + ch + 1.5, z, L); F.rbox(w * .85, 1.6, w * .85, .4, 2, x, y0 + ph + ch + 3.8, z, R); for (let k = 0; k < 5; k++) F.sph(2.2, 6, 5, x + (((b.i + k * 3) % 5) - 2) * w * .16, y0 + ph + ch + 5.5, z + (((b.j + k * 7) % 5) - 2) * w * .16, V(S.roof, 1.2)); // garden on the roof
+        F.rbox(w * .5, h - ph - ch - 4, w * .5, .5, 2, x, y0 + ph + ch + 4 + (h - ph - ch - 4) / 2, z, P); win(x, y0 + ph, z, w * .5, w * .5, Math.floor(ch / 4.2)); }
+      else if (h > 28 && h2 >= .5 && h2 < .7) { const r = w * .18; F.cyl(r, r * 1.3, h * .85, 10, x, y0 + h * .425, z, L); winR(x, y0, z, r * 1.15, Math.floor(h * .85 / 4.2)); F.cyl(r * 1.4, r * 1.1, h * .08, 10, x, y0 + h * .89, z, P); F.sph(r * 1.0, 10, 7, x, y0 + h * .97, z, W, 0, 1, 1, .9); F.cyl(0, r * 1.2, 4, 10, x, y0 + h + 3, z, L); } // lantern spire
+      else { const n = 3, hs = h / n; for (let k = 0; k < n; k++) { const wk = w * (1 - k * .2), yk = y0 + hs * k; F.rbox(wk, hs, wk, .7, 2, x - k * w * .1, yk + hs / 2, z, k % 2 ? L : P); win(x - k * w * .1, yk, z, wk * .92, wk * .92, Math.floor(hs / 4.2)); F.box(wk + 1, .8, wk + 1, x - k * w * .1, yk + hs, z, R); } F.box(w * .4, 1.2, w * .4, x - (n - 1) * w * .1, y0 + h + .6, z, R); } // garden terraces
+    } else if (world === 'phobos') { // the Hive: jigsaw stacks, spikes, scaffolds, red lights
+      if (h > 30 && h2 < .45) { const r = w * .3; F.cyl(r * .35, r, h * .7, 7, x, y0 + h * .35, z, P); F.cyl(0, r * .35, h * .3, 7, x, y0 + h * .85, z, D); winR(x, y0, z, r * .7, 3, h * .2, .35); for (let k = 0; k < 4; k++) F.box(.6, .6, .6, x + Math.cos(k * 1.7) * r * .5, y0 + h * (.3 + k * .15), z + Math.sin(k * 1.7) * r * .5, S.red, 0, 0, 0, 0, 1.0); F.box(.3, h * .5, 2.2, x + r * .9, y0 + h * .3, z, T, 0, 0, 0, 0, .3); } // spike with a white glyph strip and red lights
+      else if (h2 < .8) { const n = 3 + Math.floor(h3 * 3), hs = h / n; let cx = x, cz = z; for (let k = 0; k < n; k++) { const wx = w * (.5 + ((b.i * 3 + k * 7) % 5) / 10), wz = w * (.5 + ((b.j * 5 + k * 3) % 5) / 10); cx = x + (((b.i + k) % 3) - 1) * w * .18; cz = z + (((b.j + k * 2) % 3) - 1) * w * .18; F.rbox(wx, hs, wz, .4, 2, cx, y0 + hs * (k + .5), cz, k % 2 ? L : P); win(cx, y0 + hs * k, cz, wx * .92, wz * .92, Math.floor(hs / 4.2), 4.2, .35); if (k % 2) F.box(wx * .6, .4, .5, cx, y0 + hs * (k + .5), cz + wz / 2 + .3, T, 0, 0, 0, 0, .3); } F.box(.6, .6, .6, cx, y0 + h + .4, cz, S.red, 0, 0, 0, 0, 1.0); } // jigsaw stack
+      else if (h3 > .6) tower(4, 'none', w, h, D, P);
+      else { F.rbox(w * .7, h, w * .7, .4, 2, x, y0 + h / 2, z, D); win(x, y0, z, w * .64, w * .64, Math.floor(h / 4.2), 4.2, .35); for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) F.box(.6, h + 2, .6, x + sx * w * .45, y0 + h / 2 + 1, z + sz * w * .45, L); for (let k = 1; k < 4; k++) { F.box(w * .92, .4, .4, x, y0 + h * k / 4, z + w * .45, L); F.box(w * .92, .4, .4, x, y0 + h * k / 4, z - w * .45, L); F.box(.4, .4, w * .92, x + w * .45, y0 + h * k / 4, z, L); F.box(.4, .4, w * .92, x - w * .45, y0 + h * k / 4, z, L); } } // scaffolded block
+    } else if (world === 'deimos') { // the Battle Moon: bunkers, batteries, blast walls, masts
+      if (h2 < .35) { const bh = Math.min(h, 12); F.rbox(w, bh, w, 1.2, 2, x, y0 + bh / 2, z, P); for (const s of [-1, 1]) { F.box(w, bh * .9, 3, x, y0 + bh * .45, z + s * (w / 2 + 1), D, 0, s * .45); F.box(3, bh * .9, w, x + s * (w / 2 + 1), y0 + bh * .45, z, D, 0, 0, -s * .45); } F.box(w * .5, 1.2, .3, x, y0 + bh * .75, z + w / 2 + .1, W, 0, 0, 0, 0, .5); } // bunker with glacis plates and a lit slit
+      else if (h2 < .6) { const bh = Math.min(h, 10), r = w * .3; F.rbox(w, bh, w, 1.0, 2, x, y0 + bh / 2, z, P); F.sph(r, 14, 8, x, y0 + bh, z, D, 0, .7, 1); for (const s of [-1, 1]) F.cyl(.6, .7, 16, 8, x + 8, y0 + bh + r * .4, z + s * 1.6, D, 0, 0, -PI / 2 + .25); } // a gun battery
+      else if (h2 < .8) { F.rbox(w * .8, 6, 2.4, .4, 2, x, y0 + 3, z, P); F.rbox(2.4, 6, w * .8, .4, 2, x, y0 + 3, z, P); F.cyl(.5, .8, h, 8, x + w * .25, y0 + h / 2, z + w * .25, D); F.box(6, .4, .4, x + w * .25, y0 + h, z + w * .25, L); F.sph(.6, 6, 5, x + w * .25, y0 + h + .5, z + w * .25, S.red || '#ff4040', 0, 1, 1, 1.0); } // blast walls and a radar mast
+      else { tower(h3 < .5 ? 0 : 1); F.box(w * .3, 2, w * .3, x, y0 + h + 1, z, D); } // barracks
+    } else if (world === 'earth') { // the old lands: masonry, cornices, stacks
+      if (h > 30 && h2 < .3) { F.rbox(w * .7, h * .7, w * .7, .6, 2, x, y0 + h * .35, z, P); F.rbox(w * .5, h * .3, w * .5, .5, 2, x, y0 + h * .85, z, D); win(x, y0, z, w * .64, w * .64, Math.floor(h * .7 / 4.2)); win(x, y0 + h * .7, z, w * .46, w * .46, Math.floor(h * .3 / 4.2)); F.box(w * .76, 1.2, w * .76, x, y0 + h * .7, z, L); F.cyl(.3, .5, 6, 6, x, y0 + h + 3, z, D); } // an old tower
+      else if (h2 < .55) { tower(1); F.box(w * .7, .6, w * .7, x, y0 + h * .5, z, L); } // masonry with a cornice
+      else if (h2 < .82) tower(h3 < .5 ? 0 : 3, 'parapet', w, h, D, P);
+      else { const bh = Math.min(h, 14); F.rbox(w, bh, w, .5, 2, x, y0 + bh / 2, z, D); for (let k = 0; k < 3; k++) F.cyl(1.0, 1.3, h - bh + 6, 8, x - w * .3 + k * w * .3, y0 + bh + (h - bh + 6) / 2, z + w * .2, S.trim); F.box(w * .6, 3, w * .4, x, y0 + bh + 1.5, z - w * .2, P); } // industrial stacks
+    } else { // a Rim colony: pavilions with wide eaves, glass domes, thin spires
+      if (h > 26 && h2 < .3) { const r = w * .14; F.cyl(r * .6, r, h * .9, 10, x, y0 + h * .45, z, L); F.cyl(r * 1.6, r * 1.6, .4, 10, x, y0 + h * .9, z, T, 0, 0, 0, 0, true); F.cyl(0, r * .6, h * .1 + 3, 10, x, y0 + h * .95 + 1.5, z, L); F.sph(.7, 8, 6, x, y0 + h + 3.4, z, W, 0, 1, 1, .8); } // a thin spire
+      else if (h2 > .3 && h2 < .55) { const r = w * .44, hd = Math.min(h * .4, 8); F.cyl(r, r * 1.04, hd, 20, x, y0 + hd / 2, z, P); F.sph(r, 20, 10, x, y0 + hd, z, W, 0, Math.max(.35, (h - hd) / r), 1, .25); } // a glass dome, faintly lit
+      else { const n = 1 + Math.floor(h3 * 2), hs = Math.min(h, 24) / n; for (let k = 0; k < n; k++) { const wk = w * (.9 - k * .15), yk = y0 + hs * k; F.rbox(wk, hs * .8, wk, .5, 2, x, yk + hs * .4, z, k % 2 ? L : P); win(x, yk, z, wk * .92, wk * .92, 1, 3.2, .35); F.box(wk + 6, .6, wk + 6, x, yk + hs * .85, z, D); for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) F.box(.4, hs * .85, .4, x + sx * (wk / 2 + 2.6), yk + hs * .42, z + sz * (wk / 2 + 2.6), D); } F.box(w * .3, 1, w * .3, x, y0 + Math.min(h, 24) * .9, z, T); } // pavilions with wide eaves on posts
     }
+    if (rot) for (let k = n0; k < F.parts.length; k++) { const g = F.parts[k]; g.translate(-x, 0, -z); g.rotateY(rot); g.translate(x, 0, z); }
   }
   return F.build();
 }
