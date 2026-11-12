@@ -132,12 +132,12 @@ export function waterMaterial(M, B) {
 // weather, stars where it has next to no air. Per-world looks sit on top of the biome's own sky and fog colours.
 const SKY = {
   mercury: { zen: '#5f7fb4', cover: .22, stars: 0, haze: .6 }, venus: { zen: '#8c8a78', cover: .78, stars: 0, haze: 1 }, earth: { zen: '#2f5fa8', cover: .45, stars: 0, haze: .5 },
-  mars: { zen: '#5c4a5a', cover: .14, stars: .12, haze: .8 }, luna: { zen: '#05060c', cover: 0, stars: 1, haze: .15 }, phobos: { zen: '#030308', cover: 0, stars: 1, haze: .1 },
+  mars: { zen: '#5c4a5a', cover: .14, stars: .12, haze: .8 }, luna: { zen: '#2a4e9a', cover: .3, stars: 0, haze: .35 } /* terraformed: a thin, high blue sky */, phobos: { zen: '#030308', cover: 0, stars: 1, haze: .1 },
   deimos: { zen: '#030308', cover: 0, stars: 1, haze: .1 }, _ice: { zen: '#0a1222', cover: .08, stars: .8, haze: .35 } };
 // what hangs in the sky: the Earth over Hyperion, Mars filling the sky over the Hive, Jupiter over Sungrave, Saturn over Titan
 // (dir: where it hangs; r: its angular radius in radians; band: a banded giant)
 const PARENT = {
-  luna: { dir: [.3, .22, .93], r: .034, col: '#4d7fc4', atmo: '#8fb8ff', band: 0 }, phobos: { dir: [-.2, .22, .95], r: .36, col: '#b86a3e', atmo: '#e0a070', band: 0 }, deimos: { dir: [-.2, .22, .95], r: .11, col: '#b86a3e', atmo: '#e0a070', band: 0 },
+  luna: { dir: [.3, .22, .93], r: .034, col: '#4d7fc4', atmo: '#8fb8ff', band: 0, day: 1 }, // seen through Luna's own daytime sky, as the Moon is from Earth phobos: { dir: [-.2, .22, .95], r: .36, col: '#b86a3e', atmo: '#e0a070', band: 0 }, deimos: { dir: [-.2, .22, .95], r: .11, col: '#b86a3e', atmo: '#e0a070', band: 0 },
   io: { dir: [.15, .22, .95], r: .17, col: '#c9a37e', atmo: '#e8d0b0', band: 1 }, europa: { dir: [.15, .22, .95], r: .1, col: '#c9a37e', atmo: '#e8d0b0', band: 1 }, ganymede: { dir: [.15, .22, .95], r: .065, col: '#c9a37e', atmo: '#e8d0b0', band: 1 },
   callisto: { dir: [.15, .22, .95], r: .038, col: '#c9a37e', atmo: '#e8d0b0', band: 1 }, titan: { dir: [.4, .22, .9], r: .05, col: '#d8c49a', atmo: '#f0e0b8', band: 1 }, triton: { dir: [0, .22, .97], r: .07, col: '#3a58c8', atmo: '#7090e0', band: 1 } };
 export function skyDome(sc, B, world, sunLight) {
@@ -168,8 +168,9 @@ export function skyDome(sc, B, world, sunLight) {
       else pc.assign(mix(pc, pc.mul(1.5).add(.15), smoothstep(.45, .75, mx_fractal_noise_float(vec3(px.mul(2.2), py.mul(2.2), pz.mul(2.2)).mul(1.5), 3, 2, .5, 1).mul(.5).add(.5)).mul(.6))); // cloud and land on a rocky world
       pc.assign(pc.mul(lit.mul(.95).add(.02)).mul(float(.55).add(pz.mul(.45))));
       const rim = col3(PAR.atmo).mul(pow(one.sub(pz), 5)).mul(lit.mul(.6).add(.1));
-      c.assign(mix(c, pc.add(rim), inside.mul(smoothstep(-.02, .04, y))));
-      c.addAssign(col3(PAR.atmo).mul(pow(max(ca2(d, pd), 0), 1 / (PAR.r * PAR.r * 60) + 8)).mul(.035).mul(one.sub(inside))); } // a faint halo round it
+      const pcol = PAR.day ? mix(pc.add(rim), c, .45).add(c.mul(.35)) : pc.add(rim); // by day the sky washes it out, like the Moon at noon
+      c.assign(mix(c, pcol, inside.mul(smoothstep(-.02, .04, y))));
+      if (!PAR.day) c.addAssign(col3(PAR.atmo).mul(pow(max(ca2(d, pd), 0), 1 / (PAR.r * PAR.r * 60) + 8)).mul(.035).mul(one.sub(inside))); } // a faint halo round it, on a dark sky
     // clouds: noise on the dome's ceiling, drifting; lit from the Sun's side, shadowed underneath
     if (cover > 0) { const cq = d.xz.div(max(y, .1)).mul(2600).add(T.mul(9)), n = mx_fractal_noise_float(vec3(cq.x.mul(.00075), cq.y.mul(.00075), T.mul(.006)), 4, 2.1, .5, 1).mul(.5).add(.5);
       const cv = smoothstep(1 - cover, 1 - cover + .32, n).mul(smoothstep(.04, .26, y)).toVar();
