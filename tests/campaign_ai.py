@@ -57,7 +57,7 @@ RUN_JS = """async([MODE,TURNS])=>{const K=window.__CAMP.K, C=window.__CAMP.C; do
       for (const id in C.worlds) { const w=C.worlds[id]; if (w.owner!==f||!w.lv.yard) continue; if (!room) continue; out.yardTot++; if (!w.sq.length && R.he>1500) out.yardIdle++; }
       if (nW(f)<=2 && F.some(o=>o!==f&&C.fac[o].alive&&K.relOf(f,o)==='war'&&(C.weary[o]||0)<55)) out.linger++; }
   }
-  const S=C.aiStats||{}; out.feint=S.feint||0; out.evade=S.evade||0; out.closeShare=out.battles?+(out.close/out.battles).toFixed(3):0; out.ops=S.ops||C.opsLog||0; out.multi=S.multi||C.opsMulti||0; out.opFleets=S.ops?+(S.fleets/S.ops).toFixed(2):null;
+  const S=C.aiStats||{}; out.feint=S.feint||0; out.evade=S.evade||0; out.rally=S.rally||0; out.withdraw=S.withdraw||0; out.declined=S.declined||0; out.closeShare=out.battles?+(out.close/out.battles).toFixed(3):0; out.ops=S.ops||C.opsLog||0; out.multi=S.multi||C.opsMulti||0; out.opFleets=S.ops?+(S.fleets/S.ops).toFixed(2):null;
   out.inc={}; for (const f of F) out.inc[f]=C.fac[f].alive?Math.round(K.income(f).he):null;
   out.cut=S.cut||0; out.turn=C.turn; out.over=C.over||null;
   out.own={}; for (const id in C.worlds) out.own[C.worlds[id].owner]=(out.own[C.worlds[id].owner]||0)+1;
@@ -87,7 +87,7 @@ def summarise(runs):
     S['warsAI'] = avg([sum(r['wars'].values()) for r in runs])
     S['yardIdle'] = avg([r['yardIdle'] / max(1, r['yardTot']) for r in runs])
     for k in ['ops', 'multi', 'idle', 'streak', 'ping5', 'linger', 'peaceNearDead', 'peace', 'cut']: S[k] = avg([r[k] for r in runs])
-    for k in ['battles', 'closeShare', 'feint', 'evade']: S[k] = avg([r.get(k) or 0 for r in runs])
+    for k in ['battles', 'closeShare', 'feint', 'evade', 'rally', 'withdraw', 'declined']: S[k] = avg([r.get(k) or 0 for r in runs])
     S['opFleets'] = avg([r['opFleets'] for r in runs if r['opFleets'] is not None]) if any(r['opFleets'] for r in runs) else None
     S['falls'] = avg([len(r['fell']) for r in runs])
     for f in F: S['heEnd_' + f] = avg([r['inc'][f] for r in runs if r.get('inc') and r['inc'][f] is not None]); S['worldsEnd_' + f] = avg([r['own'].get(f, 0) for r in runs])
