@@ -664,6 +664,13 @@ function combat(s, t, dt) {
     const wx = ahead > -R * .3 ? t.x + (-by * side) * wide + bx * R * .6 : px, wy = ahead > -R * .3 ? t.y + (bx * side) * wide + by * R * .6 : py;
     arrive(s, wx, wy, t.vx, t.vy); G.face = s.def.broadside ? broadsideFace(s, t) : Math.atan2(t.y - s.y, t.x - s.x); return;
   }
+  // on her weak beam: one half of her shield is down, so the ship works round to that side and keeps the wound open
+  // (side +1 starboard, -1 port, as sideOf has them), going round her bow or stern rather than through her
+  if (s.order.side && s.order.t === t && t.sub) {
+    const sd = s.order.side, ca = Math.cos(t.a), sa = Math.sin(t.a), nx = -sa * sd, ny = ca * sd, rx = s.x - t.x, ry = s.y - t.y, on = rx * nx + ry * ny, al = rx * ca + ry * sa;
+    const k = on < R * .3 ? (al >= 0 ? 1 : -1) * R * .9 : 0;
+    arrive(s, t.x + nx * R + ca * k, t.y + ny * R + sa * k, t.vx * .9, t.vy * .9); G.face = s.def.broadside ? broadsideFace(s, t) : Math.atan2(t.y - s.y, t.x - s.x); return;
+  }
   const dx = s.x - t.x, dy = s.y - t.y, d = hyp(dx, dy) || 1;
   const sw = ((s.id % 2) ? 1 : -1) * .18;
   const ux = dx / d, uy = dy / d;
