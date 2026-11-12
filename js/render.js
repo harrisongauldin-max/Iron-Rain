@@ -1102,15 +1102,25 @@ function sceneFrame() {
   for (const r of S.rings) { if (!onScr(r.x, r.y, r.r * z + 40)) continue; const k = r.life / r.maxl, d = r.r * 2; if (!r.soft && k > .55 && r.max < 300) { const gs = Math.max(r.max * .45, px * 10); B.sglow.add(r.x, r.y, 2.5, gs, gs, 0, r.col, (k - .55) / .45 * .85, 2.2); } /* the strike itself: a hot flash before the ring spreads */ B.shock.add(r.x, r.y, 2, d, d, 0, r.col, k * k * (r.soft ? .2 : .5), 1.3); }
   // shield cells lighting up where a shot landed
   if (!(S.gx && S.gx.ripples === false)) for (const q of S.ripples || []) { const s = q.s; if (s.dead || !onScr(s.x, s.y, s.r * z * 3)) continue; const k = 1 - (S.time - q.t) / .4; if (k <= 0) continue;
-    const R = Math.max(s.r * 1.25, s.def.static ? 0 : vrOf(s) * 1.5), x = s.x + Math.cos(q.a) * R, y = s.y + Math.sin(q.a) * R, sz = R * (q.big ? .36 : .22) * (1.15 - k * .15); // a patch of cells where the shot landed, not a wall of them
-    B.hex.add(x, y, 3, sz, sz, q.a, q.col || 0x9fdcff, k * k * .6, 1.4); B.glow.add(x, y, 3, sz * .35, sz * .35, 0, 0xcfefff, k * k * .35, 1.3); }
+    const g = 1 - k, R = Math.max(s.r * 1.25, s.def.static ? 0 : vrOf(s) * 1.5), x = s.x + Math.cos(q.a) * R, y = s.y + Math.sin(q.a) * R, sz = R * (q.big ? .36 : .22) * (.55 + g * 1.1); // the cells light where the shot landed, and the light spreads out across the bubble as it fades
+    B.hex.add(x, y, 3, sz, sz, q.a, q.col || 0x9fdcff, k * .55, 1.4); B.hex.add(x, y, 3.01, sz * .5, sz * .5, q.a + 1, 0xe8f8ff, k * k * .5, 1.8);
+    const rd = R * (q.big ? .6 : .36) * (.15 + g); B.shock.add(x, y, 2.9, rd, rd, 0, q.col || 0x9fdcff, k * k * .45, 1.5); // the ripple ring running out from the hit
+    B.glow.add(x, y, 3, sz * .35, sz * .35, 0, 0xcfefff, k * k * k * .7, 1.5); }
   for (const p of S.shots) {
     if (!onScr(p.x, p.y, 80)) continue; const D = p.D, ang = Math.atan2(p.vy, p.vx), sv = hyp(p.vx, p.vy);
     if (D.kind === 'slug') { // a rail slug: a hot tracer you can follow across the field, with a fading trail behind it
       const L = Math.max(sv * (D.huge ? .07 : D.big ? .05 : .03), (D.huge ? 46 : D.big ? 32 : 20) * px), th = Math.max(D.huge ? 9 : D.big ? 5 : 2.2, (D.huge ? 5 : D.big ? 3.2 : 2) * px), ca = Math.cos(ang), sa = Math.sin(ang);
-      B.streak.add(p.x - ca * L * 1.1, p.y - sa * L * 1.1, 3, L * 2.2, th * .55, ang, D.col, .22, 2.2); B.streak.add(p.x, p.y, 3, L, th, ang, D.col, 1, 2.2); B.glow.add(p.x + ca * L * .45, p.y + sa * L * .45, 3, th * 3.2, th * 3.2, 0, D.big ? 0xffb080 : 0xd8f2ff, .55, 1.6); }
+      B.streak.add(p.x - ca * L * 1.1, p.y - sa * L * 1.1, 3, L * 2.2, th * .55, ang, D.col, .22, 2.2); B.streak.add(p.x, p.y, 3, L, th, ang, D.col, 1, 2.2); B.glow.add(p.x + ca * L * .45, p.y + sa * L * .45, 3, th * 3.2, th * 3.2, 0, D.big ? 0xffb080 : 0xd8f2ff, .55, 1.6);
+      if (D.big) { // a lance round: a white-hot core inside a wide coloured sheath, a bow wave of light ahead of it, and the muzzle still shimmering with heat behind it
+        B.streak.add(p.x, p.y, 2.99, L * 1.2, th * 2.6, ang, D.col, .32, 1.5); B.streak.add(p.x + ca * L * .08, p.y + sa * L * .08, 3.01, L * .85, th * .45, ang, 0xffffff, 1, 2.8);
+        B.sglow.add(p.x + ca * L * .55, p.y + sa * L * .55, 3, th * 9, th * 9, 0, D.col, .3, 1.8);
+        const age = D.life - p.life; if (age < .2 && age >= 0) { const f = 1 - age / .2, mx = p.x - p.vx * age, my = p.y - p.vy * age, wob = .85 + .15 * Math.sin(S.time * 71 + p.x);
+          B.plume.add(mx, my, 3.1, Math.max(th * 9, 30 * px) * f * wob, th * (2.5 + 2 * f), ang + PI, D.col, f * .65, 1.8); B.sglow.add(mx, my, 3.1, th * (3 + 5 * f) * wob, th * (3 + 5 * f) * wob, 0, 0xfff0d8, f * f * .7, 2); } } }
     else if (D.kind === 'flak') { const L = Math.max(sv * .012, 8 * px); B.streak.add(p.x, p.y, 3, L, Math.max(2.2, px * 2), ang, D.col, 1, 2.6); B.glow.add(p.x, p.y, 3, Math.max(4, px * 5), Math.max(4, px * 5), 0, D.col, .5, 1.8); } // a flak round: a short bright dash with a hot head
     else { const L = Math.max(sv * .02, 12 * px), th = Math.max(2, px * 1.8); B.streak.add(p.x - Math.cos(ang) * L * .9, p.y - Math.sin(ang) * L * .9, 3, L * 1.8, th * .5, ang, D.col, .3, 2); B.streak.add(p.x, p.y, 3, L, th, ang, D.col, 1, 2.6); } // a gun round: a tracer with a fading tail, so a broadside reads as a volley
+    if ((D.kind === 'bullet' || D.kind === 'flak') && D.life) { // the muzzle flash: a short bright cone at the gun for the round's first few frames, sized to the calibre
+      const T = D.kind === 'flak' ? .05 : .09, age = D.life - p.life; if (age >= 0 && age < T) { const f = 1 - age / T, mx = p.x - p.vx * age, my = p.y - p.vy * age, Lm = Math.max(D.kind === 'flak' ? 12 : D.big ? 44 : 26, (D.kind === 'flak' ? 7 : 13) * px) * (.5 + .5 * f), Wm = Lm * .34;
+        B.plume.add(mx, my, 3.2, Lm, Wm, ang + PI, D.kind === 'flak' ? D.col : 0xffd9a0, f * .85, 2.2); B.plume.add(mx, my, 3.21, Lm * .55, Wm * .45, ang + PI, 0xffffff, f, 2.6); B.glow.add(mx, my, 3.2, Wm * 1.4, Wm * 1.4, 0, 0xfff0d0, f * f * .7, 2); } }
   }
   for (const m of S.missiles) {
     if (!onScr(m.x, m.y, 60)) continue;
@@ -1131,9 +1141,14 @@ function sceneFrame() {
   }
   for (const f of S.flashes) { const k = f.life / f.max, g = 1 - k, e = 1 - (1 - g) * (1 - g), R = Math.max(f.r * 2, (f.px || 0) * px) * (f.fire ? .6 + e * .6 : 1); if (f._rot == null) f._rot = (f.x * 5.3 + f.y * 2.9) % TAU;
     B.sglow.add(f.x, f.y, 6, R * (f.fire ? .8 : 1.2), R * (f.fire ? .8 : 1.2), 0, f.blue ? 0xb0dcff : f.col || 0xffd7a0, f.fire ? k * .9 : k * k, 2);
+    if (!f.fire && !f.blue && f.r >= 800) { // a nuclear flash: the double pulse (a first spike, a dip as the shock front hides the fireball, then the long second peak), a white core with a cross of streaks, and the condensation ring running out ahead of the fireball
+      const b = g < .1 ? 1 : g < .28 ? .3 : g < .5 ? .3 + (g - .28) / .22 * .65 : .95 * (1 - g) / .5, Rc = f.r * .35 * (1 + g * .6);
+      B.sglow.add(f.x, f.y, 6.02, Rc, Rc, 0, 0xffffff, b, 3); B.anam.add(f.x, f.y, 6.03, R * 4.5, R * .14, 0, 0xfff4e4, b * .8, 2); B.anam.add(f.x, f.y, 6.03, R * .14, R * 3, 0, 0xfff4e4, b * .6, 2);
+      const rd = f.r * (.9 + g * 3.2); B.shock.add(f.x, f.y, 5.95, rd, rd, 0, 0xfff6ea, (1 - g) * (1 - g) * .4, 1.6); }
     if (f.r >= 60 && !f.fire && k > .3) B.anam.add(f.x, f.y, 6.01, R * 3.2, R * .22, 0, f.blue ? 0xb0dcff : 0xfff0d8, (k - .3) * .6, 1.4); // the streak of a hard flash across the lens
     if (f.fire) { const d = f.r * (.5 + e * 1.3), col = k > .75 ? 0xfff2dc : k > .5 ? 0xffc860 : k > .25 ? 0xff8a3a : 0xd0481c, kk = k > .75 ? 2.4 : k > .5 ? 1.8 : 1.3; // a fireball: two turning layers, white → yellow → orange → ember
       B.fire.add(f.x, f.y, 6, d, d, f._rot + g * .7, col, Math.min(1, k * 1.5), kk); B.fire.add(f.x, f.y, 6.01, d * .8, d * .8, f._rot + 2.1 - g * .5, col, Math.min(1, k * 1.3) * .8, kk);
+      if (f.r >= 500) { B.fire.add(f.x, f.y, 6.02, d * 1.1, d * 1.1, f._rot - 1.3 + g * .4, col, Math.min(1, k * 1.2) * .6, kk * .9); B.smoke.add(f.x, f.y, 5.88, d * (1.3 + g * .9), d * (1.3 + g * .9), f._rot + g * .6, 0x1e1814, g * .55); } // a nuclear fireball: a third turning layer, and a sooty cloud swelling round it for as long as it hangs
       if (k < .5) B.smoke.add(f.x, f.y, 5.9, d * 1.25, d * 1.25, f._rot - g, 0x2a2420, (.5 - k) * .8); } } // and the soot that follows
   for (const m of Object.values(missileM)) m.end(); for (const b of Object.values(B)) b.end();
   return { z, px, icons };
