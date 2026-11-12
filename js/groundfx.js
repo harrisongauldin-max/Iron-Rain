@@ -38,7 +38,7 @@ export function terrainArrays(M, B) {
   for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) {
     const k = j * W + i, h = M.H[k];
     rampAt(h / (M.relief || 1), tmp);
-    const s = Math.abs((M.H[Math.min(N - 1, k + 1)] || h) - h) + Math.abs((M.H[Math.min(N - 1, k + W)] || h) - h); tmp.multiplyScalar(Math.min(1.1, Math.max(.6, 1.06 - s / 60)));
+    const s = Math.abs((i < W - 1 ? M.H[k + 1] : h) - h) + Math.abs((j < W - 1 ? M.H[k + W] : h) - h); // the last column read the next row's first vertex: a dark stripe down the east edge tmp.multiplyScalar(Math.min(1.1, Math.max(.6, 1.06 - s / 60)));
     const n = ((i * 73856093 ^ j * 19349663) >>> 0) % 1000 / 1000; tmp.multiplyScalar(.95 + n * .1);
     col[k * 3] = tmp.r; col[k * 3 + 1] = tmp.g; col[k * 3 + 2] = tmp.b;
     // the mask, averaged over the four cells round the vertex so a patch's edge is a slope, not a step

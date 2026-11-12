@@ -94,12 +94,24 @@ function buildMap(spec) {
     h += (y / MAP - .45) * .35;                                // the land rises toward the city
     const dc = hyp(x - city.x, y - city.y) / city.r;            // flatten the city's plateau
     if (dc < 1.6) { const k = clamp((dc - .9) / .7, 0, 1); h = lerp(.18 + (n3(u * 3, v * 3) - .5) * .02, h, k * k); }
-    const edge = Math.min(x, y, MAP - x, MAP - y) / MAP; if (edge < .05) h += (.05 - edge) * 2; // the field's edges rise
+    const edge = Math.min(x, y, MAP - x, MAP - y) / MAP; if (edge < .05) h += (.05 - edge) ** 2 * 40; // the field's edges rise, smoothly (a sudden slope showed as a crease from high up)
     H[j * (NH + 1) + i] = h * B.relief * 2.9; // a bigger field, bigger hills
   }
   let lo = Infinity, hi = -Infinity; for (const h of H) { if (h < lo) lo = h; if (h > hi) hi = h; }
   for (let k = 0; k < H.length; k++) H[k] -= lo;
   const relief = hi - lo, seaH = B.sea != null ? relief * B.sea : -1;
+  // the land beyond the field, for the view only: the same noise carried on past the edge, so the hills, the coast
+  // and the scrub run on to the horizon instead of the field ending in a cliff. The rise at the field's rim keeps
+  // climbing outside and levels off (the field sits in a shallow basin), the slope toward the city stops growing,
+  // and far off the ground climbs into a ring of ranges
+  const far = (x, y) => {
+    const u = x / (900 * SC), v = y / (900 * SC), out = Math.max(0, -x, -y, x - MAP, y - MAP);
+    let h = 0, a = 1, f = 1; for (let o = 0; o < 5; o++) { h += (n1(u * f, v * f) - .5) * a; a *= .5; f *= 2.1; }
+    const ridge = 1 - Math.abs(n2(u * .7 + 3, v * .7) * 2 - 1); h += ridge * ridge * .35 - .12;
+    h += (clamp(y / MAP, -.15, 1.15) - .45) * .35 + .1 + .15 * (1 - Math.exp(-out * 4 / MAP / .15)); // the rim's slope (4/MAP at the edge) carries on and eases off: no crest along the field's edge
+    const range = 1 - Math.abs(n3(u * .22 + 5, v * .22) * 2 - 1); h += range * range * .9 * clamp((out - 4000) / 9000, 0, 1);
+    const vn = n2(x / (260 * SC) + 9, y / (260 * SC)); return { h: h * B.relief * 2.9 - lo, veg: B.veg > 0 && vn < B.veg * .75, vegK: B.veg > 0 ? B.veg * .75 - vn : -1 }; // vegK > 0 inside a patch
+  };
   // the city: blocks of buildings on a street grid, a wall round its core if the world is fortified
   const blocks = [];
   for (let j = 0; j < NH; j++) for (let i = 0; i < NH; i++) {
@@ -128,7 +140,7 @@ function buildMap(spec) {
     }
   }
   const bld = buildingIndex(cityPlan(keep, CH, spec.world).plots, CH); // the buildings, as the view will draw them: units walk round them
-  return { B, H, cover, urban, veg, blocks: keep, sites, city, walls, wl: walls.slice(), seaH, relief, bld };
+  return { B, H, cover, urban, veg, blocks: keep, sites, city, walls, wl: walls.slice(), seaH, relief, bld, far };
 }
 export function heightAt(x, y) {
   const M = G.map; if (!M) return 0;

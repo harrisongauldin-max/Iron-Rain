@@ -104,6 +104,49 @@ function rampColor(B, f, out) { // the biome's ground colours by height
   const r = B.ground, k = clamp(f, 0, .999) * (r.length - 1), i = Math.floor(k), t = k - i;
   out.copy(hexC(r[i])).lerp(hexC(r[Math.min(r.length - 1, i + 1)]), t); return out;
 }
+// The land beyond the field (view only: nothing moves out there). One grid round the field: its lines inside are the
+// field's own 25 m lines, so the seam shares every vertex and height with the terrain; outside they open out
+// (25 m at the edge, ×1.13 a step) to 20 km. Heights and scrub come from ground.js's far(), the same noise carried on;
+// colours and masks follow groundfx's terrainArrays recipe so the shader paints it the same. Returns the lowest height.
+const FAR = 20000;
+function farLand(sc, M, B, ter) {
+  const lines = []; for (let i = 0; i <= NH; i++) lines.push(i * CH);
+  let st = CH, o = 0; const out = []; while (o < FAR) { o += st; st *= 1.13; out.push(Math.min(o, FAR)); }
+  const X = out.slice().reverse().map(v => -v).concat(lines, out.map(v => MAP + v)), n = X.length, i0 = out.length, i1 = i0 + NH; // field columns i0..i1
+  const pos = new Float32Array(n * n * 3), col = new Float32Array(n * n * 3), mask = new Float32Array(n * n * 4), H = new Float32Array(n * n);
+  const ramp = B.ground.map(h => new THREE.Color(h)), c = new THREE.Color(), W = NH + 1;
+  let lo = Infinity;
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const k = j * n + i, x = X[i], z = X[j], inside = i >= i0 && i <= i1 && j >= i0 && j <= i1;
+    const f = inside ? { h: M.H[(j - i0) * W + (i - i0)], vegK: -1 } : M.far(x, z);
+    H[k] = f.h; pos[k * 3] = x; pos[k * 3 + 1] = inside && i > i0 && i < i1 && j > i0 && j < i1 ? f.h - 40 : f.h; pos[k * 3 + 2] = z; // the field's interior points sit under the terrain, unused
+    if (!inside || i === i0 || i === i1 || j === i0 || j === i1) lo = Math.min(lo, f.h);
+    // scrub and wet sand soften with the cell size, so the wide outer cells give soft patches, not stretched blocks
+    const cs = Math.max(X[Math.min(n - 1, i + 1)] - X[i], X[Math.min(n - 1, j + 1)] - X[j], CH) / CH;
+    mask[k * 4] = inside ? 0 : Math.min(1, Math.max(0, f.vegK / (.015 * cs) + .5)) * Math.min(1, 6 / cs);
+    mask[k * 4 + 2] = M.seaH >= 0 && cs < 4 ? Math.max(0, 1 - Math.abs(f.h - (M.seaH + 1)) / 7) : 0;
+  }
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { // the colour: height ramp, darker on slopes, a little grain
+    const k = j * n + i, h = H[k], q = Math.min(1, Math.max(0, h / (M.relief || 1))) * .999 * (ramp.length - 1), a = Math.floor(q);
+    c.copy(ramp[a]).lerp(ramp[Math.min(ramp.length - 1, a + 1)], q - a);
+    const dx = i < n - 1 ? Math.abs(H[k + 1] - h) / (X[i + 1] - X[i]) : 0, dz = j < n - 1 ? Math.abs(H[k + n] - h) / (X[j + 1] - X[j]) : 0;
+    c.multiplyScalar(Math.min(1.1, Math.max(.6, 1.06 - (dx + dz) * CH / 60)) * (.95 + ((i * 73856093 ^ j * 19349663) >>> 0) % 1000 / 10000));
+    col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b;
+  }
+  // the edge row of the field takes the field's own colours and masks, so the seam does not show
+  const fa = GFX.terrainArrays(M, B);
+  for (let t = 0; t <= NH; t++) for (const [fi, fj] of [[t, 0], [t, NH], [0, t], [NH, t]]) { const k = (fj + i0) * n + (fi + i0), kf = fj * W + fi; for (let e = 0; e < 3; e++) col[k * 3 + e] = fa.col[kf * 3 + e]; for (let e = 0; e < 4; e++) mask[k * 4 + e] = fa.mask[kf * 4 + e]; }
+  const idx = []; for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) { if (i >= i0 && i < i1 && j >= i0 && j < i1) continue; const a = j * n + i, b = a + 1, d = a + n, e = d + 1; idx.push(a, d, b, b, d, e); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setAttribute('mask', new THREE.BufferAttribute(mask, 4));
+  g.setIndex(new THREE.BufferAttribute(new Uint32Array(idx), 1)); g.computeVertexNormals();
+  // each mesh only sees its own side of the seam, so the edge normals are averaged across it and given to both
+  const nO = g.attributes.normal, nF = ter.geometry.attributes.normal, v = new THREE.Vector3();
+  for (let t = 0; t <= NH; t++) for (const [fi, fj] of [[t, 0], [t, NH], [0, t], [NH, t]]) { const k = (fj + i0) * n + (fi + i0), kf = fj * W + fi;
+    v.set(nO.getX(k) + nF.getX(kf), nO.getY(k) + nF.getY(kf), nO.getZ(k) + nF.getZ(kf)).normalize(); nO.setXYZ(k, v.x, v.y, v.z); nF.setXYZ(kf, v.x, v.y, v.z); }
+  nF.needsUpdate = true;
+  const m = new THREE.Mesh(g, ter.material); m.receiveShadow = true; m.frustumCulled = false; sc.add(m);
+  return lo;
+}
 function buildScene() {
   const M = G.map, B = M.B, sc = new THREE.Scene(); V.scene = sc; GFX.dispose(); PX.dispose();
   sc.background = hexC(B.sky); sc.fog = new THREE.Fog(hexC(B.fog), 5000, 19000); // replaced by the sky dome below
@@ -120,8 +163,9 @@ function buildScene() {
   for (let j = 0; j < NH; j++) for (let i = 0; i < NH; i++) { const a = j * W + i, b = a + 1, c = a + W, d = c + 1; idx[q++] = a; idx[q++] = c; idx[q++] = b; idx[q++] = b; idx[q++] = c; idx[q++] = d; }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setAttribute('mask', new THREE.BufferAttribute(mask, 4)); g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeVertexNormals();
   const ter = new THREE.Mesh(g, GFX.terrainMaterial(M, B)); ter.receiveShadow = true; sc.add(ter);
-  // a skirt so the field does not end in a knife-edge
-  const skirt = new THREE.Mesh(new THREE.PlaneGeometry(MAP * 6, MAP * 6), GFX.skirtMaterial(B)); skirt.rotation.x = -PI / 2; skirt.position.set(MAP / 2, -8, MAP / 2); sc.add(skirt);
+  // the land beyond the field, out to the horizon, in the same material; the skirt stays underneath as the floor past it
+  const farMin = farLand(sc, M, B, ter);
+  const skirt = new THREE.Mesh(new THREE.PlaneGeometry(MAP * 6, MAP * 6), GFX.skirtMaterial(B)); skirt.rotation.x = -PI / 2; skirt.position.set(MAP / 2, Math.min(-8, farMin) - 200, MAP / 2); // well below everything: 8 m under the lake beds it flickered through them at long range sc.add(skirt);
   if (M.seaH >= 0) { const wm = new THREE.Mesh(new THREE.PlaneGeometry(MAP * 6, MAP * 6, 1, 1), GFX.waterMaterial(M, B)); wm.rotation.x = -PI / 2; wm.position.set(MAP / 2, M.seaH, MAP / 2); wm.renderOrder = 2; sc.add(wm); skirt.position.y = M.seaH - 30; }
   // the city: a kit of towers, domes, hab stacks and blocks placed per block and merged into one static mesh (groundmodels.cityGeo)
   const m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), sv = new THREE.Vector3(), pv = new THREE.Vector3();
