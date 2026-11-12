@@ -210,7 +210,7 @@ function texU(init = null) {
 }
 const { Fn, float, vec2, vec3, vec4, uniform, uv, varying, attribute, positionGeometry, normalGeometry, positionWorld, cameraPosition,
   modelWorldMatrix, cameraViewMatrix, cameraProjectionMatrix, fwidth, smoothstep, mix, dot, cross, normalize, length, fract, floor,
-  max, min, clamp, pow, abs, select, sin, cos, step, exp } = TSL;
+  max, min, clamp, pow, abs, select, sin, cos, step, exp, hash } = TSL;
 const one = float(1);
 // shared per-frame uniforms: the view's size in pixels (for anything drawn a fixed number of pixels wide) and the clock
 const SH = { res: uniform(new THREE.Vector2(1, 1)), time: uniform(0) };
@@ -236,6 +236,20 @@ const mkMat = (frag, o = {}) => { const m = new THREE.NodeMaterial(); Object.ass
 // relief lit from the map itself, cloud shadows cast on the ground, a fresnel rim of atmosphere reddening at the
 // terminator, and procedural fine ground detail that fades in as the camera closes (so a close pass never goes soft).
 // Gas giants are limb-darkened with a deep, soft terminator and pale polar hoods; a ringed world wears its ring's shadow.
+// weather in the lookup: zonal jets slide the bands past each other, and each named storm turns on its own centre.
+// Storms are [u, v, ru, rv, spin] in texture space (u from lon, v from lat), spin in rad/s of the render clock.
+const storms = (uvw, list, jets) => {
+  if (jets) uvw.x.addAssign(sin(uvw.y.mul(PI * 9).add(1.3)).mul(.0022).add(sin(uvw.y.mul(PI * 23).add(.4)).mul(.0009)).mul(SH.time).mul(jets)); // differential rotation: each latitude its own speed
+  for (const [cu, cv, ru, rv, sp] of list || []) {
+    const d = vec2(uvw.x.sub(cu).div(ru), uvw.y.sub(cv).div(rv)).toVar(), rr = length(d), f = smoothstep(1.35, .75, rr).toVar();
+    const a = SH.time.mul(sp).add(sin(SH.time.mul(.31).add(rr.mul(3))).mul(.25)), ca = cos(a), sa = sin(a);
+    const rd = vec2(d.x.mul(ca).sub(d.y.mul(sa)), d.x.mul(sa).add(d.y.mul(ca))); // the storm turns as a whole; its collar is dragged part of the way
+    uvw.addAssign(vec2(rd.x.sub(d.x).mul(ru), rd.y.sub(d.y).mul(rv)).mul(f)); }
+  return uvw;
+};
+// night-side lightning in a cloud deck: a cell flashes for one frame in sixty or so, brighter at its centre
+const lightning = (uvw, cells, rate) => { const c = floor(uvw.mul(cells)), hv = hash(c.x.mul(7.13).add(c.y.mul(113.7)).add(floor(SH.time.mul(9)).mul(.731)));
+  const on = step(one.sub(rate), hv), f = fract(uvw.mul(cells)).sub(.5), cen = smoothstep(.5, .05, length(f)); return on.mul(cen); };
 const planetMat = (atmo, o = {}) => {
   const GAS = !!o.gas, AIR = o.air ? 1 : 0, BUMP = o.bump ?? 1, RING = !!o.ring, AUR = o.aurora, MOONS = !!o.moons;
   const U = { map: texU(), night: texU(), m0: uniform(new THREE.Vector4(0, 0, 0, 1e-6)), m1: uniform(new THREE.Vector4(0, 0, 0, 1e-6)), m2: uniform(new THREE.Vector4(0, 0, 0, 1e-6)), m3: uniform(new THREE.Vector4(0, 0, 0, 1e-6)),
@@ -252,6 +266,7 @@ const planetMat = (atmo, o = {}) => {
     // below a texel, warp the lookup with fine noise: coasts and band edges go ragged instead of stair-stepping
     const fw = length(fwidth(vP)).toVar(), wz = one.sub(smoothstep(.3, 1, fw.mul(1400))), w2 = float(.5).mul(one.sub(smoothstep(.25, .5, fw.mul(2800))));
     const uvw = uv().add(tx.mul(1.6).mul(wz).mul(vec2(n3(vP.mul(1400)).add(w2.mul(n3(vP.mul(2800).add(2)))), n3(vP.mul(1400).add(5)).add(w2.mul(n3(vP.mul(2800).add(7))))))).toVar();
+    if (GAS) storms(uvw, o.storms, 1); // the giants' weather: bands sliding, storms turning
     const t = U.map.at(uvw).toVar(), base = t.rgb.toVar(), land = one.sub(t.a).toVar();
     // relief: from the painted elevation map when there is one, else from the colour map's own brightness
     const useH = U.hasH.greaterThan(.5);
@@ -308,8 +323,12 @@ const planetMat = (atmo, o = {}) => {
     col.addAssign(vec3(1, .9, .75).mul(pow(max(dot(N0, H), 0), 60)).mul(t.a).mul(smoothstep(0, .15, nl0)).mul(.035).mul(sh));
     col.addAssign(vec3(1, .95, .85).mul(pow(max(dot(N0, H), 0), 14)).mul(t.a).mul(fr).mul(smoothstep(0, .2, nl0)).mul(.25).mul(sh)); // the sea's broad fresnel sheen toward the limb
     const nt = U.night.at(uvw).rgb.toVar();
-    col.addAssign(nt.mul(one.sub(day)).mul(1.9).mul(one.sub(one.sub(sh).mul(.6))).mul(U.hasNight));
-    col.addAssign(nt.mul(.5).mul(one.sub(day)).mul(pow(one.sub(mu), 1.5)).mul(U.hasNight)); // a little of the city light scatters in the air at the limb
+    // the lights come on as the terminator sweeps over them, each district at its own moment, sodium-orange at dusk and whiter in deep night
+    const dh = hash(floor(uvw.mul(260)).x.mul(3.1).add(floor(uvw.mul(260)).y.mul(91.7))).mul(.12), lit = smoothstep(float(.1).add(dh), float(-.06).add(dh), nl0).toVar();
+    const dusk = smoothstep(-.12, .08, nl0); nt.assign(mix(nt, nt.mul(vec3(1.15, .78, .5)), dusk.mul(.8)));
+    col.addAssign(nt.mul(lit).mul(1.9).mul(one.sub(one.sub(sh).mul(.6))).mul(U.hasNight));
+    col.addAssign(nt.mul(.5).mul(lit).mul(pow(one.sub(mu), 1.5)).mul(U.hasNight)); // a little of the city light scatters in the air at the limb
+    if (o.lightning) col.addAssign(vec3(.8, .85, 1).mul(lightning(uvw, 90, .0012)).mul(one.sub(day)).mul(1.4)); // storms flashing in the dark
     if (AUR) { // the auroral oval round each pole, on the night side: curtains that drift and ripple, in the world's own colour
       const q = positionGeometry, alat = abs(q.y).toVar(), band = (GAS ? smoothstep(.74, .83, alat).mul(one.sub(smoothstep(.87, .95, alat))) : smoothstep(.86, .905, alat).mul(one.sub(smoothstep(.925, .965, alat)))).toVar(); // Earth's oval: a thin ring at 60–75°; the giants' wider
       const cur = n3(vec3(q.x.mul(9), SH.time.mul(.11), q.z.mul(9))).mul(.6).add(n3(vec3(q.x.mul(27).add(SH.time.mul(.17)), q.y.mul(6), q.z.mul(27))).mul(.4)).toVar();
@@ -320,10 +339,11 @@ const planetMat = (atmo, o = {}) => {
   })();
   const m = mkMat(frag); m.uniforms = U; return m;
 };
-const cloudMat = () => { // the cloud deck, its edges broken into wisps and billows as the camera closes; lit tops, blue-grey undersides at the terminator
+const cloudMat = (o = {}) => { // the cloud deck, its edges broken into wisps and billows as the camera closes; lit tops, blue-grey undersides at the terminator
   const U = { map: texU(), sunPos: uniform(new THREE.Vector3()) }, vN = worldN();
   const frag = Fn(() => {
-    const N = normalize(vN), L = normalize(U.sunPos.sub(positionWorld)), V = normalize(cameraPosition.sub(positionWorld)), nl = dot(N, L).toVar(), c = U.map.at(uv()).toVar();
+    const uvw = uv().toVar(); if (o.storms) storms(uvw, o.storms, .35); // fronts spiralling round their lows, a little shear between latitudes
+    const N = normalize(vN), L = normalize(U.sunPos.sub(positionWorld)), V = normalize(cameraPosition.sub(positionWorld)), nl = dot(N, L).toVar(), c = U.map.at(uvw).toVar();
     const vP = positionGeometry.toVar(), fw = length(fwidth(vP)).toVar();
     let d = float(0), s = float(0);
     for (let k = 0; k < 4; k++) { const f = 60 * Math.pow(3, k), a = one.sub(smoothstep(.06, .22, fw.mul(f))).div(1 + k).toVar();
@@ -338,6 +358,7 @@ const cloudMat = () => { // the cloud deck, its edges broken into wisps and bill
     col.assign(mix(col, vec3(.62, .68, .8).mul(lit), one.sub(al).mul(.35)));
     col.addAssign(vec3(1, .55, .3).mul(smoothstep(-.1, .02, nl)).mul(one.sub(smoothstep(.02, .2, nl))).mul(.25).mul(al));
     col.addAssign(vec3(1, .97, .9).mul(pow(max(dot(N, normalize(L.add(V))), 0), 8)).mul(.08).mul(al)); // the silver lining
+    if (o.lightning) col.addAssign(vec3(.85, .9, 1).mul(lightning(uvw, 70, .0015)).mul(one.sub(smoothstep(-.15, .05, nl))).mul(al).mul(2)); // lightning in the night clouds
     return vec4(col, al.mul(.84).mul(one.sub(fr.mul(.25))));
   })();
   const m = mkMat(frag, { transparent: true, depthWrite: false }); m.uniforms = U; return m;
@@ -393,8 +414,8 @@ const dustMat = (r0, r1, col) => {
     const q = positionGeometry.xy.div(r1).toVar(), rr = length(q), fw = length(fwidth(q)).toVar();
     const prof = smoothstep(rn, rn + (1 - rn) * .18, rr).mul(one.sub(smoothstep(1 - (1 - rn) * .3, 1, rr))).toVar();
     const clump = n3(vec3(q.mul(7), 1.3)).mul(.5).add(.5).toVar(), lane = n3(vec3(rr.mul(60), q.x.mul(.5), 4)).mul(.5).add(.5);
-    const g1 = smoothstep(.5, 1.1, n3(vec3(q.mul(90), 2))).mul(one.sub(smoothstep(.004, .012, fw))), g2 = smoothstep(.6, 1.2, n3(vec3(q.mul(420), 5))).mul(one.sub(smoothstep(.0008, .0025, fw)));
-    const a = clamp(prof.mul(float(.15).add(clump.mul(.22)).add(lane.mul(clump).mul(.14)).add(g1.mul(.5).mul(clump.add(.3))).add(g2.mul(.55))).mul(U.k), 0, 1);
+    const g1 = smoothstep(.5, 1.1, n3(vec3(q.mul(90), 2))).mul(one.sub(smoothstep(.004, .012, fw))).mul(smoothstep(.0012, .002, fw)), g2 = smoothstep(.6, 1.2, n3(vec3(q.mul(420), 5))).mul(one.sub(smoothstep(.0008, .0025, fw))).mul(smoothstep(.00025, .0004, fw)); // grains live between a pixel and six across; closer in they would read as boulders
+    const a = clamp(prof.mul(float(.1).add(clump.mul(.12)).add(lane.mul(clump).mul(.1)).add(g1.mul(.22).mul(clump.add(.3))).add(g2.mul(.3))).mul(U.k), 0, 1);
     return vec4(U.col.mul(a), a);
   })();
   const m = mkMat(frag, { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }); m.uniforms = U; return m;
@@ -596,7 +617,7 @@ export async function initRender() {
   for (const b of Object.values(B)) scene.add(b.mesh);
   buildPost();
   setBloom(S.bloom);
-  window.__BODIES = BODIES; window.__CAM = { projectTo, toWorld, footprint }; window.__R = { scene, B, orbitL, PUNCH, rocksG, shipsG, bodiesG, turretM, debrisM, bgMesh, get renderer() { return renderer; }, get bloom() { return bloomPass; }, get gen() { return GEN; }, get shipVis() { return shipVis; }, mountClear, clearAt };
+  window.__BODIES = BODIES; window.__CAM = { projectTo, toWorld, footprint }; window.__R = { scene, B, orbitL, PUNCH, cometPos, COMETS, rocksG, shipsG, bodiesG, turretM, debrisM, bgMesh, get renderer() { return renderer; }, get bloom() { return bloomPass; }, get gen() { return GEN; }, get shipVis() { return shipVis; }, mountClear, clearAt };
   return renderer;
 }
 function sizeOverlay() { ov.width = Math.round(S.W * ODPR); ov.height = Math.round(S.H * ODPR); ov.style.width = S.W + 'px'; ov.style.height = S.H + 'px'; }
@@ -716,7 +737,7 @@ function applySurface(v) {
   const t = GEN.have[v.b.id]; if (!t) return;
   const U = v.mesh.material.uniforms; U.map.value = t.map; if (U.night) { U.night.value = t.night; U.hasNight.value = t.night ? 1 : 0; }
   if (U.texel) U.texel.value.set(1 / t.W, 2 / t.W); if (U.hmap) { U.hmap.value = t.hgt; U.hasH.value = t.hgt ? 1 : 0; } if (U.clouds) { U.clouds.value = t.clouds; U.hasClouds.value = t.clouds ? 1 : 0; }
-  if (t.clouds) { if (!v.clouds) { v.clouds = new THREE.Mesh(GEO.sphere, cloudMat()); v.clouds.scale.setScalar(1.012); v.clouds.renderOrder = 2; v.g.add(v.clouds); } v.clouds.material.uniforms.map.value = t.clouds; }
+  if (t.clouds) { if (!v.clouds) { v.clouds = new THREE.Mesh(GEO.sphere, cloudMat({ storms: v.b.id === 'earth' ? STORMS.earthClouds : null, lightning: v.b.id === 'earth' || v.b.id === 'venus' })); v.clouds.scale.setScalar(1.012); v.clouds.renderOrder = 2; v.g.add(v.clouds); } v.clouds.material.uniforms.map.value = t.clouds; }
   v.mesh.visible = true;
 }
 // the outline of a world as the camera really sees it: the sphere's horizon circle (a sphere under perspective is
@@ -746,6 +767,13 @@ function ringUniforms(v, x, y, pr, sunP) {
   v.g.updateMatrixWorld(); v.g.getWorldQuaternion(GL_Q); GL_N.set(0, 1, 0).applyQuaternion(GL_Q); R.N.value.copy(GL_N);
   const U = v.mesh.material.uniforms; if (U.ringN) { U.ringN.value.copy(GL_N); const RS = v.ringSpec || RINGS.saturn; U.ringR.value.set(RS.r0, RS.r1); }
 }
+const UV = (lat, lon) => [(lon + 180) / 360, (lat + 90) / 180];
+const STORMS = { // the giants' named storms, on their painted positions (planetgen: JUP_GRS, JUP_OVALS, NEP_GDS); Saturn's a polar vortex and a white spot
+  jupiter: [[...UV(-22, 40), 16 / 360, 9 / 180, .05], [...UV(-33, 60), 4 / 360, 3 / 180, -.12], [...UV(-33, 90), 4 / 360, 3 / 180, -.1], [...UV(-33, 120), 4 / 360, 3 / 180, -.13], [...UV(40, -60), 4 / 360, 3 / 180, .11]],
+  neptune: [[...UV(-22, 30), 11 / 360, 8 / 180, -.07]],
+  saturn: [[...UV(-38, 110), 7 / 360, 4 / 180, .09]],
+  earthClouds: [[...UV(38, -45), 14 / 360, 11 / 180, .06], [...UV(-42, 95), 13 / 360, 10 / 180, -.055], [...UV(18, 140), 8 / 360, 7 / 180, -.09], [...UV(50, 160), 12 / 360, 9 / 180, .05]], // extratropical cyclones and a typhoon
+};
 // auroral ovals: Earth's green, the giants' violet-blue (seen by Hubble in ultraviolet; here given a little visible colour)
 const AURORA = { earth: [.3, 1, .55], jupiter: [.55, .45, 1], saturn: [.5, .6, 1] };
 // fill a world's moon-shadow slots: moons on the sunward side, close enough to the Sun's line to fall on the disc
@@ -768,7 +796,7 @@ function buildBodies() {
   const sph = GEO.sphere || (GEO.sphere = new THREE.SphereGeometry(1, 256, 128)); // smooth limbs up close
   BODIES.forEach((b, i) => {
     const pal = b.pal || { c: ['#888888', '#777777', '#444444'] };
-    const v = { b, g: new THREE.Group(), spin: (b.gas ? .01 : .003) * (i % 2 ? 1 : -.8), tilt: TILT[b.id] ?? -.6, face: -PI / 2 - (FACE[b.id] ?? (i * 47) % 360) * PI / 180, cspin: (i % 3 - 1) * .002 + .004 };
+    const v = { b, g: new THREE.Group(), spin: (b.gas ? .01 : .003) * (i % 2 ? 1 : -.8), tilt: TILT[b.id] ?? -.6, face: -PI / 2 - (FACE[b.id] ?? (i * 47) % 360) * PI / 180, cspin: b.id === 'venus' ? .03 : (i % 3 - 1) * .002 + .004 }; // Venus's deck super-rotates: round in four days
     if (b.kind === 'star') {
       v.mesh = new THREE.Mesh(sph, sunMat());
       const gm = new THREE.SpriteMaterial({ map: TEX.sunglow, color: 0xffc870, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: .8 });
@@ -777,7 +805,7 @@ function buildBodies() {
       v.corona = new THREE.Sprite(cm); v.corona.renderOrder = -1; bodiesG.add(v.corona); // the corona, behind everything but the sky
     } else {
       v.moons = []; BODIES.forEach((m, j) => { if (m.kind === 'moon' && m.parent === i) v.moons.push(j); });
-      v.mesh = new THREE.Mesh(sph, planetMat(pal.atmo || [180, 180, 190], { gas: b.gas, air: !!pal.atmo && !b.gas, ring: !!(RINGS[b.id] || pal.ring), aurora: AURORA[b.id], moons: v.moons.length > 0, bump: b.gas ? 0 : b.id === 'earth' || b.id === 'venus' || b.id === 'titan' ? .55 : 1 }));
+      v.mesh = new THREE.Mesh(sph, planetMat(pal.atmo || [180, 180, 190], { gas: b.gas, air: !!pal.atmo && !b.gas, ring: !!(RINGS[b.id] || pal.ring), aurora: AURORA[b.id], moons: v.moons.length > 0, storms: STORMS[b.id], lightning: b.id === 'jupiter' || b.id === 'saturn', bump: b.gas ? 0 : b.id === 'earth' || b.id === 'venus' || b.id === 'titan' ? .55 : 1 }));
       if (pal.atmo && !b.dwarf && b.r > 250) { v.atmo = new THREE.Mesh(sph, atmoMat(pal.atmo, b.gas ? .75 : b.kind === 'moon' ? .55 : 1)); v.atmoK = b.gas ? 1.07 : 1.12; v.atmo.renderOrder = 3; bodiesG.add(v.atmo); }
       const RS = RINGS[b.id] || (pal.ring ? RINGS.saturn : null); // the four giants carry rings; a palette's ring flag means Saturn's
       if (RS) { const rg = new THREE.RingGeometry(RS.r0, RS.r1, 192, 1), rt = TEX.rings[b.id] || TEX.ring; v.ring = new THREE.Mesh(rg, ringMat(rt)); v.ringSpec = RS; const RU = v.ring.material.uniforms; RU.r0.value = RS.r0; RU.r1.value = RS.r1; RU.dust.value = RS.dust;
@@ -1189,7 +1217,7 @@ function renderOrrery(L) {
     if (v.ring) ringUniforms(v, x, y, P.r, sunP);
     if (v.moons && v.moons.length) moonShadows(v, x, y, P.r, sunP, m => L.pos[m.id]);
   }
-  beltDust(sunP, z, true);
+  beltDust(sunP, z, true); comets(L, z);
   const fpz = footprint(); let reach = 0; for (const [wx, wy] of fpz) reach = Math.max(reach, hyp(wx - c.x, wy - c.y)); reach *= 1.15;
   for (const Lr of orbitL) Lr.n = 0;
   for (const [cx, cy, R, k] of L.orbits) ring(orbitL[k], cx, cy, R, reach);
@@ -1779,6 +1807,39 @@ function drawOverlay(z, px, icons) {
 }
 // the Sun's glare: when the Sun is on or near the screen, a soft flare over the view and a few ghosts across the centre;
 // a world between the camera and the Sun blocks it
+// ---- comets: two long-period visitors on Keplerian ellipses round the Sun, timed off Jupiter's place in its orbit
+// (the layout carries no clock; Jupiter's angle advances 2π in 11.86 years, so it is one). Each draws a nucleus, a coma
+// that swells as it nears the Sun, a curved dust tail and a straight blue ion tail, both pointing away from the Sun.
+const COMETS = [{ a: 8, e: .9, w: 1.1, M0: 3.78, P: 22.6, col: 0xfff0d8 }, { a: 20, e: .96, w: 3.9, M0: 5.63, P: 89.4, col: 0xf0f4ff }]; // both inbound at the campaign's start: 2.5 AU and 3.7 AU out
+function cometPos(cm, tYears) { const M = (TAU * tYears / cm.P + cm.M0) % TAU; let E = M; for (let i = 0; i < 7; i++) E -= (E - cm.e * Math.sin(E) - M) / (1 - cm.e * Math.cos(E));
+  const r = cm.a * (1 - cm.e * Math.cos(E)), nu = Math.atan2(Math.sqrt(1 - cm.e * cm.e) * Math.sin(E), Math.cos(E) - cm.e); return { x: r * Math.cos(nu + cm.w) * AU, y: r * Math.sin(nu + cm.w) * AU, d: r }; }
+function comets(L, z) {
+  const J = L.pos.jupiter, sp = L.pos.sun; if (!J) return; const t = ((Math.atan2(J.y - sp.y, J.x - sp.x) + TAU) % TAU) / TAU * 11.86;
+  for (const cm of COMETS) { const c = cometPos(cm, t), x = sp.x + c.x, y = sp.y + c.y; if (!onScr(x, y, Math.max(AU * .6 * z, 60))) continue; // world coordinates: the batches subtract O themselves
+    const near = clamp(1.6 / c.d, 0, 1), act = near * near, aw = Math.atan2(c.y, c.x), g = Math.max(AU * .012 * (.4 + act), 9 / z); // activity falls off with the square of the distance
+    B.glow.add(x, y, 2, g, g, 0, cm.col, .55 + .4 * act, 2); B.sglow.add(x, y, 2, g * 4 * (.3 + act), g * 4 * (.3 + act), 0, cm.col, .22 * act + .05, 1.5); // nucleus and coma
+    if (act > .02) { const Ld = AU * (.12 + .5 * act) * clamp(1.2 / c.d, .2, 1.5), Li = Ld * 1.7, fl = .9 + .1 * Math.sin(SH.time.value * 3.1 + cm.a);
+      B.plume.add(x, y, 2, Ld, Ld * .22, aw + PI + .1, 0xffe8c0, .45 * act * fl, 1.3); B.plume.add(x, y, 2.01, Ld * .7, Ld * .3, aw + PI + .22, 0xffd8a8, .25 * act, 1.2); // the dust tail, lagging the orbit a little
+      B.streak.add(x, y, 2.02, Li, Math.max(Ld * .03, 1.5 / z), aw + PI, 0x9fc8ff, .5 * act * fl, 1.6); } } // the ion tail, straight down the Sun's wind
+}
+// ---- 2D helpers the strategic overlay calls for things it knows and the renderer does not (fleets in transit, worlds under siege)
+const FLK = c => '#' + c.toString(16).padStart(6, '0');
+export function fleetGlow(ctx, x, y, tx, ty, col, k = 1) { // a torch: a hot dot with a short flickering tail pointing back along the track
+  const dx = tx - x, dy = ty - y, L = Math.hypot(dx, dy) || 1, ux = -dx / L, uy = -dy / L, fl = .8 + .2 * Math.sin(performance.now() * .021 + x), len = 16 * fl * k;
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  const gr = ctx.createLinearGradient(x, y, x + ux * len, y + uy * len); gr.addColorStop(0, `rgba(255,230,190,${.75 * k})`); gr.addColorStop(.3, `rgba(255,170,90,${.35 * k})`); gr.addColorStop(1, 'rgba(255,120,60,0)');
+  ctx.strokeStyle = gr; ctx.lineWidth = 3.2; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + ux * len, y + uy * len); ctx.stroke();
+  const rg = ctx.createRadialGradient(x, y, 0, x, y, 7); rg.addColorStop(0, `rgba(255,245,225,${.9 * k})`); rg.addColorStop(.35, `rgba(255,200,140,${.4 * k})`); rg.addColorStop(1, 'rgba(255,160,90,0)'); ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(x, y, 7, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+export function siegeFx(ctx, cx, cy, rr, sil = null) { // bombardment seen from space: brief flashes along the world's limb and dark side, each fading out, and a faint ring of debris
+  const now = performance.now() / 1000; ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 4; i++) { const t = now * 1.3 + i * .41, ph = t % 1, sd = Math.floor(t) * 9.17 + i * 3.3, h = Math.abs(Math.sin(sd * 12.9898) * 43758.5453) % 1, h2 = Math.abs(Math.sin(sd * 78.233) * 12345.6789) % 1;
+    const a = h * TAU, rad = rr * (.55 + .45 * h2), px = cx + Math.cos(a) * rad, py = cy + Math.sin(a) * rad, al = (1 - ph) * (1 - ph) * (ph < .08 ? ph / .08 : 1), r = 2.5 + 7 * (1 - ph) * (.5 + h2);
+    const g = ctx.createRadialGradient(px, py, 0, px, py, r); g.addColorStop(0, `rgba(255,250,235,${.9 * al})`); g.addColorStop(.3, `rgba(255,190,120,${.5 * al})`); g.addColorStop(1, 'rgba(255,120,60,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, py, r, 0, TAU); ctx.fill(); }
+  ctx.globalCompositeOperation = 'source-over'; ctx.strokeStyle = 'rgba(200,190,180,.28)'; ctx.lineWidth = 1; ctx.setLineDash([1, 3]); ctx.beginPath(); ctx.arc(cx, cy, rr + 2.5, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+  ctx.restore();
+}
 function sunGlare(sp = null) {
   if (S.gx && S.gx.glare === false) return;
   const sun = sp ? { x: sp.x, y: sp.y, r: sp.r, kind: 'star' } : BODIES[0]; if (!sun || !FLARE_C || S.cam.z > 3) return; projectTo(Q, sun.x, sun.y); if (!Q.ok) return;

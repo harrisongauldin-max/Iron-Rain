@@ -9,7 +9,7 @@ const PI = Math.PI;
 import * as K from './camp.js';
 import { C } from './camp.js';
 import { toWorld, projectTo } from './cam.js';
-import { buildIcon, overlayAPI, portrait, silhouette } from './render.js';
+import { buildIcon, overlayAPI, portrait, silhouette, fleetGlow, siegeFx } from './render.js';
 import { setupFactions } from './sim.js';
 import { fightBattle } from './battle.js';
 import * as GV from './groundview.js';
@@ -101,6 +101,7 @@ function drawOverlay(G, label) {
     const mine = fl.owner === me, threat = !mine && C.worlds[fl.transit.to].owner === me && !fl.transit.sortie;
     ctx.globalAlpha = mine ? .85 : threat ? .8 : .4; ctx.strokeStyle = threat ? '#ff6a5a' : colS(fl.owner); ctx.lineWidth = mine && V.sel && V.sel.fl === fl ? 2.2 : 1.3;
     ctx.setLineDash([6, 5]); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(t.x, t.y); ctx.stroke(); ctx.setLineDash([]);
+    ctx.globalAlpha = 1; fleetGlow(ctx, a.x, a.y, t.x, t.y, colN(fl.owner), mine ? 1 : threat ? .9 : .5); ctx.globalAlpha = mine ? .85 : threat ? .8 : .4; // graphics: the torch under burn
     const ang = Math.atan2(t.y - a.y, t.x - a.x), tr = Math.max(t.R || 0, 4) + 9, hx = t.x - Math.cos(ang) * tr, hy = t.y - Math.sin(ang) * tr;
     if (Math.hypot(t.x - a.x, t.y - a.y) > tr + 10) { ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx - Math.cos(ang - .45) * 9, hy - Math.sin(ang - .45) * 9); ctx.moveTo(hx, hy); ctx.lineTo(hx - Math.cos(ang + .45) * 9, hy - Math.sin(ang + .45) * 9); ctx.stroke(); }
     if ((mine || threat) && Math.hypot(t.x - a.x, t.y - a.y) > 60) label(fl.transit.left + ' wk', (a.x + t.x) / 2, (a.y + t.y) / 2 - 16, threat ? 0xff8a7a : 0xe9e3d4, false, 'skip');
@@ -145,7 +146,7 @@ function drawOverlay(G, label) {
     if (R < 2.5) G.screen().circle(q.x, q.y, moon ? 2.2 : 3).fill({ color: oc, alpha: .95 });
     if (sil) { ctx.globalAlpha = selW || hov ? 1 : .7; ctx.strokeStyle = colS(w.owner); ctx.lineWidth = selW ? 2.4 : hov ? 1.8 : 1.1; ringPath(3); ctx.stroke(); ctx.globalAlpha = 1; }
     else G.screen().circle(q.x, q.y, rr).stroke({ width: selW ? 2.4 : hov ? 1.8 : 1.1, color: oc, alpha: selW || hov ? 1 : .7 });
-    if (w.siege) G.screen().dashed(q.x, q.y, rr + 5, 5, 4).stroke({ width: 1.6, color: 0xff5a4a, alpha: .95 });
+    if (w.siege) { G.screen().dashed(q.x, q.y, rr + 5, 5, 4).stroke({ width: 1.6, color: 0xff5a4a, alpha: .95 }); if (R >= 3) siegeFx(ctx, q.x, q.y, rr - 3, sil); } // graphics: the bombardment's flashes
     if (K.wreckAt(w.id)) debris(ctx, q.x, q.y, rr + (w.siege ? 10 : 6), K.wreckAt(w.id));
     if (selW) { const s = rr + 9, l = 7; ctx.globalAlpha = 1; ctx.strokeStyle = '#f2c14e'; ctx.lineWidth = 1.5; ctx.beginPath();
       for (const [dx, dy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { ctx.moveTo(q.x + dx * s, q.y + dy * s - dy * l); ctx.lineTo(q.x + dx * s, q.y + dy * s); ctx.lineTo(q.x + dx * s - dx * l, q.y + dy * s); } ctx.stroke(); }
