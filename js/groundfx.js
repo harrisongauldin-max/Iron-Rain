@@ -3,6 +3,7 @@
 // meshes and calls in for their materials; groundmodels.js owns the figures and props.
 import * as THREE from 'three/webgpu';
 import { NH, CH, MAP, BIOME, G, heightAt } from './ground.js';
+import { S } from './state.js';
 import { Fn, float, vec2, vec3, vec4, uniform, uniformArray, attribute, varying, positionGeometry, positionWorld, normalWorld, cameraPosition, cameraViewMatrix, cameraProjectionMatrix, uv,
   mx_noise_float, mx_fractal_noise_float, mx_worley_noise_float, smoothstep, mix, dot, cross, sqrt, normalize, length, fract, floor, max, min, clamp, pow, abs, select, sin, cos, step, exp, hash,
   transformNormalToView, texture } from 'three/tsl';
@@ -10,7 +11,11 @@ import { Fn, float, vec2, vec3, vec4, uniform, uniformArray, attribute, varying,
 const one = float(1), lum = c => dot(c, vec3(.3, .55, .15));
 const col3 = h => { const c = new THREE.Color(h); return vec3(c.r, c.g, c.b); };
 const T = uniform(0); // the clock, for water and cloud drift
-const sunDirU = uniform(new THREE.Vector3(.3, .8, .5)), coverU = uniform(0), wetU = uniform(0); // wetU: rain on the ground (darker, glossier) // the Sun and the cloud cover, shared by the dome and the ground (the dome sets them)
+const sunDirU = uniform(new THREE.Vector3(.3, .8, .5)), coverU = uniform(0), wetU = uniform(0); // wetU: rain on the ground (darker, glossier)
+// per-world ground character, set by the dome: x craters, y dunes, z ice cracks, w sulphur (0..1 each)
+const charU = uniform(new THREE.Vector4(0, 0, 0, 0));
+const CHAR = { phobos: [1, 0, 0, 0], deimos: [1, 0, 0, 0], luna: [.35, 0, 0, 0], mercury: [.5, .4, 0, 0], mars: [.25, .6, 0, 0], venus: [0, 0, 0, 0], earth: [0, 0, 0, 0], titan: [0, .5, 0, 0],
+  europa: [0, 0, 1, 0], ganymede: [.3, 0, .8, 0], callisto: [.6, 0, .4, 0], triton: [.1, 0, .8, 0], rhea: [.5, 0, .5, 0], io: [.2, 0, 0, 1], _ice: [.2, 0, .7, 0] }; // the Sun and the cloud cover, shared by the dome and the ground (the dome sets them)
 let dome = null;
 // the clouds, as the dome paints them and as the ground wears their shadows: one noise, in world metres, drifting with the clock
 const cloudN = q => mx_fractal_noise_float(vec3(q.x.mul(.00075), q.y.mul(.00075), T.mul(.006)), 4, 2.1, .5, 1).mul(.5).add(.5);
@@ -85,6 +90,23 @@ export function terrainMaterial(M, B) {
     c.assign(mix(c, pave, urbK));
     // rubble and cover: a little darker and rougher
     c.mulAssign(one.sub(mk.w.mul(.12)));
+    // the world's own character, near the camera: craters, dunes, pressure ridges in the ice, sulphur
+    { const chr = charU, q = p.xz, inWater = M.seaH >= 0 ? smoothstep(-1, 1, p.y.sub(M.seaH)) : one, land = one.sub(mk.y).mul(inWater).mul(near);
+      // craters: cellular rings at two scales, a dark floor inside a raised bright rim
+      const w1 = mx_worley_noise_float(vec3(q.mul(.018), 7.3)), w2 = mx_worley_noise_float(vec3(q.mul(.06).add(3.1), 2.2));
+      const cr = (w, r) => { const rim = smoothstep(r - .06, r, w).mul(one.sub(smoothstep(r, r + .05, w))), floor_ = one.sub(smoothstep(r - .25, r - .06, w)); return rim.mul(.45).sub(floor_.mul(.22)); };
+      c.mulAssign(one.add(cr(w1, .42).mul(.8).add(cr(w2, .38).mul(.5)).mul(chr.x).mul(land)));
+      // dunes: ripples with a steep shaded slip face, bent by a slow noise, aligned to one prevailing wind
+      const bend = mx_noise_float(vec3(q.mul(.012), 1.1)).mul(18), ph = q.x.mul(.09).add(q.y.mul(.04)).add(bend), saw = fract(ph.div(Math.PI * 2)), dune = smoothstep(.55, .95, saw).mul(.5).add(sin(ph).mul(.5).add(.5).mul(.5));
+      const ripple = sin(q.x.mul(.9).add(q.y.mul(.4)).add(bend.mul(3))).mul(.5).add(.5).mul(one.sub(smoothstep(80, 500, length(p.sub(cameraPosition)))));
+      c.mulAssign(one.add(dune.sub(.5).mul(.5).add(ripple.sub(.5).mul(.22)).mul(chr.y).mul(land).mul(one.sub(mk.x))));
+      // pressure ridges: ridged noise picks out thin lines, dark blue-grey, at two scales, with a pale lip beside each
+      const rg = (sc, sd) => one.sub(abs(mx_noise_float(vec3(q.mul(sc), sd)))), l1 = smoothstep(.94, 1, rg(.035, 4.4)), l2 = smoothstep(.955, 1, rg(.12, 8.8)), lip1 = smoothstep(.84, .94, rg(.035, 4.4)).mul(one.sub(l1));
+      const crack = l1.add(l2.mul(.6)).mul(chr.z).mul(land); // the lineae: dark, a little rust in them, with a pale lip of fresh ice either side
+      c.assign(mix(c, c.mul(vec3(.5, .42, .4)), min(crack.mul(.9), .9))); c.mulAssign(one.add(lip1.mul(chr.z).mul(.14).mul(land)));
+      // sulphur: yellow and orange patches with a dark ring, where the ground is thinnest
+      const sul = smoothstep(.5, .8, mx_fractal_noise_float(vec3(q.mul(.01), 5.5), 3, 2, .5, 1).mul(.5).add(.5)), sulC = mix(vec3(.9, .75, .2), vec3(.85, .4, .12), mx_noise_float(vec3(q.mul(.04), 9)).mul(.5).add(.5));
+      c.assign(mix(c, sulC, sul.mul(chr.w).mul(.75).mul(land))); c.mulAssign(one.sub(smoothstep(.35, .5, mx_fractal_noise_float(vec3(q.mul(.01), 5.5), 3, 2, .5, 1).mul(.5).add(.5)).mul(one.sub(sul)).mul(chr.w).mul(.25).mul(land))); }
     // the seabed in the shallows: a caustic web of light, two cellular patterns drifting over each other
     if (M.seaH >= 0) { const under = smoothstep(.4, -1.2, p.y.sub(M.seaH)).mul(smoothstep(-16, -3, p.y.sub(M.seaH))).mul(near);
       const w1 = mx_worley_noise_float(vec3(p.x.mul(.22).add(T.mul(.35)), p.z.mul(.22).sub(T.mul(.2)), T.mul(.3))), w2 = mx_worley_noise_float(vec3(p.x.mul(.31).sub(T.mul(.25)), p.z.mul(.31).add(T.mul(.3)), T.mul(.22).add(5)));
@@ -173,6 +195,7 @@ export function skyDome(sc, B, world, sunLight) {
   const ca2 = (a, b) => dot(a, b);
   const zen = new THREE.Color(K.zen), hor = fog.clone().lerp(sky, .35).multiplyScalar(K.stars >= .8 ? .3 : 1), sunC = new THREE.Color(B.sun); // an airless horizon is nearly as black as its zenith
   const dir = sunLight.position.clone().sub(sunLight.target.position).normalize(); sunDirU.value.copy(dir); coverU.value = K.cover; for (const e of scorchA.array) e.set(0, 0, 0, -1e9);
+  charU.value.fromArray(CHAR[world] || (B === BIOME._ice ? CHAR._ice : [0, 0, 0, 0]));
   const geo = new THREE.SphereGeometry(26000, 48, 24), m = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, depthWrite: false, fog: false });
   const zenV = vec3(zen.r, zen.g, zen.b), horV = vec3(hor.r, hor.g, hor.b), sunV = vec3(sunC.r, sunC.g, sunC.b), starK = float(K.stars), cover = K.cover;
   m.colorNode = Fn(() => {
@@ -327,8 +350,51 @@ function lightsTick(dt, step) {
     P[n * 3] = x; P[n * 3 + 1] = heightAt(x, z) + .4; P[n * 3 + 2] = z; Sz[n * 3] = (l.big ? 26 : 12) * (l.t > l.T ? 1.6 : 1); Sz[n * 3 + 1] = (l.big ? .55 : .32) * hit; C[n * 3] = l.col[0]; C[n * 3 + 1] = l.col[1]; C[n * 3 + 2] = l.col[2]; n++; }
   g.instanceCount = n; for (const kk of ['iP', 'iS', 'iC']) { const a = g.attributes[kk]; a.clearUpdateRanges(); a.addUpdateRange(0, n * 3); a.needsUpdate = true; }
 }
+// ---------------------------------------------------------------- sun shafts (Ultra) and heat shimmer
+// Shafts: crepuscular rays as long soft billboards aligned on screen with the Sun, hung in the air ahead of the camera,
+// brightest looking into the Sun and only through gaps in the cloud. Not volumetric; it reads as light in haze.
+// Shimmer: rising near-transparent billboards of wavy noise over hot ground (fresh scorches), brightening a little —
+// a stand-in for refraction, which would need a screen-space pass the ground view does not have.
+let shaftMesh = null, shimMesh = null, shaftV = new THREE.Vector3(), shaftS = new THREE.Vector3();
+function stripBatch(N, frag, blend) {
+  const g = new THREE.InstancedBufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute([-.5, -.5, 0, .5, -.5, 0, .5, .5, 0, -.5, .5, 0], 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2)); g.setIndex([0, 1, 2, 0, 2, 3]);
+  const iP = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3), iS = new THREE.InstancedBufferAttribute(new Float32Array(N * 4), 4); for (const a of [iP, iS]) a.setUsage(THREE.DynamicDrawUsage); g.setAttribute('iP', iP); g.setAttribute('iS', iS); g.instanceCount = 0;
+  const m = new THREE.NodeMaterial(); m.transparent = true; m.depthWrite = false; m.lights = false; m.blending = blend;
+  const aP = attribute('iP', 'vec3'), aS = attribute('iS', 'vec4');
+  m.vertexNode = Fn(() => { const c = cos(aS.z), s2 = sin(aS.z), q = positionGeometry.xy.mul(vec2(aS.x, aS.y)), r = vec2(c.mul(q.x).sub(s2.mul(q.y)), s2.mul(q.x).add(c.mul(q.y))); const mv = cameraViewMatrix.mul(vec4(aP, 1)).toVar(); return cameraProjectionMatrix.mul(vec4(mv.xy.add(r), mv.z, mv.w)); })();
+  m.fragmentNode = frag(varying(aS))();
+  const mesh = new THREE.Mesh(g, m); mesh.frustumCulled = false; mesh.renderOrder = 28; return mesh;
+}
+const SHAFT_N = 14, SHIM_N = 160; let shims = [];
+function shaftsTick(camera) {
+  const on = S.quality === 'ultra' && dome && dome.parent && coverU.value > 0; if (!on) { if (shaftMesh) shaftMesh.visible = false; return; }
+  if (!shaftMesh) { shaftMesh = stripBatch(SHAFT_N, vS => Fn(() => { const u = uv(), a = pow(sin(u.y.mul(Math.PI)), 1.5).mul(pow(one.sub(abs(u.x.sub(.5)).mul(2)), 1.8)); return vec4(vec3(1, .95, .85).mul(a.mul(vS.w)), 1); }), THREE.AdditiveBlending); dome.parent.add(shaftMesh); }
+  shaftMesh.visible = true; const g = shaftMesh.geometry, P = g.attributes.iP.array, Sz = g.attributes.iS.array;
+  camera.getWorldDirection(shaftV); const sd = sunDirU.value, into = Math.max(0, shaftV.dot(sd)); // looking toward the Sun
+  shaftS.copy(sd).project(camera); const ang = Math.atan2(-shaftS.y * camera.aspect, -shaftS.x) + Math.PI / 2; // the rays fan out from the Sun's place on the screen, hanging down from it
+  let n = 0; for (let i = 0; i < SHAFT_N; i++) { const t = T.value * .02, f = i / SHAFT_N, d = 260 + f * 520, side = (f - .5) * 1.4 + Math.sin(t + i * 2.3) * .12;
+    const px = camera.position.x + shaftV.x * d + (-shaftV.z) * side * d * .9, pz = camera.position.z + shaftV.z * d + shaftV.x * side * d * .9, py = camera.position.y + 120 + f * 140 + Math.sin(t * 1.7 + i) * 20;
+    const gap = 1 - cloudGapAt(px, pz), al = into * into * gap * .09 * (.6 + .4 * Math.sin(t * 2.1 + i * 1.7)); if (al < .004) continue;
+    P[n * 3] = px; P[n * 3 + 1] = py; P[n * 3 + 2] = pz; Sz[n * 4] = 28 + f * 40; Sz[n * 4 + 1] = 420 + f * 260; Sz[n * 4 + 2] = ang; Sz[n * 4 + 3] = al; n++; }
+  g.instanceCount = n; for (const kk of ['iP', 'iS']) { const a = g.attributes[kk]; a.clearUpdateRanges(); a.addUpdateRange(0, n * a.itemSize); a.needsUpdate = true; }
+}
+// the cloud cover over a ground point, on the CPU, matching cloudN's noise closely enough for the shafts (a cheap 3-octave value noise)
+function cloudGapAt(x, z) { const t = T.value; let v = 0, amp = .5, f = .00075; for (let o = 0; o < 3; o++) { const px = (x + t * 9) * f, pz = (z + t * 9) * f, ix = Math.floor(px), iz = Math.floor(pz), fx = px - ix, fz = pz - iz, h = (a, b) => { const s0 = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s0 - Math.floor(s0); };
+  const sx = fx * fx * (3 - 2 * fx), sz = fz * fz * (3 - 2 * fz), v0 = h(ix, iz) + (h(ix + 1, iz) - h(ix, iz)) * sx, v1 = h(ix, iz + 1) + (h(ix + 1, iz + 1) - h(ix, iz + 1)) * sx; v += (v0 + (v1 - v0) * sz) * amp; amp *= .5; f *= 2.1; }
+  const cover = coverU.value, n = v, lo = 1 - cover, hi = lo + .32, k = Math.min(1, Math.max(0, (n - lo) / (hi - lo))); return k * k * (3 - 2 * k); }
+function shimmerTick(dt, step) {
+  if (!shimMesh && dome && dome.parent) { shimMesh = stripBatch(SHIM_N, vS => Fn(() => { const u = uv(), n = mx_noise_float(vec3(u.x.mul(3), u.y.mul(6).sub(T.mul(1.5)), vS.z.mul(5))).mul(.5).add(.5), e = smoothstep(1, .3, length(u.sub(.5)).mul(2));
+      return vec4(vec3(1, .97, .9).mul(e.mul(smoothstep(.35, .75, n)).mul(vS.w)), 1); }), THREE.AdditiveBlending); dome.parent.add(shimMesh); }
+  if (!shimMesh) return;
+  if (step > 0) { for (let i = 0; i < SCORCH_N; i++) { const e = scorchA.array[i], age = T.value - e.w; if (e.z < .5 || age > 18 || age < 0) continue; if (Math.random() < step * 6 * (1 - age / 18) && shims.length < SHIM_N) { const a = Math.random() * 6.28, d = Math.random() * e.z * .8; shims.push({ x: e.x + Math.cos(a) * d, y: heightAt(e.x, e.y) + 1, z: e.y + Math.sin(a) * d, life: 1.4 + Math.random(), max: 2.4, sz: e.z * .6, sd: Math.random() }); } }
+    for (const q of shims) { q.life -= step; q.y += 3 * step; } shims = shims.filter(q => q.life > 0); }
+  const g = shimMesh.geometry, P = g.attributes.iP.array, Sz = g.attributes.iS.array; let n = 0;
+  for (const q of shims) { const k = q.life / q.max; P[n * 3] = q.x; P[n * 3 + 1] = q.y; P[n * 3 + 2] = q.z; Sz[n * 4] = q.sz; Sz[n * 4 + 1] = q.sz * 1.6; Sz[n * 4 + 2] = q.sd; Sz[n * 4 + 3] = .08 * Math.min(1, k * 3) * Math.min(1, (1 - k) * 4 + .2); n++; }
+  g.instanceCount = n; for (const kk of ['iP', 'iS']) { const a = g.attributes[kk]; a.clearUpdateRanges(); a.addUpdateRange(0, n * a.itemSize); a.needsUpdate = true; }
+}
 // per frame: the clock, the dome follows the camera, dust and scorches, weather, the tracers' light
-export function tick(dt, camera) { T.value += dt; if (dome) dome.position.copy(camera.position); const step = G.paused ? 0 : dt * (G.speed || 1); dustTick(dt, camera); weatherTick(dt, camera); lightsTick(dt, step); }
-export function dispose() { dome = null; puffMesh = null; puffs = null; wxMesh = null; wx = null; litMesh = null; lights = []; wetU.value = 0; }
+export function tick(dt, camera) { T.value += dt; if (dome) dome.position.copy(camera.position); const step = G.paused ? 0 : dt * (G.speed || 1); dustTick(dt, camera); weatherTick(dt, camera); lightsTick(dt, step); shaftsTick(camera); shimmerTick(dt, step); }
+export function dispose() { dome = null; puffMesh = null; puffs = null; wxMesh = null; wx = null; litMesh = null; lights = []; shaftMesh = null; shimMesh = null; shims = []; wetU.value = 0; }
 export const _dbg = () => ({ scorch: scorchA.array.map(v => v.toArray()), live: puffs ? puffs.filter(p => p.life > 0).length : -1, n: puffMesh ? puffMesh.geometry.instanceCount : -1, T: T.value, mesh: !!puffMesh, dome: !!dome, units: G.units ? G.units.filter(u => !u.gone && Math.hypot(u.vx, u.vy) > .6).length : -1 });
 export const _forceWeather = kind => { _FORCE = kind; }; let _FORCE = null;
