@@ -13,7 +13,7 @@ CHROME = os.environ.get('IR_CHROME', '/usr/bin/google-chrome')
 ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']
 def launch(p): return p.chromium.launch(executable_path=CHROME, headless=True, args=ARGS) if os.path.exists(CHROME) else p.chromium.launch(headless=True, args=ARGS)
 SC=sys.argv[1]; AI=sys.argv[2]; SEED=sys.argv[3] if len(sys.argv)>3 else '0'
-OLD=open(os.path.join(HERE, 'baseline', 'enemyai_v1.js')).read()
+OLD=open(os.environ.get('OLD_AI') or os.path.join(HERE, 'baseline', 'enemyai_v1.js')).read()  # OLD_AI=path compares against another version
 async def main():
     async with async_playwright() as p:
         b=await launch(p)

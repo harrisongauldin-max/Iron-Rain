@@ -4,10 +4,10 @@
 // behind the line. A defending fleet holds near its world until the attackers come within reach.
 import { S } from './state.js';
 import { bodyOf } from './solar.js';
-import { nukesOf, launchNuke, disabled, brace, threatSide, goCold, warmUp } from './sim.js';
+import { nukesOf, launchNuke, disabled, brace, threatSide, goCold, warmUp, bigHull } from './sim.js';
 import { lockOf } from './data.js';
 import * as AB from './abilities.js';
-import { M, doc, DOC } from './morale.js';
+import { M, doc, DOC, rout } from './morale.js';
 import { known } from './sensors.js';
 import { TR } from './terrain.js';
 import { OP, bombCan, bombStart } from './ops.js';
@@ -56,6 +56,24 @@ const dpsOf = s => s.weapons.reduce((a, w) => gunOf(w) ? a + (w.def.dmg || 0) * 
 const effOf = s => s.weapons.reduce((a, w) => gunOf(w) ? Math.max(a, w.def.eff || w.def.range) : a, 0);
 const ehp = f => f.hp != null ? f.hp + (f.sh || 0) : (f.def.hp || 500) + (f.def.shield || 0);
 const valOf = f => (f.def.value || 50) * (f.hp != null ? Math.max(.2, f.hp / f.def.hp) : 1);
+// the counters, as the guns see them: armour takes its toll of every slug and round (sim.js damage: the plate's rating
+// off each hit, never below 15% of it), while lances, missiles and torpedoes go through it, and torpedoes are fired only
+// at big hulls. A corvette's light railguns barely mark a dreadnought's plate; her torpedo is what she is for. From
+// astern there is no plate at all, and the round does double harm.
+const plateK = (D, f, stern) => D.kind === 'missile' || D.big || stern ? 1 : Math.max(.15, 1 - (f.def.armor || 0) / Math.max(1, D.dmg || 1));
+const gunDps = w => (w.def.dmg || 0) * (w.def.salvo || 1) * (w.guns || 1) / Math.max(.1, w.def.reload || 1);
+function dpsVs(s, f, stern) {
+  let v = 0; for (const w of s.weapons) { if (!gunOf(w) || w.def.emp) continue; if (w.def.breach && !bigHull(f)) continue; v += gunDps(w) * plateK(w.def, f, stern) * (stern && w.def.kind !== 'missile' ? 2 : 1); }
+  return v * (s.hf ?? 1);
+}
+const dpsAll = s => s.weapons.reduce((a, w) => gunOf(w) && !w.def.emp && !w.def.breach ? a + gunDps(w) : a, 0) * (s.hf ?? 1) || 1;
+// a ship alone is a ship to kill: the fewer of her friends close enough to cover her, the better the target
+const coverOf = (f, L) => { let n = 0; for (const o of L) if (o !== f && !o.def.fighter && !o.def.shell && hyp(o.x - f.x, o.y - f.y) < 3200) n++; return n; };
+// the weaker half of a target's shield, when one is down or nearly: +1 starboard, -1 port, 0 if neither
+const softSide = f => { if (!f.sub || !(f.def.shield > 0) || f.shP == null) return 0; const cap = f.def.shield * .5, p = f.shP / cap, q = f.shS / cap; if (Math.min(p, q) > .25 || Math.abs(p - q) < .3) return 0; return p < q ? -1 : 1; };
+// stern runners: fast escorts that can get round a slow capital ship's broadsides while others hold her attention
+const sternRunner = s => !s.def.cmd || s.type === 'raider' ? (s.def.cruise >= 330 && s.def.turn >= 1.4) : false;
+const sternWorthy = f => (f.def.broadside || bigHull(f)) && f.def.turn < 1 && !f.def.static;
 // where a side's firepower lands: the reach that half its damage comes from, or further
 function reachOf(L) {
   const W = []; for (const s of L) if (s.weapons) for (const w of s.weapons) if (gunOf(w)) W.push([w.def.eff || w.def.range, (w.def.dmg || 0) * (w.def.salvo || 1) / Math.max(.1, w.def.reload || 1)]);
@@ -82,7 +100,11 @@ function readField(mine, mw, foes, seen, b, defending, D, diff) {
   // (once a battle: a fleet that has fallen back and been caught again fights it out, or breaks)
   if (orderly && diff > 0 && !P.fellBack && P.post !== 'fallback' && ratio < (D.patient ? .55 : .45) && close < R0 * 1.3 && mw.length >= 2) {
     setPost('fallback', 'losing'); P.fellBack = true; P.fb = defending ? null : { x: mc.x - ux * 12000, y: mc.y - uy * 12000 }; return A; }
-  if (P.post === 'fallback') { if (ratio > .8 || close < R1 * .7 || S.time - P.postT > 45) setPost(close < R1 * 1.2 ? 'engage' : defending ? 'hold' : 'advance', 'turned'); else return A; }
+  if (P.post === 'fallback') { if (ratio > .8 || close < R1 * .7 || S.time - P.postT > 45) {
+      // an attacker that fell back and is still badly outmatched does not go in again to die: it breaks off the attack
+      // and takes what is left home, and the enemy must run it down for the prizes
+      if (!defending && diff > 0 && ratio < .5 && !M.rout[1]) { rout(1, `${M.lead ? M.lead.name : 'The enemy commander'} sees the day is lost and breaks off the attack. Run them down before they clear the field`); return A; }
+      setPost(close < R1 * 1.2 ? 'engage' : defending ? 'hold' : 'advance', 'turned'); } else return A; }
   if (defending) {
     const nearW = fw.filter(f => hyp(f.x - b.x, f.y - b.y) < b.r + 16000).length;
     if (diff <= 0) { setPost(nearW ? 'engage' : 'hold'); return A; } // Easy: a garrison that comes out to meet you, as it always did
@@ -115,19 +137,23 @@ function allocate(mw, seen, D, diff, dn = M.doc, foeTeam = 0) {
   const T = seen.filter(f => live(f) && !f.def.fighter && !f.def.shell && !f.surrendered);
   if (!T.length) return new Map();
   const flag = T.find(f => f.cmdr && f.cmdr === (S.cmdrs || []).filter(c => c.team === foeTeam && c.state === 'aboard').sort((a, b) => (b.rank || 0) - (a.rank || 0))[0]);
+  const smart2 = diff >= 1;
   const want = f => { let v = (f.def.value || 50) * (1 + 1.2 * (1 - f.hp / f.def.hp)) / (ehp(f) / 1000 + 1.5); // value for the effort
+    if (smart2) { const c = coverOf(f, T); if (c === 0) v *= 1.35; else if (c === 1) v *= 1.12; } // stragglers and ships out on their own
     if (f.sh < (f.def.shield || 1) * .25) v *= 1.35; if (f.cmdr) v *= D.hunt ? 1.8 : 1.3; if (dn === 'onslaught' && f === flag) v *= 2.2;
     if ((dn === 'cunning') && (f.h || f.type === 'tender' || f.def.depot || f.type === 'hauler')) v *= 1.8; if (dn === 'patient' && f.hp / f.def.hp < .4) v *= 1.5;
     if (f.boardProg > 0 && f.boardTeam === 1 - foeTeam) v *= 1.6; return v; };
   const W = new Map(T.map(f => [f, want(f)])), load = new Map(), out = new Map();
   const order = mw.slice().sort((a, b) => dpsOf(b) - dpsOf(a));
   for (const s of order) {
-    const R = (effOf(s) || 1500) * (diff >= 2 ? 1.25 : 1.15); let best = null, bs = 0;
+    const R = (effOf(s) || 1500) * (diff >= 2 ? 1.25 : 1.15), all = dpsAll(s); let best = null, bs = 0, bd = 0;
     for (const f of T) { const d = hyp(f.x - s.x, f.y - s.y); if (d > R * 1.6) continue;
       const need = ehp(f) / 12, have = load.get(f) || 0; // ~12 seconds of fire is enough on one target; more is overkill
+      const hurt = smart2 ? dpsVs(s, f) : dpsOf(s); // what this ship's guns would actually do to her, through her plate
       let v = W.get(f) * (d < R ? 1.6 : 1) / (1 + d / 9000) * (have > need ? .25 : 1); if (s.engage === f || (s.order && s.order.t === f)) v *= 1.25; // a little stickiness
-      if (v > bs) { bs = v; best = f; } }
-    if (best) { out.set(s, best); load.set(best, (load.get(best) || 0) + dpsOf(s)); }
+      if (smart2) v *= .2 + .8 * Math.min(1, hurt / all); // each hull shoots what it can hurt: the rock, paper and scissors of the line
+      if (v > bs) { bs = v; best = f; bd = hurt; } }
+    if (best) { out.set(s, best); load.set(best, (load.get(best) || 0) + (smart2 ? bd : dpsOf(s))); }
   }
   return out;
 }
@@ -138,6 +164,20 @@ function slotOf(s, mw) {
   return P.slots.get(s);
 }
 const D_screen = () => !!doc().screen;
+// the screen: each flak frigate is told off to the capital ship nearest her, two at most to a ship, the biggest ships
+// first, once the enemy brings fighters, missiles or torpedo boats (as the COUNTER cards have it: flak kills missiles
+// and ripWings). A guard whose ship is lost goes back to the line
+function assignGuards(mw, seen) {
+  P.guard = P.guard || new Map(); P.guardK = P.guardK || new Map();
+  for (const [g, c] of P.guard) if (!live(g) || !live(c) || c.broken) { P.guard.delete(g); P.guardK.delete(g); }
+  const threat = seen.some(f => f.def.fighter || f.type === 'corvette' || f.type === 'raider' || f.weapons.some(w => w.def.kind === 'missile' && !w.def.nuke));
+  if (!threat) return;
+  const caps = mw.filter(s => s.def.cmd && (s.def.value || 0) >= 500 && !s.def.fighter).sort((a, b) => (b.def.value || 0) - (a.def.value || 0)); if (!caps.length) return;
+  const flak = mw.filter(s => s.weapons.some(w => w.def.kind === 'flak' && w.def.range >= 1000) && !s.def.cmd && !P.guard.has(s));
+  for (const g of flak) { const n = c => [...P.guard.values()].filter(x => x === c).length;
+    const c = caps.filter(c => n(c) < 2).sort((a, b) => hyp(a.x - g.x, a.y - g.y) - hyp(b.x - g.x, b.y - g.y))[0]; if (!c) break;
+    const mate = [...P.guard].find(([, x]) => x === c); P.guardK.set(g, mate ? -(P.guardK.get(mate[0]) || 1) : (g.id % 2 ? 1 : -1)); P.guard.set(g, c); }
+}
 export function tick() {
   if (!P) return;
   const { world, defending, diff: d0 } = P.ctx, D = doc(), b = bodyOf(world), diff = d0 ?? 1, smart = diff > 0;
@@ -169,6 +209,9 @@ export function tick() {
   if (D.dark && !P.dark && !defending && gap > 40000 && gap < 150000) { P.dark = true; for (const s of mine) if (warship(s)) goCold(s); }
   coldAI(mine, foes);
   const alloc = smart ? allocate(mw, seen, D, diff) : new Map();
+  const aimedN = new Map(); for (const f of alloc.values()) aimedN.set(f, (aimedN.get(f) || 0) + 1);
+  P.sternN = new Map(); for (const s of mw) if (s.order.stern && live(s.order.t)) P.sternN.set(s.order.t, (P.sternN.get(s.order.t) || 0) + 1);
+  if (smart) assignGuards(mw, seen);
   const esc = mw.filter(s => !s.def.cmd), ec = cen(esc), slow = mw.length ? Math.min(...mw.map(s => s.def.cruise * Math.max(.15, s.hf || 1))) * .95 : 200;
   const px = -uy, py = ux; // across the line
   const post = P.post || 'engage';
@@ -204,8 +247,15 @@ export function tick() {
     }
     if (s.lying && post === 'hold') { const L = s.lying; s.order = { type: 'move', x: L.f.x + L.ox, y: L.f.y + L.oy }; continue; }
     s.order.back = false;
+    // a flak frigate keeps beside the capital ship she screens, killing what comes at it, her rails on the allotted target
+    const gc = smart && P.guard && P.guard.get(s);
+    if (gc && live(gc) && !gc.broken && post !== 'fallback' && post !== 'shelter' && post !== 'hold') {
+      const k = P.guardK.get(s) || 1, gx = gc.x + ux * 420 + px * k * 380, gy = gc.y + uy * 420 + py * k * 380;
+      if (hyp(s.x - gx, s.y - gy) > 250 || s.order.type !== 'move') s.order = { type: 'move', x: gx, y: gy, guard: true };
+      s.engage = aim && hyp(aim.x - s.x, aim.y - s.y) < effOf(s) * 1.05 ? aim : null; continue;
+    }
     const slotPt = (cx, cy) => ({ x: cx + px * sl.lat - ux * sl.back, y: cy + py * sl.lat - uy * sl.back });
-    const fightAim = () => { if (aim) { if (!(s.order.type === 'attack' && s.order.t === aim)) s.order = { type: 'attack', t: aim }; s.engage = aim; } else if (s.order.type !== 'amove' || Math.random() < .3) s.order = { type: 'amove', x: t.x, y: t.y }; };
+    const fightAim = () => { if (aim) { if (!(s.order.type === 'attack' && s.order.t === aim && !s.order.side && !s.order.stern)) s.order = { type: 'attack', t: aim }; s.engage = aim; } else if (s.order.type !== 'amove' || Math.random() < .3) s.order = { type: 'amove', x: t.x, y: t.y }; };
     if (post === 'fallback') { const back = defending || !P.fb ? sh || mc : P.fb, p = slotPt(back.x, back.y); s.order = { type: 'move', x: p.x, y: p.y, face: Math.atan2(uy, ux) }; s.helm = 'range'; if (aim && hyp(aim.x - s.x, aim.y - s.y) < effOf(s)) s.engage = aim; continue; }
     if (post === 'shelter') { const p = slotPt(sh.x, sh.y); if (s.order.type !== 'move' || hyp(s.order.x - p.x, s.order.y - p.y) > 1500) s.order = { type: 'move', x: p.x, y: p.y }; continue; }
     if (post === 'hold') {
@@ -228,6 +278,17 @@ export function tick() {
     // capital ships never lead: one ahead of its escorts drops back behind them, guns still firing
     if (smart && D.screen && s.def.cmd && esc.length > 2 && ec && post !== 'rush') { const ahead = ((s.x - ec.x) * ux + (s.y - ec.y) * uy); if (ahead > 1200) { s.order = { type: 'move', x: ec.x - ux * 1500, y: ec.y - uy * 1500, screen: true }; if (aim) s.engage = aim; continue; } }
     if (post === 'standoff') s.helm = 'range';
+    // the counters in the fight: a fast escort whose target is a slow capital ship already under other guns works round to
+    // her stern, where there is no plate and the drive takes double harm; any ship whose target has lost a shield half
+    // works round to that beam and keeps the wound open
+    if (smart && post !== 'standoff') {
+      const st = s.order.stern && live(s.order.t) ? s.order.t : null;
+      if (st && hp > .35 && hyp(st.x - s.x, st.y - s.y) < 16000) { s.engage = st; continue; } // committed to the run
+      if (aim && !s.cmdr && sternRunner(s) && sternWorthy(aim) && hp > .5 && (aimedN.get(aim) || 0) >= 2 && (P.sternN.get(aim) || 0) < (diff >= 2 ? 3 : 2)) {
+        s.order = { type: 'attack', t: aim, stern: true }; s.engage = aim; P.sternN.set(aim, (P.sternN.get(aim) || 0) + 1); continue; }
+      const sd = aim && !s.def.cmd && !s.cmdr && softSide(aim); // capital ships and flagships keep their place behind the screen
+      if (sd && hyp(aim.x - s.x, aim.y - s.y) < effOf(s) * 1.8) { if (!(s.order.type === 'attack' && s.order.t === aim && s.order.side === sd)) s.order = { type: 'attack', t: aim, side: sd }; s.engage = aim; continue; }
+    }
     if (post === 'rush') { s.helm = 'auto'; if (aim) { s.order = { type: 'attack', t: aim }; s.engage = aim; } else s.order = { type: 'amove', x: t.x, y: t.y }; continue; }
     fightAim();
     if (!aim && P.focus.length) { const R = reach(s) * 1.15, f = P.focus.filter(f => hyp(f.x - s.x, f.y - s.y) < R)[0]; if (f) s.engage = f; }

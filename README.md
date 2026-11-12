@@ -37,6 +37,10 @@ Needs Python 3 with Playwright (`pip install playwright && playwright install ch
 - `python3 tests/smoke.py` plays 12 campaign turns with auto-resolved battles. Fails on any page error.
 - `bash tests/run_tournament.sh` runs the space-battle AI (`js/enemyai.js`) against the previous version (`tests/baseline/enemyai_v1.js`) across the standard scenarios and prints a summary. `SEEDS=` and `JOBS=` control the size. Takes around 15–20 minutes.
 
+- `bash tests/run_tournament.sh` also takes `OLD_AI=path/to/enemyai.js` (compare against another version, e.g. `git show main:js/enemyai.js > /tmp/old.js`), `SCEN="even attack"` and `AIS=new`. Results vary a lot from run to run: use 4+ seeds.
+- `node tests/ground_ai.mjs [--seeds 8] [--modes OO,NN,NO,ON]` fights whole ground battles headless in Node (no browser, no server) with the AI on both sides, the old AI (main's, from git) grafted beside the new: both old, both new, new attacker against old defender, old attacker against new defender.
+- `python3 tests/campaign_ai.py --runs 3` plays all-AI campaigns; it also reports how many battles the forecast called close (10–90%), feints and fleets that fell back.
+
 Headless Chrome renders through SwiftShader on WebGL2, so the tests check behaviour, not looks. Graphics need checking on a real GPU.
 
 ## Working on it
