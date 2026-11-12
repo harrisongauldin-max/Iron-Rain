@@ -158,20 +158,37 @@ export function animMesh(im, kind) {
   return true;
 }
 
+// ---------------------------------------------------------------- each figure walks to its place
+// groundview lays a unit's figures out on formation slots every frame; set straight onto them, figures teleported when
+// the block re-formed (men falling, a file added or lost), skated sideways when the unit wheeled, swivelled with every
+// jostle and popped up into flight. settle() eases each figure from where it stood last frame (L = [x, y, z, yaw, lift])
+// toward its slot, turns it at its own pace and lifts it smoothly; it returns [x, z, yaw, lift, speed], the speed being
+// how fast the figure itself is moving, so its legs step when it shuffles into a new place. Far jumps (a landing, a
+// first frame) are taken at once.
+const SET = [0, 0, 0, 0, 0];
+export function settle(L, tx, tz, tyaw, lift, dt) {
+  if (globalThis.__irNoSettle || !L || !(dt >= 0) || Math.hypot(L[0] - tx, L[2] - tz) > 40) { SET[0] = tx; SET[1] = tz; SET[2] = tyaw; SET[3] = lift; SET[4] = 0; return SET; }
+  const k = 1 - Math.exp(-dt * 7), ky = 1 - Math.exp(-dt * 8), kl = 1 - Math.exp(-dt * 3), l0 = L[4] ?? lift;
+  let da = tyaw - L[3]; da -= TAU * Math.round(da / TAU);
+  SET[0] = L[0] + (tx - L[0]) * k; SET[1] = L[2] + (tz - L[2]) * k; SET[2] = L[3] + da * ky; SET[3] = l0 + (lift - l0) * kl;
+  SET[4] = dt > 0 ? Math.hypot(SET[0] - L[0], SET[1] - L[2]) / dt : 0; return SET;
+}
+
 // ---------------------------------------------------------------- the per-figure motion (CPU)
 const U = new Map();   // per unit: stride phase, gait, turn, melee and fire phases
 const Q = new Float32Array(NV * 4);
 // the cycle of a melee blow: wind up, strike, recover (k in 0..1) → −1 (wound back) … +1 (struck through)
 const blow = (k, up = .45, hit = .14) => k < up ? -ease(k / up) : k < up + hit ? lerp(-1, 1, ease((k - up) / hit)) : lerp(1, 0, ease((k - up - hit) / (1 - up - hit)));
-const pulse = (k, w = .12) => k < w ? k / w : Math.exp(-(k - w) * 9);
+const pulse = (k, w = .1) => k < w ? Math.sin(k / w * PI / 2) : Math.exp(-(k - w) * 8); // eases into the kick, no corner at the top
 // advance one unit's clocks (once per game step, before its figures are posed)
 function unitClock(u, t, kind, scale) {
   let s = U.get(u.id); if (!s) { s = { ph: Math.random() * TAU, g: 0, a: u.a, turn: 0, mph: Math.random(), fire: 0, fly: 0, mel: 0, t }; U.set(u.id, s); }
   const dt = Math.max(0, Math.min(.1, t - s.t)); s.t = t; if (dt <= 0) return s;
   const R = RIG[kind], L = R.leg * scale, T = u.T || {}, ca = Math.cos(u.a), sa = Math.sin(u.a);
-  const v = Math.hypot(u.vx || 0, u.vy || 0), along = (u.vx || 0) * ca + (u.vy || 0) * sa;
+  const v0 = Math.hypot(u.vx || 0, u.vy || 0), along = (u.vx || 0) * ca + (u.vy || 0) * sa;
+  s.v = (s.v ?? v0) + (v0 - (s.v ?? v0)) * (1 - Math.exp(-dt * 4)); const v = s.v; // the stride follows a steadied speed
   let da = u.a - s.a; da -= TAU * Math.round(da / TAU); s.a = u.a; s.turn += (clamp(Math.abs(da) / Math.max(dt, 1e-3), 0, 2) - s.turn) * (1 - Math.exp(-dt * 6));
-  const flying = (kind === 'gold' || kind === 'lead') && v > 8;
+  const flying = (kind === 'gold' || kind === 'lead') && v0 > 8;
   s.fly += ((flying ? 1 : 0) - s.fly) * (1 - Math.exp(-dt * 3));
   // stride: the swing amplitude grows from a walk to a run, and the cadence is set so the feet don't slide
   const walk = T.walk || 3, run = T.run || walk * 2, k = clamp((v - walk) / Math.max(.1, run - walk), 0, 1), A = lerp(.28, .5, k);
@@ -184,11 +201,11 @@ function unitClock(u, t, kind, scale) {
   s.run = k; return s;
 }
 // write one figure: (x, y, z) its feet, yaw as groundview turns it, n its index in the unit, h a stable 0..1 hash
-export function animFigure(im, i, x, y, z, yaw, u, kind, n, h, scale, t) {
+export function animFigure(im, i, x, y, z, yaw, u, kind, n, h, scale, t, fv = 0) {
   const D = im.userData.anim; if (!D) return false;
   const s = unitClock(u, t, kind, scale), R = D.rig, st = R.style, q = Q; q.fill(0);
   // the gait: Grays keep step across the cohort (a little ragged), the others each their own
-  const ph = s.ph + (st === 'gray' ? (h - .5) * .5 : h * TAU), g = s.g, A = (s.A || .3) * Math.min(1, g), sn = Math.sin(ph), cs = Math.cos(ph);
+  const ph = s.ph + (st === 'gray' ? (h - .5) * .5 : h * TAU), g = Math.max(s.g, (1 - s.fly) * clamp((fv - .4) / ((u.T && u.T.walk) || 3), 0, 1) * .9), /* stepping when it shuffles into place, too */ A = (s.A || .3) * Math.min(1, g), sn = Math.sin(ph), cs = Math.cos(ph);
   const kb = .06 + .14 * s.fire * (1 - Math.min(1, g)), K = (.5 + .35 * (s.run || 0)) * Math.min(1, g);
   q[4] = -A * sn; q[5] = kb + K * Math.max(0, cs) ** 1.5; q[6] = A * sn; q[7] = kb + K * Math.max(0, -cs) ** 1.5;
   let drop = -R.leg * (1 - Math.cos(A * Math.abs(sn))) - R.leg * .45 * (1 - Math.cos(kb)), roll = .035 * g * sn * (st === 'shell' ? 2 : st === 'obs' ? 1.5 : 1);
@@ -222,7 +239,12 @@ export function animFigure(im, i, x, y, z, yaw, u, kind, n, h, scale, t) {
   q[8] = twist; q[9] = lean; q[10] = head; q[11] = cape;
   q[12] = aRp; q[13] = aRy; q[14] = aRz; q[15] = aLp; q[16] = aLy; q[17] = aLz; q[18] = drop; q[19] = roll;
   q[20] = 0; q[21] = banner; q[22] = scale; q[23] = nod;
-  write(D, i, q); return true;
+  write(D, i, q);
+  const ST = globalThis.__irAnimStats; if (ST) { // test hook: how far each figure moves against its own unit, frame to frame
+    const key = u.id * 4096 + n, rx = x - u.x, rz = z - u.y, p = ST.last.get(key);
+    if (p && t > p[3]) { const d = Math.hypot(rx - p[0], rz - p[1]); let dy = yaw - p[2]; dy = Math.abs(dy - TAU * Math.round(dy / TAU)); ST.n++; ST.d.push(d); ST.y.push(dy); }
+    ST.last.set(key, [rx, rz, yaw, t]); }
+  return true;
 }
 function write(D, i, q) { const o = ((Math.floor(i / PER_ROW) * PER_ROW + i % PER_ROW) * NV) * 4, a = D.data; for (let k = 0; k < NV * 4; k++) a[o + k] = q[k]; }
 export function animEnd(meshes) { for (const k in meshes) { const D = meshes[k].userData.anim; if (D) D.tex.needsUpdate = true; } }

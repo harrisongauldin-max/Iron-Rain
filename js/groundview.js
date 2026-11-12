@@ -10,7 +10,7 @@ import { FACTIONS, NEUTRAL_C } from './data.js';
 import { S } from './state.js';
 import { sfx, initAudio, music } from './audio.js';
 import { figureGeo, figureMaterial, corpseGeo, storkGeo, lodGeo, KINDS, MUZZLE, cityGeo, staticMaterial } from './groundmodels.js';
-import { animMesh, animFigure, animEnd, animReset, dyingAdd, drawDying } from './groundanim.js'; // the figures' motion (animator chat)
+import { animMesh, animFigure, animEnd, animReset, dyingAdd, drawDying, settle } from './groundanim.js'; // the figures' motion (animator chat)
 import * as GFX from './groundfx.js'; // textures and effects: the terrain surface, water, sky dome
 
 const PI = Math.PI, TAU = PI * 2, hyp = Math.hypot, clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -180,7 +180,7 @@ function camUpdate(dt) {
 // scattering when the unit runs
 const LOD_D = 350, CORPSES = 12000; // metres from the camera beyond which a figure is drawn as its stand-in; the fallen kept on the field
 function drawUnits(dt) {
-  const cnt = {}, cntL = {}; for (const k of KINDS) { cnt[k] = 0; cntL[k] = 0; } const t = G.t, cp = V.camera.position;
+  const cnt = {}, cntL = {}; for (const k of KINDS) { cnt[k] = 0; cntL[k] = 0; } const t = G.t, cp = V.camera.position, dtg = G.paused ? 0 : dt * (G.speed || 1);
   for (const u of G.units) {
     if (u.state === 'fall' || u.men <= 0 && !V.lastFig.has(u.id)) continue;
     const kd = kindOf(u.type), pf = perFig(u.type, u.men0), nf = u.gone ? 0 : Math.ceil(u.men / pf), fp = footprint(u);
@@ -195,14 +195,15 @@ function drawUnits(dt) {
       if (C0[kk] >= imk.instanceMatrix.count) break;
       const fi = n % files, ri = Math.floor(n / files), h1 = ((u.id * 928371 + n * 2654435761) >>> 0) / 4294967296, h2 = ((u.id * 1234567 + n * 7654321) >>> 0) / 4294967296;
       let ox = (fi - (files - 1) / 2) * dx + (h1 - .5) * dx * .35, oz = -((ri - (ranks - 1) / 2) * dz) + (h2 - .5) * dz * .35;
-      if (rout) { const sc = 1 + Math.min(4, (t - (u.routT || t)) * .4); ox *= sc; oz *= sc; ox += (h2 - .5) * 30; }
+      if (rout) { const rt = t - (u.routT || t), sc = 1 + Math.min(4, rt * .4); ox *= sc; oz *= sc; ox += (h2 - .5) * 30 * Math.min(1, rt * .5); } // the scatter grows, it doesn't jump
       if (mel) { ox += Math.sin(t * 6 + n) * .5; oz += Math.cos(t * 5 + n * 1.7) * .5 + (ri === 0 ? 1.5 : 0); }
-      const wx = u.x + px * ox + ca * oz, wz = u.y + py * ox + sa * oz;
-      let wy = heightAt(wx, wz); if (u.type === 'gravpod') wy += 2.2 + Math.sin(t * 2 + n) * .3; if (u.type === 'peerless' && mv > 8) wy += 3 + Math.sin(t * 3 + n) * 1.5;
+      const lift = u.type === 'gravpod' ? 2.2 + Math.sin(t * 2 + n) * .3 : u.type === 'peerless' && mv > 8 ? 3 + Math.sin(t * 3 + n) * 1.5 : 0;
+      const tyaw = PI / 2 - (rout ? u.a + PI * 0 : u.a) + (mel ? Math.sin(t * 1.7 + n) * .18 : 0); // in melee each turns a little to his own foe
+      const P = settle(last[n], u.x + px * ox + ca * oz, u.y + py * ox + sa * oz, tyaw, lift, dtg), wx = P[0], wz = P[1], yaw = P[2], lf = P[3], fv = P[4]; // each walks to his place (groundanim.js)
+      const wy = heightAt(wx, wz) + lf;
       const bob = mv > .5 && kd !== 'pod' ? Math.abs(Math.sin(t * (u.run ? 11 : 7) + h1 * 10)) * .12 : 0;
-      const yaw = PI / 2 - (rout ? u.a + PI * 0 : u.a) + (mel ? Math.sin(t * 4 + n) * .4 : 0);
       tmpV.set(wx, wy + bob, wz); tmpQ.setFromAxisAngle(UP, yaw); tmpS.set(VS, VS, VS); tmpM.compose(tmpV, tmpQ, tmpS);
-      imk.setMatrixAt(C0[kk], tmpM); imk.setColorAt(C0[kk], base); if (!far) animFigure(imk, C0[kk], wx, wy, wz, yaw, u, kk, n, h1, VS, t); C0[kk]++; figs.push([wx, wy, wz, yaw]);
+      imk.setMatrixAt(C0[kk], tmpM); imk.setColorAt(C0[kk], base); if (!far) animFigure(imk, C0[kk], wx, wy, wz, yaw, u, kk, n, h1, VS, t, fv); C0[kk]++; figs.push([wx, wy, wz, yaw, lf]);
     }
     // the fallen stay where they fell
     if (last.length > figs.length) for (let n = figs.length; n < last.length; n++) if (far || !dyingAdd(last[n], u.team, kd, base.clone(), VS, t)) addCorpse(last[n], u.team); // near, they fall first
