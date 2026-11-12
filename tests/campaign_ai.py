@@ -18,6 +18,8 @@ Metrics, averaged over the runs (per power where it says so):
   linger        weeks a power spent alive on 2 worlds or fewer while at war with someone who was not weary
   peaceNearDead peace treaties made with a power that held 2 worlds or fewer
   heEnd/worldsEnd each power's weekly He-3 income (after upkeep) and worlds held at the end
+  battles/closeShare battles fought, and the share the forecast called between 10% and 90% (the fights worth fighting)
+  feint/evade   offensives that struck another world than the one they massed for; fleets that fell back before a stronger force
 Passes (exit 0) if no page errors. --save NAME writes tests/results/campaign_ai_NAME.json (not committed); --compare
 takes such a NAME or a path, e.g. tests/baseline/campaign_ai.json, the reference summary (6 runs x 80 weeks, all-AI)
 after the campaign AI rework. Results vary a good deal from run to run: compare 6 runs or more.
@@ -38,7 +40,7 @@ RUN_JS = """async([MODE,TURNS])=>{const K=window.__CAMP.K, C=window.__CAMP.C; do
   const nW=f=>Object.values(C.worlds).filter(w=>w.owner===f).length;
   for(let t=0;t<TURNS;t++){
     const small={}; for (const f of F) small[f]=C.fac[f].alive && nW(f)<=2;
-    const cf=K.endTurn(); for(const c of cf) K.autoResolve(c); K.finishTurn();
+    const cf=K.endTurn(); for(const c of cf) { const p=K.forecastBattle(c,60).attWin; out.battles=(out.battles||0)+1; if (p>=.1&&p<=.9) out.close=(out.close||0)+1; K.autoResolve(c); } K.finishTurn();
     // new chronicle entries this week
     const ch=C.chron||[], i=last?ch.indexOf(last):-1, neu=ch.slice(i+1); last=ch.slice(-1)[0];
     for (const e of neu) { if (e.k==='war' && e.f && F.includes(e.f)) out.wars[e.f]++; if (e.k==='peace') { out.peace++; if (F.some(f=>small[f] && e.text.includes(K.BLOC_NAME[f]))) out.peaceNearDead++; } if (e.k==='fall') out.fell.push(e.f+'@'+C.turn); }
@@ -55,7 +57,7 @@ RUN_JS = """async([MODE,TURNS])=>{const K=window.__CAMP.K, C=window.__CAMP.C; do
       for (const id in C.worlds) { const w=C.worlds[id]; if (w.owner!==f||!w.lv.yard) continue; if (!room) continue; out.yardTot++; if (!w.sq.length && R.he>1500) out.yardIdle++; }
       if (nW(f)<=2 && F.some(o=>o!==f&&C.fac[o].alive&&K.relOf(f,o)==='war'&&(C.weary[o]||0)<55)) out.linger++; }
   }
-  const S=C.aiStats||{}; out.ops=S.ops||C.opsLog||0; out.multi=S.multi||C.opsMulti||0; out.opFleets=S.ops?+(S.fleets/S.ops).toFixed(2):null;
+  const S=C.aiStats||{}; out.feint=S.feint||0; out.evade=S.evade||0; out.closeShare=out.battles?+(out.close/out.battles).toFixed(3):0; out.ops=S.ops||C.opsLog||0; out.multi=S.multi||C.opsMulti||0; out.opFleets=S.ops?+(S.fleets/S.ops).toFixed(2):null;
   out.inc={}; for (const f of F) out.inc[f]=C.fac[f].alive?Math.round(K.income(f).he):null;
   out.cut=S.cut||0; out.turn=C.turn; out.over=C.over||null;
   out.own={}; for (const id in C.worlds) out.own[C.worlds[id].owner]=(out.own[C.worlds[id].owner]||0)+1;
@@ -85,6 +87,7 @@ def summarise(runs):
     S['warsAI'] = avg([sum(r['wars'].values()) for r in runs])
     S['yardIdle'] = avg([r['yardIdle'] / max(1, r['yardTot']) for r in runs])
     for k in ['ops', 'multi', 'idle', 'streak', 'ping5', 'linger', 'peaceNearDead', 'peace', 'cut']: S[k] = avg([r[k] for r in runs])
+    for k in ['battles', 'closeShare', 'feint', 'evade']: S[k] = avg([r.get(k) or 0 for r in runs])
     S['opFleets'] = avg([r['opFleets'] for r in runs if r['opFleets'] is not None]) if any(r['opFleets'] for r in runs) else None
     S['falls'] = avg([len(r['fell']) for r in runs])
     for f in F: S['heEnd_' + f] = avg([r['inc'][f] for r in runs if r.get('inc') and r['inc'][f] is not None]); S['worldsEnd_' + f] = avg([r['own'].get(f, 0) for r in runs])
