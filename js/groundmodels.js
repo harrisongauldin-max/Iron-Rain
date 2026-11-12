@@ -96,7 +96,7 @@ class Fig {
     const g = new THREE.ExtrudeGeometry(sh, { depth: t, bevelEnabled: false }); g.rotateX(PI / 2); g.translate(0, y, 0); return this.add(g, paint, tm, em);
   }
   both(fn) { fn(1); fn(-1); return this; }
-  build() { const g = mergeGeometries(this.parts); g.computeBoundingBox(); g.computeBoundingSphere(); g.userData.tris = this.tris; return g; }
+  build() { const g = mergeGeometries(this.parts); g.computeBoundingBox(); g.computeBoundingSphere(); g.userData.tris = this.tris; g.userData.parts = this.parts.map(p => p.attributes.position.count); return g; } // part ranges: groundanim.js tags each whole part with a bone
 }
 
 // ---------------------------------------------------------------- the Grays (1.8 m) — modern tactical troopers

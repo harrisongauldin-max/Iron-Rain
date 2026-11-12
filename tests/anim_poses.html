@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Iron Rain — ground figure animation lab</title>
+<style>html,body{margin:0;height:100%;background:#111;color:#ddd;font:13px system-ui}canvas{display:block;width:100%;height:100%}
+#hud{position:fixed;left:10px;top:8px;background:#0008;padding:6px 10px;border-radius:4px;line-height:1.5}#hud b{color:#f2c14e}</style>
+<script type="importmap">{"imports":{"three":"../vendor/three/three.webgpu.js","three/webgpu":"../vendor/three/three.webgpu.js","three/tsl":"../vendor/three/three.tsl.js"}}</script>
+</head><body><canvas id="cv"></canvas>
+<div id="hud"><b>Ground figure animation lab</b> (groundanim.js) — rows: Gray, RailRifle, Obsidian, Peerless, Legate, StarShell · columns: idle, walk, run, fire, melee, walk backward, turning, fly (Golds), dying<br>
+drag to orbit · wheel to zoom · <span id="st"></span></div>
+<script type="module">
+// Every figure kind in every state the game uses, posed live by groundanim.js exactly as groundview poses them.
+// Open at /tests/anim_poses.html on the dev server. window.__lab exposes { t, setTime(t), pause } for screenshots.
+import * as THREE from 'three';
+import { figureGeo, figureMaterial } from '../js/groundmodels.js';
+import { animMesh, animFigure, animEnd, dyingAdd, drawDying, animReset } from '../js/groundanim.js';
+const KINDS = ['inf', 'rail', 'obs', 'gold', 'lead', 'shell'], COLS = ['idle', 'walk', 'run', 'fire', 'melee', 'back', 'turn', 'fly', 'dying'];
+const VS = 2.2, GAP = 9, ROW = 12;
+const cv = document.getElementById('cv'), R = new THREE.WebGPURenderer({ canvas: cv, antialias: true });
+R.setPixelRatio(Math.min(2, devicePixelRatio)); R.shadowMap.enabled = true;
+const sc = new THREE.Scene(); sc.background = new THREE.Color('#3a2a22');
+const cam = new THREE.PerspectiveCamera(35, 1, .5, 2000);
+sc.add(new THREE.HemisphereLight('#ffe6cc', '#3a2418', 1.4));
+const sun = new THREE.DirectionalLight('#fff1dd', 2.6); sun.position.set(-60, 120, 80); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -80, right: 80, top: 80, bottom: -80, far: 400 }); sc.add(sun);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshStandardMaterial({ color: '#7a4a32', roughness: .95 })); ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; sc.add(ground);
+const team = new THREE.Color('#ff4b3e'), meshes = {}, cnt = {};
+for (const k of KINDS) { const im = new THREE.InstancedMesh(figureGeo(k), figureMaterial(k), 64); im.castShadow = true; im.frustumCulled = false; im.setColorAt(0, team); animMesh(im, k); sc.add(im); meshes[k] = im; }
+// one fake unit per cell, behaving as the game's units do in each state
+const T = { inf: { walk: 2.8, run: 5.6 }, rail: { walk: 2.6, run: 5.2 }, obs: { walk: 3, run: 6.6 }, gold: { walk: 6, run: 12 }, lead: { walk: 6, run: 12 }, shell: { walk: 3.4, run: 7 } };
+const units = {}; let id = 1;
+for (const k of KINDS) for (const c of COLS) units[k + c] = { id: id++, a: Math.PI / 2, vx: 0, vy: 0, T: T[k], melee: null, firing: false, state: 'idle' };
+let t = 0, last = performance.now(), paused = false, dieT = -9;
+const lab = window.__lab = { only: null, // [kind, column]: one figure alone at the origin, for close study
+  get t() { return t; }, setTime(v) { t = v; }, pause(p = true) { paused = p; } };
+function frame(now) {
+  const dt = Math.min(.05, (now - last) / 1000); last = now; if (!paused) t += dt;
+  for (const k of KINDS) cnt[k] = 0;
+  KINDS.forEach((k, r) => COLS.forEach((c, j) => {
+    const u = units[k + c], solo = !!lab.only, x = solo ? 0 : (j - (COLS.length - 1) / 2) * GAP, z = solo ? 0 : (r - (KINDS.length - 1) / 2) * ROW, im = meshes[k];
+    if (c === 'dying') return;
+    if (lab.only && (lab.only[0] !== k || lab.only[1] !== c)) return;
+    const sp = { idle: 0, walk: u.T.walk, run: u.T.run, fire: 0, melee: 0, back: u.T.walk * .6, turn: 0, fly: 14 }[c];
+    if (c === 'fly' && k !== 'gold' && k !== 'lead') return;
+    u.a = c === 'turn' ? Math.PI / 2 + Math.sin(t * .8) * 1.4 : Math.PI / 2;
+    const dir = c === 'back' ? -1 : 1; u.vx = Math.cos(u.a) * sp * dir; u.vy = Math.sin(u.a) * sp * dir;
+    u.melee = c === 'melee' ? {} : null; u.firing = c === 'fire'; u.state = c === 'melee' ? 'melee' : c === 'fire' ? 'fire' : sp ? 'move' : 'idle';
+    const y = c === 'fly' ? 3 + Math.sin(t * 3) * 1.5 : 0, yaw = Math.PI / 2 - u.a;
+    animFigure(im, cnt[k], x, y, z, yaw, u, k, 0, ((u.id * 2654435761) >>> 0) / 4294967296, VS, t); im.setColorAt(cnt[k], team); cnt[k]++;
+  }));
+  // the dying column: one falls every 1.4 s and lies there briefly as a stand-in for the corpse
+  if (t - dieT > 1.4 && (!lab.only || lab.only[1] === 'dying')) { dieT = t; KINDS.filter(k => !lab.only || lab.only[0] === k).forEach((k, r) => dyingAdd([lab.only ? 0 : (COLS.length - 1) / 2 * GAP, 0, lab.only ? 0 : (KINDS.indexOf(k) - (KINDS.length - 1) / 2) * ROW, 0], 0, k, team, VS, t)); }
+  drawDying(meshes, cnt, t, () => {}); animEnd(meshes);
+  for (const k of KINDS) { meshes[k].count = cnt[k]; if (meshes[k].instanceColor) meshes[k].instanceColor.needsUpdate = true; }
+  R.render(sc, cam); document.getElementById('st').textContent = 't = ' + t.toFixed(2) + (paused ? ' (paused)' : '');
+  requestAnimationFrame(frame);
+}
+// camera: orbit with the mouse
+const C = { yaw: .6, pitch: .45, dist: 95, tx: 0, tz: 0 }; let drag = null;
+const place = () => { cam.position.set(Math.sin(C.yaw) * Math.cos(C.pitch) * C.dist, Math.sin(C.pitch) * C.dist, Math.cos(C.yaw) * Math.cos(C.pitch) * C.dist); cam.position.x += C.tx; cam.position.z += C.tz; cam.lookAt(C.tx, 3, C.tz); };
+lab.cam = (yaw, pitch, dist, tx = 0, tz = 0) => { Object.assign(C, { yaw, pitch, dist, tx, tz }); place(); };
+lab.row = (r, yaw = 1.2, pitch = .12, dist = 70) => lab.cam(yaw, pitch, dist, 0, (r - (KINDS.length - 1) / 2) * ROW); // one row, side on
+addEventListener('pointerdown', e => drag = [e.clientX, e.clientY]); addEventListener('pointerup', () => drag = null);
+addEventListener('pointermove', e => { if (!drag) return; C.yaw -= (e.clientX - drag[0]) * .005; C.pitch = Math.max(.05, Math.min(1.4, C.pitch + (e.clientY - drag[1]) * .005)); drag = [e.clientX, e.clientY]; place(); });
+addEventListener('wheel', e => { C.dist = Math.max(10, Math.min(400, C.dist * (1 + Math.sign(e.deltaY) * .1))); place(); });
+const fit = () => { R.setSize(innerWidth, innerHeight, false); cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); };
+addEventListener('resize', fit); fit(); place();
+animReset(); await R.init(); requestAnimationFrame(frame); lab.ready = true;
+</script></body></html>
