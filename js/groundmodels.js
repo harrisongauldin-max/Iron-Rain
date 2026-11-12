@@ -19,7 +19,7 @@
 // shell/pod/aa ≤ 6,000 · corpse ≤ 300 · stork ≤ 15,000. triCount() reports them.
 import * as THREE from 'three';
 import { MeshStandardNodeMaterial } from 'three/webgpu';
-import { attribute, mix, max, vec3, instanceColor } from 'three/tsl';
+import { attribute, mix, max, min, vec2, vec3, float, instanceColor, positionWorld, normalWorld, transformNormalToView, texture, fract, floor, abs, pow, select, dFdx, dFdy, log2, length, clamp, normalize, sign, uniform, Fn, dot } from 'three/tsl';
 import { cityPlan } from './ground.js';
 import { mergeGeometries } from '../vendor/three/utils/BufferGeometryUtils.js';
 
@@ -59,7 +59,7 @@ function roundedBox(w, h, d, r, seg = 3) {
 // a coordinate on the outer face stays; anything inside is scaled so the outermost inner ring lands at the bevel start
 const snapIn = (v, half, hin) => Math.abs(Math.abs(v) - half) < 1e-5 ? v : Math.abs(v) < 1e-9 ? 0 : Math.sign(v) * hin;
 class Fig {
-  constructor() { this.parts = []; this.tris = 0; }
+  constructor() { this.parts = []; this.tris = 0; this.role = null; this.roleFn = null; }  // role: which city texture a part wears (CITY_ROLE); figures leave it 0
   add(g, paint, tm = 0, em = 0) {
     if (!g.attributes.normal) g.computeVertexNormals();
     if (g.index) g = g.toNonIndexed();
@@ -69,6 +69,7 @@ class Fig {
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
     g.setAttribute('tm', new THREE.BufferAttribute(new Float32Array(n).fill(tm), 1));
     g.setAttribute('em', new THREE.BufferAttribute(new Float32Array(n).fill(em), 1));
+    g.setAttribute('role', new THREE.BufferAttribute(new Float32Array(n).fill(this.role != null ? this.role : this.roleFn ? this.roleFn(paint) : 0), 1));
     this.parts.push(g); this.tris += n / 3; return this;
   }
   // a rounded box: edges bevelled to radius r with smooth normals, so plates read as forged metal rather than voxels
@@ -553,6 +554,7 @@ function standard() {
 //            glyphs and blinking red lights", "spiked towers" — cantilevered jigsaw stacks, spikes, scaffolds, red lights
 //   deimos   the Battle Moon, a fleet base — bunkers with glacis plates, gun batteries, blast walls, radar masts
 //   _ice     a Rim colony: "very minimalistic and serene" — low pavilions with wide eaves, glass domes, thin white spires
+export const CITY_ROLE = { wall: 0, column: 1, facade: 2, trim: 3, pave: 4, metal: 5 }; // cells of the city texture atlas, see cityMaterial
 const CITY = {
   luna:    { base: '#d4d6dc', dark: '#9a9ea8', light: '#eceef2', trim: '#c9a24c', roof: '#6c7078', win: '#ffd9a0' },
   mars:    { base: '#8e3f2a', dark: '#5a2618', light: '#e8e2d8', trim: '#e8e2d8', roof: '#4a2016', win: '#ffd9a0' },
@@ -565,6 +567,7 @@ const CITY = {
 };
 export function cityGeo(blocks, CH, heightAt, stone, world) {
   const F = new Fig(), PI2 = PI * 2;
+  const sph0 = F.sph.bind(F); F.sph = (...a) => { const r0 = F.role; if (r0 == null) F.role = CITY_ROLE.metal; sph0(...a); F.role = r0; return F; }; // domes wear the metal
   const S = CITY[world] || CITY._ice; if (!CITY[world]) world = '_ice';
   // how each world builds: hx scales every height, core lifts the heart further, grand is the chance a whole 3x3 block between streets
   // becomes one great structure, split the chance an outer block is broken into several small buildings, open the chance it is left as a
@@ -574,11 +577,13 @@ export function cityGeo(blocks, CH, heightAt, stone, world) {
   for (const b of plots) {
     const x = b.x, z = b.z, w = b.w, y0 = heightAt(x, z) - 2, h = (Math.max(b.h * LAY.hx, LAY.min * (b.small ? .5 : 1)) + hashf(b.i, b.j, 61) * LAY.jit * (b.small ? .4 : 1) * (1.2 - b.d * .6)) * (1 + (LAY.core - 1) * Math.max(0, 1 - b.d / .4)) + 2, hsh = ((b.i * 31 + b.j * 17) % 10) / 10, v = .84 + hsh * .22, h2 = b.grand ? 0 : ((b.i * 7 + b.j * 13) % 10) / 10, h3 = ((b.i * 11 + b.j * 5) % 10) / 10;
     const n0 = F.parts.length, rot = LAY.rot ? (hashf(b.i, b.j, 53) - .5) * 2 * LAY.rot : 0;
+    // which texture each part wears (cityMaterial): facade (windows) for bodies in the base or light paint, stone for the dark
+    // paint, trim for trim, metal for roofs and lit parts; columns(), plazas and a few pieces say so themselves
+    F.role = null; F.roleFn = paint => paint === P || paint === L ? CITY_ROLE.facade : paint === D ? CITY_ROLE.wall : paint === T ? CITY_ROLE.trim : CITY_ROLE.metal;
     const P = V(S.base, v), D = V(S.dark, v), L = V(S.light, v), R = V(S.roof, v), T = S.trim, W = S.win;
-    const win = (cx, cy, cz, sx, sz, rows, step = 4.2, em = .45) => { for (let r = 0; r < rows; r++) { const yy = cy + (r + .5) * step; if (yy > y0 + h - 2) break; F.box(sx + .3, 1.4, sz + .3, cx, yy, cz, W, 0, 0, 0, 0, em); } };
-    const winR = (cx, cy, cz, r, rows, step = 4.2, em = .45) => { for (let k = 0; k < rows; k++) { const yy = cy + (k + .5) * step; if (yy > y0 + h - 2) break; F.cyl(r + .15, r + .15, 1.4, 16, cx, yy, cz, W, 0, 0, 0, 0, true, em); } }; // a lit band round a tower
+    const win = () => {}, winR = () => {}; // the storeys and their lit windows are in the facade texture now (cityMaterial); nothing to build
     const parapet = (cx, cy, cz, sx, sz) => { F.box(sx + 1, 1.4, sz + 1, cx, cy, cz, D); F.box(sx * .9, .4, sz * .9, cx, cy + .1, cz, R); };
-    const columns = (cx, cy, cz, sx, sz, n, ch, r, paint) => { for (let i = 0; i < n; i++) { const t = (i + .5) / n; F.cyl(r, r * 1.08, ch, 8, cx - sx / 2 + t * sx, cy + ch / 2, cz + sz / 2, paint); F.cyl(r, r * 1.08, ch, 8, cx - sx / 2 + t * sx, cy + ch / 2, cz - sz / 2, paint); if (i > 0 && i < n - 1) { F.cyl(r, r * 1.08, ch, 8, cx - sx / 2, cy + ch / 2, cz - sz / 2 + t * sz, paint); F.cyl(r, r * 1.08, ch, 8, cx + sx / 2, cy + ch / 2, cz - sz / 2 + t * sz, paint); } } };
+    const columns = (cx, cy, cz, sx, sz, n, ch, r, paint) => { const r0 = F.role; F.role = CITY_ROLE.column; for (let i = 0; i < n; i++) { const t = (i + .5) / n; F.cyl(r, r * 1.08, ch, 8, cx - sx / 2 + t * sx, cy + ch / 2, cz + sz / 2, paint); F.cyl(r, r * 1.08, ch, 8, cx - sx / 2 + t * sx, cy + ch / 2, cz - sz / 2, paint); if (i > 0 && i < n - 1) { F.cyl(r, r * 1.08, ch, 8, cx - sx / 2, cy + ch / 2, cz - sz / 2 + t * sz, paint); F.cyl(r, r * 1.08, ch, 8, cx + sx / 2, cy + ch / 2, cz - sz / 2 + t * sz, paint); } }  F.role = r0; };
     // the everyday buildings: never a plain cube. slab, L-plan, round tower, setback tiers or twin towers with a bridge, by hash
     const tower = (kind, cap = 'parapet', ww = w, hh = h, paintA = P, paintB = L) => {
       const wr = Math.floor(h3 * 5 + hsh * 2) % 5 || kind, yt = y0 + hh, swap = hsh > .5;
@@ -590,7 +595,7 @@ export function cityGeo(blocks, CH, heightAt, stone, world) {
     };
     const spire = (cx, cz, tiers, caps) => { let yy = y0, ww = w * .72; for (let k = 0; k < tiers.length; k++) { const th = h * tiers[k]; F.rbox(ww, th, ww, Math.min(1, ww * .08), 2, cx, yy + th / 2, cz, k % 2 ? L : P); win(cx, yy, cz, ww * .92, ww * .92, Math.floor(th / 4.2)); yy += th; ww *= .68; } return yy; };
 
-    if (b.open) { // open ground: a plaza, garden, yard or pad, in the city's own manner
+    if (b.open) { F.role = CITY_ROLE.pave; // open ground: a plaza, garden, yard or pad, in the city's own manner
       if (world === 'venus' || world === 'earth') { F.cyl(w * .4, w * .44, 1.2, 16, x, y0 + .6, z, R); for (let k = 0; k < 6; k++) F.sph(2 + hashf(k, b.i, 7) * 2, 6, 5, x + Math.cos(k * 1.05 + b.j) * w * .28, y0 + 3, z + Math.sin(k * 1.05 + b.j) * w * .28, V(S.roof, 1.2)); F.cyl(1.5, 1.5, 4, 8, x, y0 + 2, z, L); } // a garden with a fountain
       else if (world === 'deimos') { F.rbox(w, 1.6, w, .4, 2, x, y0 + .8, z, D); for (const s of [-1, 1]) F.box(w * .9, 4, 1.2, x, y0 + 2, z + s * w * .42, P); F.box(3, 2, 3, x, y0 + 2.6, z, D); } // a hardstand
       else if (world === 'mercury') { F.cyl(w * .42, w * .46, 2, 16, x, y0 + 1, z, L); for (let k = 0; k < 8; k++) F.cyl(.6, .7, 8, 6, x + Math.cos(k * PI / 4) * w * .36, y0 + 5, z + Math.sin(k * PI / 4) * w * .36, P); F.cyl(w * .4, w * .4, .6, 16, x, y0 + 9.3, z, T); } // a shaded court
@@ -612,7 +617,7 @@ export function cityGeo(blocks, CH, heightAt, stone, world) {
     } else if (world === 'mercury') { // Heliopolis: Corinthian towers, amphitheatres, viaducts, low domes
       if (h > 30 && h2 < .55) { const r = w * .3, sh = h * .78; F.rbox(w, 3, w, .4, 2, x, y0 + 1.5, z, D); F.cyl(r, r * 1.06, sh, 14, x, y0 + 3 + sh / 2, z, P); for (let k = 0; k < 8; k++) F.box(1.2, sh * .96, .6, x + Math.cos(k * PI2 / 8) * r * 1.0, y0 + 3 + sh / 2, z + Math.sin(k * PI2 / 8) * r * 1.0, L, 0, -k * PI2 / 8); // flutes
         F.cyl(r * 1.35, r * 1.05, h * .08, 14, x, y0 + 3 + sh + h * .04, z, L); F.rbox(r * 2.9, h * .1, r * 2.9, .5, 2, x, y0 + 3 + sh + h * .13, z, P); win(x, y0 + 3 + sh + h * .08, z, r * 2.6, r * 2.6, 2, 3.5); F.rbox(r * 1.6, 3, r * 1.6, .4, 2, x, y0 + h + 1.5, z, D); } // capital and entablature on top
-      else if (h < 16 && h2 < .15 && !b.small) { const r = w * .46; for (let k = 0; k < 14; k++) { const a = k * PI2 / 14, hh = 6 + 5 * Math.sin(a) ** 2; F.box(4.2, hh, w * .2, x + Math.cos(a) * r * .9, y0 + hh / 2, z + Math.sin(a) * r * .9, P, 0, -a + PI / 2); } F.cyl(r * .55, r * .6, 1.2, 14, x, y0 + .6, z, L); } // amphitheatre
+      else if (h < 16 && h2 < .15 && !b.small) { F.role = CITY_ROLE.wall; const r = w * .46; for (let k = 0; k < 14; k++) { const a = k * PI2 / 14, hh = 6 + 5 * Math.sin(a) ** 2; F.box(4.2, hh, w * .2, x + Math.cos(a) * r * .9, y0 + hh / 2, z + Math.sin(a) * r * .9, P, 0, -a + PI / 2); } F.cyl(r * .55, r * .6, 1.2, 14, x, y0 + .6, z, L); } // amphitheatre
       else if (h < 20 && h2 < .7) { for (let k = 0; k < 5; k++) F.box(2.4, 10, 2.4, x - w / 2 + (k + .5) * w / 5, y0 + 5, z, P); F.rbox(w, 2.4, 5, .4, 2, x, y0 + 11.2, z, L); for (let k = 0; k < 4; k++) F.box(.8, 4, 4.6, x - w / 2 + (k + 1) * w / 5, y0 + 8, z, D); } // viaduct arcade
       else if (h3 > .55) tower(0, 'parapet', w, h, P, L);
       else { const r = w * .44, hd = h * .5; F.rbox(w, hd, w, .8, 2, x, y0 + hd / 2, z, P); win(x, y0, z, w * .92, w * .92, Math.floor(hd / 4.2)); F.sph(r, 18, 9, x, y0 + hd, z, L, 0, Math.max(.3, (h - hd) / r), 1); F.cyl(1.2, 1.8, 3, 8, x, y0 + h + .8, z, D); } // low dome
@@ -651,6 +656,45 @@ export function staticMaterial(opts = {}) {
   const m = new MeshStandardNodeMaterial(Object.assign({ roughness: .85, metalness: .05 }, opts));
   const paint = attribute('color', 'vec3'), em = attribute('em', 'float');
   m.colorNode = paint; m.emissiveNode = paint.mul(em).mul(1.6);
+  return m;
+}
+
+// the textured city: one atlas per map (albedo, normal, roughness, emissive) per world, six 512 px cells (CITY_ROLE) with
+// 16 px wrapped gutters, under textures/city/ (made by tools/citytex.py and tools/atlas.py). Mapping is triplanar in world
+// metres, so no UV pass is needed on the kit: a vertical face takes its storeys from world y, a roof takes the metal or
+// the paving. Each cell tiles by fract(), so the mip level is computed from the untiled coordinate and sampled explicitly
+// (no seam at the tile edge); the gutters cover the levels that are used.
+const ATLAS_W = 1632, ATLAS_H = 1088, CELL = 544, GUT = 16, TEX = 512;
+const TILE = [[10, 10], [4, 4], [12, 4.2], [6, 6], [10, 10], [6, 6]]; // metres per tile per role (u, v): the facade is one storey of 4.2 m
+export function cityMaterial(world) {
+  const S = CITY[world] || CITY._ice; if (!CITY[world]) world = '_ice';
+  const tl = new THREE.TextureLoader();
+  const load = (suf, srgb) => { const t = tl.load(`textures/city/${world}${suf}.png`); t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.anisotropy = 8; return t; };
+  const A = load('_a', true), Nm = load('_n', false), Rg = load('_r', false), Em = load('_e', false);
+  const m = new MeshStandardNodeMaterial({ roughness: 1, metalness: 0 });
+  const paint = attribute('color', 'vec3'), em = attribute('em', 'float'), role = attribute('role', 'float');
+  const winColor = uniform(new THREE.Color(S.win));
+  const tileOf = r => { let u = vec2(TILE[0][0], TILE[0][1]); for (let k = 1; k < TILE.length; k++) u = select(r.equal(float(k)), vec2(TILE[k][0], TILE[k][1]), u); return u; };
+  // atlas coordinate of a tiled uv in a role's cell, and the mip level that uv would get
+  const cellUV = (r, uvT) => { const cx = r.mod(3), cy = floor(r.div(3)); const o = vec2(cx.mul(CELL).add(GUT).div(ATLAS_W), float(1).sub(cy.add(1).mul(CELL).div(ATLAS_H)).add(GUT / ATLAS_H)); return o.add(fract(uvT).mul(vec2(TEX / ATLAS_W, TEX / ATLAS_H))); };
+  const lodOf = uvT => { const px = uvT.mul(TEX); return clamp(log2(max(length(dFdx(px)), length(dFdy(px)))), 0, 4); };
+  const sampleAll = (r, uvT) => { const uv = cellUV(r, uvT), lod = lodOf(uvT); return { a: texture(A, uv).level(lod), n: texture(Nm, uv).level(lod).xyz.mul(2).sub(1), g: texture(Rg, uv).level(lod).x, e: texture(Em, uv).level(lod).x }; };
+  const p = positionWorld, n = normalWorld, an = abs(n);
+  const w0 = pow(an, vec3(8)), w = w0.div(w0.x.add(w0.y).add(w0.z));
+  const roofRole = select(role.equal(float(CITY_ROLE.pave)), float(CITY_ROLE.pave), float(CITY_ROLE.metal));
+  const tv = tileOf(role), th = tileOf(roofRole);
+  const sx = sampleAll(role, vec2(p.z, p.y).div(tv)), sz = sampleAll(role, vec2(p.x, p.y).div(tv)), sy = sampleAll(roofRole, vec2(p.x, p.z).div(th));
+  const blend = k => sx[k].mul(w.x).add(sz[k].mul(w.z)).add(sy[k].mul(w.y));
+  // the sampled normals into world space per plane: tangent along the face, bitangent up (or +z on a roof), then blended
+  const nx = vec3(sign(n.x).mul(sx.n.z), sx.n.y, sx.n.x.mul(sign(n.x))), nz = vec3(sz.n.x.mul(sign(n.z)), sz.n.y, sign(n.z).mul(sz.n.z)), ny = vec3(sy.n.x, sign(n.y).mul(sy.n.z), sy.n.y);
+  const nW = normalize(nx.mul(w.x).add(nz.mul(w.z)).add(ny.mul(w.y)));
+  const tone = clamp(dot(paint, vec3(.333)).div(.5), .8, 1.15); // the kit's per-plot paint variation survives as a tint
+  m.colorNode = blend('a').rgb.mul(tone);
+  m.normalNode = transformNormalToView(nW);
+  m.roughnessNode = blend('g');
+  m.metalnessNode = select(role.equal(float(CITY_ROLE.metal)), float(.6), float(0));
+  m.emissiveNode = paint.mul(em).mul(1.6).add(winColor.mul(blend('e')).mul(1.4));
+  m.userData.textures = [A, Nm, Rg, Em];
   return m;
 }
 
