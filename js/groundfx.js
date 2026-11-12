@@ -10,7 +10,7 @@ import { Fn, float, vec2, vec3, vec4, uniform, uniformArray, attribute, varying,
 const one = float(1), lum = c => dot(c, vec3(.3, .55, .15));
 const col3 = h => { const c = new THREE.Color(h); return vec3(c.r, c.g, c.b); };
 const T = uniform(0); // the clock, for water and cloud drift
-const sunDirU = uniform(new THREE.Vector3(.3, .8, .5)), coverU = uniform(0); // the Sun and the cloud cover, shared by the dome and the ground (the dome sets them)
+const sunDirU = uniform(new THREE.Vector3(.3, .8, .5)), coverU = uniform(0), wetU = uniform(0); // wetU: rain on the ground (darker, glossier) // the Sun and the cloud cover, shared by the dome and the ground (the dome sets them)
 let dome = null;
 // the clouds, as the dome paints them and as the ground wears their shadows: one noise, in world metres, drifting with the clock
 const cloudN = q => mx_fractal_noise_float(vec3(q.x.mul(.00075), q.y.mul(.00075), T.mul(.006)), 4, 2.1, .5, 1).mul(.5).add(.5);
@@ -95,6 +95,7 @@ export function terrainMaterial(M, B) {
     c.mulAssign(one.add(smoothstep(.02, .12, sk).mul(one.sub(smoothstep(.12, .3, sk))).mul(.35)));
     // the clouds' shadows crossing the ground
     c.mulAssign(one.sub(cloudShadow(p).mul(.42)));
+    c.mulAssign(one.sub(wetU.mul(.28).mul(one.sub(mk.x.mul(.5))))); // rain darkens the ground, bare soil and pavement most
     return c;
   })();
   m.colorNode = frag;
@@ -112,7 +113,8 @@ export function terrainMaterial(M, B) {
     const Nw = normalize(normalWorld.add(vec3(h0.sub(hx).mul(k), 0, h0.sub(hz).mul(k))));
     return transformNormalToView(Nw);
   })();
-  m.roughnessNode = Fn(() => { const mk2 = attribute('mask', 'vec4'); return float(.96).sub(mk2.z.mul(.2)).sub(mk2.y.mul(.18)); })();
+  m.roughnessNode = Fn(() => { const mk2 = attribute('mask', 'vec4'), p = positionWorld, pud = smoothstep(.55, .85, mx_noise_float(vec3(p.x.mul(.05), p.z.mul(.05), 2.5)).mul(.5).add(.5)); // puddles gather in the hollows of the noise
+    return float(.96).sub(mk2.z.mul(.2)).sub(mk2.y.mul(.18)).sub(wetU.mul(float(.38).add(pud.mul(.45)))); })();
   return m;
 }
 // the plain beyond the field: the biome's base ground, broken by the same clumps, fading into the haze
@@ -206,6 +208,7 @@ export function skyDome(sc, B, world, sunLight) {
   })();
   dome = new THREE.Mesh(geo, m); dome.renderOrder = -10; dome.frustumCulled = false; sc.add(dome);
   sc.background = null; sc.fog = new THREE.Fog(hor.clone().lerp(sky, .2), 3500 + (1 - K.haze) * 9000, 18000 + (1 - K.haze) * 50000); // next to no haze on an airless world
+  weatherInit(sc, world, B);
   return { dome, bright };
 }
 
@@ -229,7 +232,7 @@ function puffBatch() {
 }
 function puffColour(B, x, y) { if (B === BIOME._ice) return [.9, .93, .96]; const wet = G.map && G.map.seaH >= 0 && heightAt(x, y) < G.map.seaH + 2.5;
   const c = new THREE.Color(wet ? B.water : B.ground[3]); if (wet) c.lerp(new THREE.Color(B.ground[0]), .5).multiplyScalar(.7); else c.lerp(new THREE.Color(1, 1, 1), .12); return [c.r, c.g, c.b]; }
-function puff(x, y, z, vx, vy, vz, size, life, col, al = .4) { if (!puffs) return; const p = puffs.find(p => p.life <= 0); if (!p) return; Object.assign(p, { x, y, z, vx, vy, vz, size, life, max: life, col, al, rot: Math.random() * 6.28 }); }
+function puff(x, y, z, vx, vy, vz, size, life, col, al = .4, grav = 0) { if (!puffs) return; const p = puffs.find(p => p.life <= 0); if (!p) return; Object.assign(p, { x, y, z, vx, vy, vz, size, life, max: life, col, al, grav, rot: Math.random() * 6.28 }); }
 export function scorch(x, y, r) { const e = scorchA.array[scorchI]; e.set(x, y, r, T.value); scorchI = (scorchI + 1) % SCORCH_N; }
 function dustTick(dt, camera) {
   if (!G.on || !G.units) return; const B = G.map && G.map.B; if (!B) return;
@@ -237,19 +240,95 @@ function dustTick(dt, camera) {
   if (!puffs) return;
   const cx = camera.position.x, cz = camera.position.z, step = G.paused ? 0 : dt * (G.speed || 1);
   if (step > 0) {
+    const seaH = G.map.seaH ?? -1;
     for (const u of G.units) { if (u.gone || u.men <= 0 || u.T.fly) continue; const sp = Math.hypot(u.vx, u.vy); if (sp < .6) continue; if (Math.hypot(u.x - cx, u.y - cz) > 2600) continue;
       const rate = Math.min(1, u.men / 300) * (2 + sp * .6) * step; if (Math.random() > rate) continue;
-      const r = Math.max(6, Math.min(40, Math.sqrt(u.men) * 1.2)), a = Math.random() * 6.28, d = Math.sqrt(Math.random()) * r, px = u.x + Math.cos(a) * d, py = u.y + Math.sin(a) * d;
-      puff(px, heightAt(px, py) + 1, py, -u.vx * .25 + (Math.random() - .5) * 1.5, .9 + Math.random() * .8, -u.vy * .25 + (Math.random() - .5) * 1.5, 3 + Math.random() * 3, 1.6 + Math.random() * 1.2, puffColour(B, px, py), .32); }
-    for (const f of G.fx) if (f.k === 'land') { const R = f.big ? 30 : 16; scorch(f.x, f.y, R); const h = heightAt(f.x, f.y), col = puffColour(B, f.x, f.y);
+      const r = Math.max(6, Math.min(40, Math.sqrt(u.men) * 1.2)), a = Math.random() * 6.28, d = Math.sqrt(Math.random()) * r, px = u.x + Math.cos(a) * d, py = u.y + Math.sin(a) * d, hh = heightAt(px, py);
+      if (seaH >= 0 && hh < seaH - .3) { puff(px, seaH + .3, py, -u.vx * .4 + (Math.random() - .5) * 2, .3, -u.vy * .4 + (Math.random() - .5) * 2, 1.5 + Math.random() * 2, .8 + Math.random() * .6, [.92, .95, .97], .5); continue; } // wading: foam in the wake
+      puff(px, hh + 1, py, -u.vx * .25 + (Math.random() - .5) * 1.5, .9 + Math.random() * .8, -u.vy * .25 + (Math.random() - .5) * 1.5, 3 + Math.random() * 3, 1.6 + Math.random() * 1.2, puffColour(B, px, py), .32); }
+    for (const f of G.fx) if (f.k === 'land' && seaH >= 0 && heightAt(f.x, f.y) < seaH - .5) { // a shell into the water: a column thrown up and falling back, and a ring of foam
+      for (let i = 0; i < (f.big ? 18 : 10); i++) { const a = Math.random() * 6.28, v = Math.random() * 3; puff(f.x + Math.cos(a) * v, seaH + .5, f.y + Math.sin(a) * v, Math.cos(a) * 2, 22 + Math.random() * (f.big ? 26 : 14), Math.sin(a) * 2, 2.5 + Math.random() * 3, 2.2 + Math.random() * .8, [.9, .94, .97], .6, 1); }
+      for (let i = 0; i < 8; i++) { const a = Math.random() * 6.28, v = 6 + Math.random() * 8; puff(f.x, seaH + .3, f.y, Math.cos(a) * v, 1, Math.sin(a) * v, 3 + Math.random() * 3, 1.6, [.92, .95, .97], .45); } continue; }
+    else if (f.k === 'land') { const R = f.big ? 30 : 16; scorch(f.x, f.y, R); const h = heightAt(f.x, f.y), col = puffColour(B, f.x, f.y);
       for (let i = 0; i < (f.big ? 14 : 7); i++) { const a = Math.random() * 6.28, v = 4 + Math.random() * 10; puff(f.x + (Math.random() - .5) * 4, h + 2, f.y + (Math.random() - .5) * 4, Math.cos(a) * v, 5 + Math.random() * 9, Math.sin(a) * v, 4 + Math.random() * 6, 2 + Math.random() * 2, [col[0] * .55, col[1] * .5, col[2] * .45], .5); } }
   }
   const g = puffMesh.geometry, P = g.attributes.iP.array, Sz = g.attributes.iS.array, C = g.attributes.iC.array; let n = 0;
-  for (const p of puffs) { if (p.life <= 0) continue; p.life -= step; if (p.life <= 0) continue; p.x += p.vx * step; p.y += p.vy * step; p.z += p.vz * step; p.vx *= 1 - step * .8; p.vz *= 1 - step * .8; p.vy *= 1 - step * 1.2;
+  for (const p of puffs) { if (p.life <= 0) continue; p.life -= step; if (p.life <= 0) continue; p.x += p.vx * step; p.y += p.vy * step; p.z += p.vz * step; p.vx *= 1 - step * .8; p.vz *= 1 - step * .8; if (p.grav) p.vy -= 28 * step; else p.vy *= 1 - step * 1.2;
     const k = p.life / p.max, grow = 1 + (1 - k) * 1.6; P[n * 3] = p.x; P[n * 3 + 1] = p.y; P[n * 3 + 2] = p.z; Sz[n * 3] = p.size * grow; Sz[n * 3 + 1] = p.al * Math.min(1, k * 2.5) * Math.min(1, (1 - k) * 6 + .2); Sz[n * 3 + 2] = p.rot + (1 - k) * .6; C[n * 3] = p.col[0]; C[n * 3 + 1] = p.col[1]; C[n * 3 + 2] = p.col[2]; n++; }
   g.instanceCount = n; for (const k of ['iP', 'iS', 'iC']) { const a = g.attributes[k]; a.clearUpdateRanges(); a.addUpdateRange(0, n * 3); a.needsUpdate = true; }
 }
-// per frame: the clock, the dome follows the camera, dust and scorches
-export function tick(dt, camera) { T.value += dt; if (dome) dome.position.copy(camera.position); dustTick(dt, camera); }
-export function dispose() { dome = null; puffMesh = null; puffs = null; }
+// ---------------------------------------------------------------- weather
+// Each world has a chance of weather for the battle, decided when the dome is built: rain on the wet worlds, snow on the ice
+// worlds, dust storms on the dry ones, ash on Io. Particles live in a box round the camera and wrap; rain streaks stand
+// upright and face the camera, flakes and dust are billboards. Fog closes in and rain wets the ground.
+const WEATHER = { earth: ['rain', .45], venus: ['rain', .55], luna: ['rain', .3], titan: ['rain', .5], mars: ['dust', .45], mercury: ['dust', .3], io: ['ash', .45], europa: ['snow', .5], ganymede: ['snow', .45], callisto: ['snow', .4], triton: ['snow', .5], rhea: ['snow', .4], _ice: ['snow', .35] };
+const WX = { rain: { n: 3200, box: [170, 120, 170], fall: 55, wind: 9, w: .07, h: 2.8, al: .4, col: [.72, .78, .88], vert: 1, fog: .55 }, snow: { n: 2200, box: [180, 90, 180], fall: 2.2, wind: 2.5, w: .18, h: .18, al: .8, col: [.95, .96, 1], vert: 0, fog: .5 },
+  dust: { n: 520, box: [600, 90, 600], fall: 0, wind: 28, w: 34, h: 24, al: .16, col: [.78, .62, .44], vert: 0, fog: .3 }, ash: { n: 900, box: [260, 120, 260], fall: 4, wind: 5, w: .4, h: .4, al: .5, col: [.3, .28, .26], vert: 0, fog: .6 } };
+let wx = null, wxMesh = null, wxP = null, wxSeed = 0;
+export const weather = () => wx;
+function wxBatch(W) {
+  const N = W.n, g = new THREE.InstancedBufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute([-.5, -.5, 0, .5, -.5, 0, .5, .5, 0, -.5, .5, 0], 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2)); g.setIndex([0, 1, 2, 0, 2, 3]);
+  const iP = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3), iS = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3); for (const a of [iP, iS]) a.setUsage(THREE.DynamicDrawUsage); g.setAttribute('iP', iP); g.setAttribute('iS', iS); g.instanceCount = N;
+  const m = new THREE.NodeMaterial(); m.transparent = true; m.depthWrite = false; m.lights = false; m.blending = W.vert || W.al > .4 ? THREE.NormalBlending : THREE.NormalBlending;
+  const aP = attribute('iP', 'vec3'), aS = attribute('iS', 'vec3'), col = vec3(...W.col);
+  m.vertexNode = Fn(() => { const q = positionGeometry.xy.mul(vec2(aS.x, aS.y)); if (W.vert) { // a streak standing up, turned to face the camera about the vertical
+      const toC = cameraPosition.sub(aP), yaw = normalize(vec3(toC.z, 0, toC.x.negate())), wp = aP.add(yaw.mul(q.x)).add(vec3(0, q.y, 0)); return cameraProjectionMatrix.mul(cameraViewMatrix.mul(vec4(wp, 1))); }
+    const mv = cameraViewMatrix.mul(vec4(aP, 1)).toVar(); return cameraProjectionMatrix.mul(vec4(mv.xy.add(q), mv.z, mv.w)); })();
+  m.fragmentNode = Fn(() => { const vS = varying(aS), u = uv(); let a;
+    if (W.vert) a = pow(one.sub(abs(u.x.sub(.5)).mul(2)), 2).mul(sin(u.y.mul(Math.PI))).mul(.9);
+    else if (W.w > 5) { const n = mx_noise_float(vec3(u.mul(4), vS.z)).mul(.5).add(.5); a = smoothstep(1, .25, length(u.sub(.5)).mul(2).add(n.mul(.5))); }
+    else a = smoothstep(1, .2, length(u.sub(.5)).mul(2));
+    const vP = varying(aP), d = length(vP.sub(cameraPosition)), near = smoothstep(1, 6, d); // nothing right against the lens
+    return vec4(col, a.mul(vS.z).mul(near)); })();
+  const mesh = new THREE.Mesh(g, m); mesh.frustumCulled = false; mesh.renderOrder = 30; return mesh;
+}
+function weatherInit(sc, world, B) {
+  wx = null; if (wxMesh) { wxMesh.parent && wxMesh.parent.remove(wxMesh); wxMesh = null; }
+  const key = WEATHER[world] ? world : B === BIOME._ice ? '_ice' : null, Wt = _FORCE ? [_FORCE, 1] : key && WEATHER[key]; if (!Wt || Math.random() > Wt[1]) return;
+  const W = WX[Wt[0]]; wx = { kind: Wt[0], k: .55 + Math.random() * .45, W, wind: Math.random() * 6.28 };
+  wxMesh = wxBatch(W); sc.add(wxMesh); wxP = new Float32Array(W.n * 4); for (let i = 0; i < W.n; i++) { wxP[i * 4] = Math.random(); wxP[i * 4 + 1] = Math.random(); wxP[i * 4 + 2] = Math.random(); wxP[i * 4 + 3] = .5 + Math.random(); }
+  wetU.value = Wt[0] === 'rain' ? wx.k : 0;
+  if (sc.fog) { sc.fog.near *= W.fog; sc.fog.far *= W.fog * (Wt[0] === 'dust' ? .6 : 1); if (Wt[0] === 'dust') sc.fog.color.lerp(new THREE.Color(.72, .55, .38), .5); if (Wt[0] === 'snow') sc.fog.color.lerp(new THREE.Color(.85, .88, .92), .4); }
+}
+function weatherTick(dt, camera) {
+  if (!wx || !wxMesh) return; const W = wx.W, [bx, by, bz] = W.box, g = wxMesh.geometry, P = g.attributes.iP.array, Sz = g.attributes.iS.array, cx = camera.position.x, cy = camera.position.y, cz = camera.position.z;
+  const wdx = Math.cos(wx.wind) * W.wind, wdz = Math.sin(wx.wind) * W.wind, t = T.value, gust = .7 + .3 * Math.sin(t * .37) * Math.sin(t * .11 + 1);
+  for (let i = 0; i < W.n; i++) { const o = i * 4, sp = wxP[o + 3]; let fx = wxP[o], fy = wxP[o + 1], fz = wxP[o + 2];
+    fx += (wdx * gust * sp * dt + (W.vert ? 0 : Math.sin(t * 1.3 + i) * .5 * dt)) / bx; fz += (wdz * gust * sp * dt + (W.vert ? 0 : Math.cos(t * 1.1 + i * .7) * .5 * dt)) / bz; fy -= W.fall * sp * dt / by;
+    fx -= Math.floor(fx); fy -= Math.floor(fy); fz -= Math.floor(fz); wxP[o] = fx; wxP[o + 1] = fy; wxP[o + 2] = fz;
+    const x = cx + (fx - .5) * bx, z = cz + (fz - .5) * bz, yb = W.fall > 0 ? cy - by * .35 : Math.min(cy, heightAt(x, z) + 60), y = yb + fy * by; // the box hangs below and above the camera, or hugs the ground for a storm
+    P[i * 3] = x; P[i * 3 + 1] = y; P[i * 3 + 2] = z; const k = wx.k * (W.vert ? sp : 1);
+    Sz[i * 3] = W.w * (W.w > 5 ? .7 + sp * .6 : 1); Sz[i * 3 + 1] = W.h * (W.vert ? sp * (.7 + W.fall * .01) : W.w > 5 ? .7 + sp * .6 : 1); Sz[i * 3 + 2] = W.al * k * (W.w > 5 ? (i % 7) * .1 + .6 : 1); }
+  for (const kk of ['iP', 'iS']) { g.attributes[kk].needsUpdate = true; }
+}
+// ---------------------------------------------------------------- tracer light on the ground
+// Rounds in flight light the ground beneath them: a moving glow decal, no real lights. Fed from the rules' 'shot' events,
+// which tick() sees before groundview consumes them.
+const SPD = { rail: 1500, pulse: 950, heavy: 520, missile: 240, scorch: 700, inf: 800 }, LCOL = { rail: [.75, .85, 1], pulse: [1, .45, .3], heavy: [1, .8, .5], missile: [1, .7, .4], scorch: [1, .6, .3], inf: [1, .85, .6] };
+let lights = [], litMesh = null;
+function litBatch(N = 400) {
+  const g = new THREE.InstancedBufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute([-.5, 0, -.5, .5, 0, -.5, .5, 0, .5, -.5, 0, .5], 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2)); g.setIndex([0, 1, 2, 0, 2, 3]);
+  const iP = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3), iS = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3), iC = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3); for (const a of [iP, iS, iC]) a.setUsage(THREE.DynamicDrawUsage); g.setAttribute('iP', iP); g.setAttribute('iS', iS); g.setAttribute('iC', iC); g.instanceCount = 0;
+  const m = new THREE.NodeMaterial(); m.transparent = true; m.depthWrite = false; m.depthTest = true; m.lights = false; m.blending = THREE.AdditiveBlending;
+  const aP = attribute('iP', 'vec3'), aS = attribute('iS', 'vec3'), aC = attribute('iC', 'vec3');
+  m.vertexNode = Fn(() => { const wp = aP.add(positionGeometry.mul(aS.x)); return cameraProjectionMatrix.mul(cameraViewMatrix.mul(vec4(wp, 1))); })();
+  m.fragmentNode = Fn(() => { const vS = varying(aS), vC = varying(aC), d = length(uv().sub(.5)).mul(2); return vec4(vC.mul(smoothstep(1, 0, d).mul(vS.y)), 1); })();
+  const mesh = new THREE.Mesh(g, m); mesh.frustumCulled = false; mesh.renderOrder = 15; return mesh;
+}
+function lightsTick(dt, step) {
+  if (!litMesh && dome && dome.parent) { litMesh = litBatch(); dome.parent.add(litMesh); }
+  if (!litMesh) return;
+  if (step > 0) { for (const f of G.fx) if (f.k === 'shot' && lights.length < 380) { const L = Math.hypot(f.x1 - f.x0, f.y1 - f.y0), kind = f.f || 'inf', spd = SPD[kind] || 700; lights.push({ x0: f.x0, y0: f.y0, x1: f.x1, y1: f.y1, t: -(f.d || 0) * .5, T: L / spd, col: LCOL[kind] || LCOL.inf, big: kind === 'heavy' || kind === 'rail' || kind === 'missile' }); }
+    for (const l of lights) l.t += step; lights = lights.filter(l => l.t < l.T + .12); }
+  const g = litMesh.geometry, P = g.attributes.iP.array, Sz = g.attributes.iS.array, C = g.attributes.iC.array; let n = 0;
+  for (const l of lights) { if (l.t < 0) continue; const k = Math.min(1, l.t / l.T), x = l.x0 + (l.x1 - l.x0) * k, z = l.y0 + (l.y1 - l.y0) * k, hit = l.t > l.T ? 1 - (l.t - l.T) / .12 : 1;
+    P[n * 3] = x; P[n * 3 + 1] = heightAt(x, z) + .4; P[n * 3 + 2] = z; Sz[n * 3] = (l.big ? 26 : 12) * (l.t > l.T ? 1.6 : 1); Sz[n * 3 + 1] = (l.big ? .55 : .32) * hit; C[n * 3] = l.col[0]; C[n * 3 + 1] = l.col[1]; C[n * 3 + 2] = l.col[2]; n++; }
+  g.instanceCount = n; for (const kk of ['iP', 'iS', 'iC']) { const a = g.attributes[kk]; a.clearUpdateRanges(); a.addUpdateRange(0, n * 3); a.needsUpdate = true; }
+}
+// per frame: the clock, the dome follows the camera, dust and scorches, weather, the tracers' light
+export function tick(dt, camera) { T.value += dt; if (dome) dome.position.copy(camera.position); const step = G.paused ? 0 : dt * (G.speed || 1); dustTick(dt, camera); weatherTick(dt, camera); lightsTick(dt, step); }
+export function dispose() { dome = null; puffMesh = null; puffs = null; wxMesh = null; wx = null; litMesh = null; lights = []; wetU.value = 0; }
 export const _dbg = () => ({ scorch: scorchA.array.map(v => v.toArray()), live: puffs ? puffs.filter(p => p.life > 0).length : -1, n: puffMesh ? puffMesh.geometry.instanceCount : -1, T: T.value, mesh: !!puffMesh, dome: !!dome, units: G.units ? G.units.filter(u => !u.gone && Math.hypot(u.vx, u.vy) > .6).length : -1 });
+export const _forceWeather = kind => { _FORCE = kind; }; let _FORCE = null;
