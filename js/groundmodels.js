@@ -20,6 +20,7 @@
 import * as THREE from 'three';
 import { MeshStandardNodeMaterial } from 'three/webgpu';
 import { attribute, mix, max, vec3, instanceColor } from 'three/tsl';
+import { cityPlan } from './ground.js';
 import { mergeGeometries } from '../vendor/three/utils/BufferGeometryUtils.js';
 
 const PI = Math.PI;
@@ -568,31 +569,8 @@ export function cityGeo(blocks, CH, heightAt, stone, world) {
   // how each world builds: hx scales every height, core lifts the heart further, grand is the chance a whole 3x3 block between streets
   // becomes one great structure, split the chance an outer block is broken into several small buildings, open the chance it is left as a
   // plaza or garden instead, rot the twist of organic cities off the street grid
-  const LAY = { luna:    { hx: 1.9, core: 1.5, grand: .7, split: .15, open: .05, rot: 0, min: 24, jit: 40 },
-                mars:    { hx: 1.2, core: 1.3, grand: .5, split: .25, open: .15, rot: .08, min: 12, jit: 24 },
-                mercury: { hx: .95, core: 1.2, grand: .4, split: .35, open: .12, rot: .15, min: 8, jit: 16 },
-                venus:   { hx: 1.0, core: 1.1, grand: .3, split: .3, open: .3, rot: .3, min: 8, jit: 20 },
-                phobos:  { hx: 1.5, core: 1.4, grand: .5, split: .5, open: 0, rot: 0, min: 16, jit: 36 },
-                deimos:  { hx: .6, core: 1.0, grand: .2, split: .2, open: .35, rot: 0, min: 4, jit: 6 },
-                earth:   { hx: .9, core: 1.2, grand: .3, split: .6, open: .1, rot: .1, min: 8, jit: 14 },
-                _ice:    { hx: .7, core: 1.0, grand: .2, split: .2, open: .4, rot: .05, min: 6, jit: 10 } }[world];
+  const { plots, lay: LAY, hashf } = cityPlan(blocks, CH, world);
   const V = (c, v) => { const k = new THREE.Color(c); k.multiplyScalar(v); return k.getStyle(); };
-  const hashf = (a, b, m) => (((a * 73856093) ^ (b * 19349663) ^ m) >>> 0) % 1000 / 1000;
-  // the plots: the blocks regrouped by position in the city
-  let cx0 = 0, cz0 = 0; for (const b of blocks) { cx0 += b.i + .5; cz0 += b.j + .5; } cx0 /= blocks.length || 1; cz0 /= blocks.length || 1;
-  let R = 1; for (const b of blocks) R = Math.max(R, Math.hypot(b.i + .5 - cx0, b.j + .5 - cz0));
-  const cell = new Map(); for (const b of blocks) cell.set(b.i + ',' + b.j, b);
-  const used = new Set(), plots = [];
-  // whole blocks between the streets (3x3 cells) in the heart become one grand structure
-  for (const b of blocks) { if (b.i % 4 !== 1 || b.j % 4 !== 1) continue; const d = Math.hypot(b.i + 1.5 - cx0, b.j + 1.5 - cz0) / R; if (d > .45 || hashf(b.i, b.j, 11) > LAY.grand) continue;
-    let ok = true, hm = 0; for (let a = 0; a < 3 && ok; a++) for (let c = 0; c < 3; c++) { const q = cell.get((b.i + a) + ',' + (b.j + c)); if (!q) { ok = false; break; } hm = Math.max(hm, q.h); }
-    if (!ok) continue; for (let a = 0; a < 3; a++) for (let c = 0; c < 3; c++) used.add((b.i + a) + ',' + (b.j + c));
-    plots.push({ i: b.i, j: b.j, x: (b.i + 1.5) * CH, z: (b.j + 1.5) * CH, w: CH * 2.6, h: hm * 1.5, d, grand: true }); }
-  for (const b of blocks) { if (used.has(b.i + ',' + b.j)) continue; const d = Math.hypot(b.i + .5 - cx0, b.j + .5 - cz0) / R, x = (b.i + .5) * CH, z = (b.j + .5) * CH, u = hashf(b.i, b.j, 23);
-    if (d > .55 && u < LAY.open) { plots.push({ i: b.i, j: b.j, x, z, w: CH * .86, h: b.h, d, open: true }); continue; } // a plaza, garden or yard
-    if (d > .4 && u < LAY.open + LAY.split) { const n = 2 + (hashf(b.i, b.j, 37) < .4 ? 1 : 0); // small buildings, two or three a side
-      for (let a = 0; a < n; a++) for (let c = 0; c < n; c++) { if (hashf(b.i * n + a, b.j * n + c, 41) < .18) continue; const sw = CH / n; plots.push({ i: b.i * 4 + a, j: b.j * 4 + c, x: x - CH / 2 + (a + .5) * sw, z: z - CH / 2 + (c + .5) * sw, w: sw * .78, h: b.h * (.45 + hashf(a, c + b.i, 43) * .5), d, small: true }); } continue; }
-    plots.push({ i: b.i, j: b.j, x, z, w: CH * .86, h: b.h, d }); }
   for (const b of plots) {
     const x = b.x, z = b.z, w = b.w, y0 = heightAt(x, z) - 2, h = (Math.max(b.h * LAY.hx, LAY.min * (b.small ? .5 : 1)) + hashf(b.i, b.j, 61) * LAY.jit * (b.small ? .4 : 1) * (1.2 - b.d * .6)) * (1 + (LAY.core - 1) * Math.max(0, 1 - b.d / .4)) + 2, hsh = ((b.i * 31 + b.j * 17) % 10) / 10, v = .84 + hsh * .22, h2 = b.grand ? 0 : ((b.i * 7 + b.j * 13) % 10) / 10, h3 = ((b.i * 11 + b.j * 5) % 10) / 10;
     const n0 = F.parts.length, rot = LAY.rot ? (hashf(b.i, b.j, 53) - .5) * 2 * LAY.rot : 0;

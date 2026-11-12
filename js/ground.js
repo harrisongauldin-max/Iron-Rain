@@ -47,7 +47,7 @@ export const SITE_R = 200;      // a site's radius: room for a cohort of a thous
 export const MAP = 8000;         // metres on a side: a city and its approaches, at legion scale
 export const SC = MAP / 3200;    // how much larger than the first 3.2 km field: map-scale distances are written as 3.2 km figures times SC
 export const NH = 320, CH = MAP / NH;   // height grid: 25 m cells
-const NN = 160, CN = MAP / NN;   // nav grid: 50 m cells
+const NN = 320, CN = MAP / NN;   // nav grid: 25 m cells, one per height cell, so a street between the buildings is a row of open cells
 
 // ---------------------------------------------------------------- units
 // hp is per man; armour: 1 cloth, 2 duroArmor, 6 pulseArmor, 8 a starShell. A weapon's ap below the target's armour
@@ -127,7 +127,8 @@ function buildMap(spec) {
       walls.push({ id: walls.length, x0: city.x + Math.cos(a0) * R0, y0: city.y + Math.sin(a0) * R0, x1: city.x + Math.cos(a1) * R0, y1: city.y + Math.sin(a1) * R0, h: 14 + spec.def.fort * 4, hp: WALL_HP(spec.def.fort), hp0: WALL_HP(spec.def.fort), down: false });
     }
   }
-  return { B, H, cover, urban, veg, blocks: keep, sites, city, walls, wl: walls.slice(), seaH, relief };
+  const bld = buildingIndex(cityPlan(keep, CH, spec.world).plots, CH); // the buildings, as the view will draw them: units walk round them
+  return { B, H, cover, urban, veg, blocks: keep, sites, city, walls, wl: walls.slice(), seaH, relief, bld };
 }
 export function heightAt(x, y) {
   const M = G.map; if (!M) return 0;
@@ -154,6 +155,71 @@ export function los(ax, ay, bx, by) {
   return true;
 }
 
+// ---------------------------------------------------------------- the city plan
+// Where the buildings stand, shared with the view (groundmodels.cityGeo draws exactly these plots) so the rules and the
+// picture agree: a unit walks round what it sees. Deterministic from the blocks (hashes, no rng). Plots: x, z (= y here),
+// w (side), h (height before the world's scaling), grand (a whole block between the streets), small (one of several in
+// a block), open (a plaza or garden: no building, walkable). Model builder's section.
+export function cityPlan(blocks, CH, world) {
+  const LAY = { luna:    { hx: 1.9, core: 1.5, grand: .7, split: .15, open: .05, rot: 0, min: 24, jit: 40 },
+                mars:    { hx: 1.2, core: 1.3, grand: .5, split: .25, open: .15, rot: .08, min: 12, jit: 24 },
+                mercury: { hx: .95, core: 1.2, grand: .4, split: .35, open: .12, rot: .15, min: 8, jit: 16 },
+                venus:   { hx: 1.0, core: 1.1, grand: .3, split: .3, open: .3, rot: .3, min: 8, jit: 20 },
+                phobos:  { hx: 1.5, core: 1.4, grand: .5, split: .5, open: 0, rot: 0, min: 16, jit: 36 },
+                deimos:  { hx: .6, core: 1.0, grand: .2, split: .2, open: .35, rot: 0, min: 4, jit: 6 },
+                earth:   { hx: .9, core: 1.2, grand: .3, split: .6, open: .1, rot: .1, min: 8, jit: 14 },
+                _ice:    { hx: .7, core: 1.0, grand: .2, split: .2, open: .4, rot: .05, min: 6, jit: 10 } }[world] || { hx: .7, core: 1.0, grand: .2, split: .2, open: .4, rot: .05, min: 6, jit: 10 };
+  const hashf = (a, b, m) => (((a * 73856093) ^ (b * 19349663) ^ m) >>> 0) % 1000 / 1000;
+  // the plots: the blocks regrouped by position in the city
+  let cx0 = 0, cz0 = 0; for (const b of blocks) { cx0 += b.i + .5; cz0 += b.j + .5; } cx0 /= blocks.length || 1; cz0 /= blocks.length || 1;
+  let R = 1; for (const b of blocks) R = Math.max(R, Math.hypot(b.i + .5 - cx0, b.j + .5 - cz0));
+  const cell = new Map(); for (const b of blocks) cell.set(b.i + ',' + b.j, b);
+  const used = new Set(), plots = [];
+  // whole blocks between the streets (3x3 cells) in the heart become one grand structure
+  for (const b of blocks) { if (b.i % 4 !== 1 || b.j % 4 !== 1) continue; const d = Math.hypot(b.i + 1.5 - cx0, b.j + 1.5 - cz0) / R; if (d > .45 || hashf(b.i, b.j, 11) > LAY.grand) continue;
+    let ok = true, hm = 0; for (let a = 0; a < 3 && ok; a++) for (let c = 0; c < 3; c++) { const q = cell.get((b.i + a) + ',' + (b.j + c)); if (!q) { ok = false; break; } hm = Math.max(hm, q.h); }
+    if (!ok) continue; for (let a = 0; a < 3; a++) for (let c = 0; c < 3; c++) used.add((b.i + a) + ',' + (b.j + c));
+    plots.push({ i: b.i, j: b.j, x: (b.i + 1.5) * CH, z: (b.j + 1.5) * CH, w: CH * 2.6, h: hm * 1.5, d, grand: true }); }
+  for (const b of blocks) { if (used.has(b.i + ',' + b.j)) continue; const d = Math.hypot(b.i + .5 - cx0, b.j + .5 - cz0) / R, x = (b.i + .5) * CH, z = (b.j + .5) * CH, u = hashf(b.i, b.j, 23);
+    if (d > .55 && u < LAY.open) { plots.push({ i: b.i, j: b.j, x, z, w: CH * .86, h: b.h, d, open: true }); continue; } // a plaza, garden or yard
+    if (d > .4 && u < LAY.open + LAY.split) { const n = 2 + (hashf(b.i, b.j, 37) < .4 ? 1 : 0); // small buildings, two or three a side
+      for (let a = 0; a < n; a++) for (let c = 0; c < n; c++) { if (hashf(b.i * n + a, b.j * n + c, 41) < .18) continue; const sw = CH / n; plots.push({ i: b.i * 4 + a, j: b.j * 4 + c, x: x - CH / 2 + (a + .5) * sw, z: z - CH / 2 + (c + .5) * sw, w: sw * .78, h: b.h * (.45 + hashf(a, c + b.i, 43) * .5), d, small: true }); } continue; }
+    plots.push({ i: b.i, j: b.j, x, z, w: CH * .86, h: b.h, d }); }
+  return { plots, lay: LAY, hashf };
+}
+// the buildings as obstacles: hit(x, y) is inside one; out(x, y, m) the nearest point m metres clear of them
+export function buildingIndex(plots, CH) {
+  const rects = [], grid = new Map(), key = (i, j) => i + ',' + j;
+  // a built block is solid to the cell edge, so the 3 m slots between neighbouring buildings never trap a unit; only the streets
+  // and the open plots are walked. The small buildings of a split block count as their whole block for the same reason
+  const cells = new Map();
+  for (const p of plots) { if (p.open) continue; const i0 = Math.floor(p.x / CH), j0 = Math.floor(p.z / CH), n = p.grand ? 1 : 0;
+    for (let i = i0 - n; i <= i0 + n; i++) for (let j = j0 - n; j <= j0 + n; j++) { const k = key(i, j); if (!cells.has(k)) cells.set(k, { x0: i * CH, x1: (i + 1) * CH, y0: j * CH, y1: (j + 1) * CH, h: p.h }); } }
+  // a hole in the middle of a block with buildings on all four sides is a courtyard with no way out: solid too, or units slide in and never leave
+  for (const k of [...cells.keys()]) { const [i, j] = k.split(',').map(Number); for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const ci = i + di, cj = j + dj, ck = key(ci, cj);
+    if (cells.has(ck) || ci % 4 !== 2 || cj % 4 !== 2) continue; if ([[1, 0], [-1, 0], [0, 1], [0, -1]].every(([a, b]) => cells.has(key(ci + a, cj + b)))) cells.set(ck, { x0: ci * CH, x1: (ci + 1) * CH, y0: cj * CH, y1: (cj + 1) * CH, h: 0 }); } }
+  for (const r of cells.values()) { rects.push(r);
+    for (let i = Math.floor(r.x0 / CH); i <= Math.floor(r.x1 / CH); i++) for (let j = Math.floor(r.y0 / CH); j <= Math.floor(r.y1 / CH); j++) { const k = key(i, j); if (!grid.has(k)) grid.set(k, []); grid.get(k).push(r); } }
+  const at = (x, y) => grid.get(key(Math.floor(x / CH), Math.floor(y / CH)));
+  const hit = (x, y) => { const L = at(x, y); if (!L) return null; for (const r of L) if (x > r.x0 && x < r.x1 && y > r.y0 && y < r.y1) return r; return null; };
+  const near = (x, y, m) => { for (const [ox, oy] of [[0, 0], [-m, 0], [m, 0], [0, -m], [0, m]]) { const L = at(x + ox, y + oy); if (L) for (const r of L) if (x > r.x0 - m && x < r.x1 + m && y > r.y0 - m && y < r.y1 + m) return r; } return null; };
+  // open ground: a cell with no building that is a street (every fourth row and column) or lies outside the built blocks. A free cell
+  // inside a built block (a dropped block, a courtyard) is a pocket: walkable, but no place to send a unit, since the slide along
+  // building faces cannot find the way out of one
+  const groups = new Set(); for (const k of cells.keys()) { const [i, j] = k.split(',').map(Number); groups.add(key(Math.floor(i / 4), Math.floor(j / 4))); }
+  const solid = (i, j) => cells.has(key(i, j)), pocket = (i, j) => !solid(i, j) && i % 4 !== 0 && j % 4 !== 0 && groups.has(key(Math.floor(i / 4), Math.floor(j / 4)));
+  const open = (i, j) => !solid(i, j) && !pocket(i, j);
+  // the nearest point of open ground, by a short walk over free cells (so never across a building): a point m metres clear inside that cell
+  const out = (x, y, m = 3) => { const i0 = Math.floor(x / CH), j0 = Math.floor(y / CH);
+    if (open(i0, j0) && !near(x, y, m)) return { x, y };
+    const inset = (i, j) => ({ x: Math.min(Math.max(x, i * CH + m + .5), (i + 1) * CH - m - .5), y: Math.min(Math.max(y, j * CH + m + .5), (j + 1) * CH - m - .5) });
+    if (open(i0, j0)) return inset(i0, j0);
+    const seen = new Set([key(i0, j0)]), q = [[i0, j0]]; let n = 0;
+    while (n < q.length && n < 60) { const [i, j] = q[n++]; for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const ii = i + di, jj = j + dj, k = key(ii, jj); if (seen.has(k) || solid(ii, jj)) continue; seen.add(k); if (open(ii, jj)) return inset(ii, jj); q.push([ii, jj]); } }
+    return { x, y }; };
+  return { rects, hit, out, any: rects.length > 0 };
+}
+
 // ---------------------------------------------------------------- navigation
 let NAV = null;
 function buildNav() {
@@ -163,7 +229,8 @@ function buildNav() {
     if (isWater(x, y)) { cost[k] = Infinity; continue; }
     const s = Math.abs(heightAt(x + 20, y) - heightAt(x - 20, y)) + Math.abs(heightAt(x, y + 20) - heightAt(x, y - 20));
     const shore = G.map.seaH >= 0 && [[-20, -20], [20, -20], [-20, 20], [20, 20]].some(([ox, oy]) => isWater(x + ox, y + oy)); // a cell with water in a corner: the path keeps off the waterline, where the deep is a step away
-    cost[k] = 1 + (isUrban(x, y) ? .5 : 0) + (G.map.veg[cellOf(x, y)] ? .25 : 0) + clamp(s / 40, 0, 3) + (shore ? 1.3 : 0);
+    let bl = 0; if (G.map.bld.any) for (const ox of [-.33, 0, .33]) for (const oy of [-.33, 0, .33]) if (G.map.bld.hit(x + ox * CN, y + oy * CN)) bl++; if (bl >= 8) { cost[k] = Infinity; continue; } // a cell that is all building (a grand structure) is closed; one with a street through it costs more
+    cost[k] = 1 + (isUrban(x, y) ? .5 : 0) + bl * .4 + (G.map.veg[cellOf(x, y)] ? .25 : 0) + clamp(s / 40, 0, 3) + (shore ? 1.3 : 0);
   }
   // walls block the moves between cells that cross them (8 directions per cell)
   const edge = new Uint8Array(NN * NN);
@@ -241,7 +308,7 @@ export function findPath(x0, y0, x1, y1, fly, raw) { // raw: cell by cell, no co
   const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = i * 2 + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
   const gx = g % NN, gy = (g / NN) | 0, hh = k => { const dx = Math.abs(k % NN - gx), dy = Math.abs(((k / NN) | 0) - gy); return (dx + dy + (1.414 - 2) * Math.min(dx, dy)); };
   gs[s] = 0; push(s, hh(s)); let n = 0;
-  while (heap.length && n++ < 40000) {
+  while (heap.length && n++ < 160000) {
     const [, k] = pop(); if (k === g) break; if (closed[k]) continue; closed[k] = 1;
     const i = k % NN, j = (k / NN) | 0;
     for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { if (!di && !dj) continue; const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= NN || jj >= NN) continue; const q = jj * NN + ii; if (!navOK(q) || closed[q]) continue;
@@ -252,8 +319,8 @@ export function findPath(x0, y0, x1, y1, fly, raw) { // raw: cell by cell, no co
   if (from[g] < 0 && g !== s) return lead ? [lead, { x: x1, y: y1 }] : [{ x: x1, y: y1 }];
   const cells = []; for (let k = g; k >= 0 && k !== s; k = from[k]) cells.push(k); cells.reverse();
   // string-pull: drop waypoints that a straight walk can skip
-  const pts = cells.map(k => ({ x: (k % NN + .5) * CN, y: (((k / NN) | 0) + .5) * CN }));
-  if (pts.length) pts[pts.length - 1] = { x: x1, y: y1 };
+  const pts = cells.map(k => G.map.bld.out((k % NN + .5) * CN, (((k / NN) | 0) + .5) * CN, 4)); // a waypoint in a building moves to the street beside it
+  if (pts.length) pts[pts.length - 1] = fly ? { x: x1, y: y1 } : G.map.bld.out(x1, y1, 4);
   const sc = { x: (s % NN + .5) * CN, y: (((s / NN) | 0) + .5) * CN };
   if (pts.length && G.map.wl.length && crossesWall(x0, y0, pts[0].x, pts[0].y) && !crossesWall(x0, y0, sc.x, sc.y)) pts.unshift(sc); // a wall between the unit and the next cell: round by the start cell's centre, on its side
   if (lead) pts.unshift(lead);
@@ -262,7 +329,7 @@ export function findPath(x0, y0, x1, y1, fly, raw) { // raw: cell by cell, no co
   while (i < pts.length) { let j = pts.length - 1; while (j > i && !straight(ax, ay, pts[j].x, pts[j].y)) j--; out.push(pts[j]); ax = pts[j].x; ay = pts[j].y; i = j + 1; }
   return out.length ? out : [{ x: x1, y: y1 }];
 }
-function straight(ax, ay, bx, by) { if (G.map.wl.length && crossesWall(ax, ay, bx, by)) return false; const d = hyp(bx - ax, by - ay), n = Math.ceil(d / 20); for (let q = 1; q <= n; q++) { const x = lerp(ax, bx, q / n), y = lerp(ay, by, q / n), k = clamp(Math.floor(y / CN), 0, NN - 1) * NN + clamp(Math.floor(x / CN), 0, NN - 1); if (!navOK(k) || NAV.cost[k] > 2.2) return false; } return true; }
+function straight(ax, ay, bx, by) { if (G.map.wl.length && crossesWall(ax, ay, bx, by)) return false; if (G.map.bld.any) { const d0 = hyp(bx - ax, by - ay), n0 = Math.ceil(d0 / 6); for (let q = 1; q <= n0; q++) if (G.map.bld.hit(lerp(ax, bx, q / n0), lerp(ay, by, q / n0))) return false; } const d = hyp(bx - ax, by - ay), n = Math.ceil(d / 20); for (let q = 1; q <= n; q++) { const x = lerp(ax, bx, q / n), y = lerp(ay, by, q / n), k = clamp(Math.floor(y / CN), 0, NN - 1) * NN + clamp(Math.floor(x / CN), 0, NN - 1); if (!navOK(k) || NAV.cost[k] > 2.2) return false; } return true; }
 
 // ---------------------------------------------------------------- making an army
 let UID = 1;
@@ -389,6 +456,7 @@ function touchDown(u) {
   const dead = Math.round(u.men * clamp(lost * (.75 + R() * .5), 0, .9));
   u.men -= dead; u.men0 = Math.max(u.men, 1); u.sh = (u.T.shield || 0) * u.men; G.stats[0].lost += dead; G.skyLost = (G.skyLost || 0) + dead * u.eq;
   u.state = 'idle'; u.fall = null; u.width = defaultWidth(u);
+  if (!u.T.fly && G.map.bld.any) { const p = G.map.bld.out(u.x, u.y, 4); u.x = p.x; u.y = p.y; } // come down on a roof: into the street below
   if (u.men <= 0) { u.gone = true; u.state = 'dead'; }
   G.fx.push({ k: 'land', x: u.x, y: u.y, big: u.type === 'starshell' });
 }
@@ -488,7 +556,7 @@ function move(u, dt) {
     else if (u.order.type === 'move' && de < 70 + radiusOf(u) && (G.t - u.prog.t > 6 || G.units.some(v => v !== u && v.team === u.team && live(v) && !v.order && hyp(v.x - e.x, v.y - e.y) < radiusOf(v) + 20))) { u.path = null; u.faceTo = u.order.a; u.order = null; u.prog = null; } // nearly there and the place is taken: stand beside it
     else if (G.t - u.prog.t > 8) { // no headway, far from the end: sidestep out of the jam, and after a few tries ford whatever water is in the way
       while (u.path.length > 1 && u.path[0].side) u.path.shift(); // the last sidestep did not help: no pile of stale ones
-      const q0 = u.path[0], ok = (x, y) => !isDeep(x, y) && !(G.map.wl.length && crossesWall(u.x, u.y, x, y));
+      const q0 = u.path[0], ok = (x, y) => !isDeep(x, y) && !(G.map.wl.length && crossesWall(u.x, u.y, x, y)) && !(G.map.bld.any && G.map.bld.hit(x, y));
       let side = (u.side = -(u.side || 1)), a = Math.atan2(q0.y - u.y, q0.x - u.x) + side * PI / 2, sx = clamp(u.x + Math.cos(a) * 60, 10, MAP - 10), sy = clamp(u.y + Math.sin(a) * 60, 10, MAP - 10);
       if (!ok(sx, sy)) { side = u.side = -side; a = Math.atan2(q0.y - u.y, q0.x - u.x) + side * PI / 2; sx = clamp(u.x + Math.cos(a) * 60, 10, MAP - 10); sy = clamp(u.y + Math.sin(a) * 60, 10, MAP - 10); } // not into the water or the wall: the other side
       if (ok(sx, sy)) u.path.unshift({ x: sx, y: sy, side: true });
@@ -499,6 +567,12 @@ function move(u, dt) {
     u.a += clamp(angDiff(u.a, want), -turn, turn);
     const k = Math.max(.15, Math.cos(angDiff(u.a, want))); u.vx = Math.cos(want) * v * k; u.vy = Math.sin(want) * v * k;
     let nx = u.x + u.vx * dt, ny = u.y + u.vy * dt; const nx0 = nx, ny0 = ny;
+    if (!u.T.fly && G.map.bld.any && G.map.bld.hit(nx, ny) && !G.map.bld.hit(u.x, u.y)) { // a building in the way: slide along its face, down the street
+      const vs = hyp(u.vx, u.vy); // at full pace along the face, or the unit creeps and counts as stuck
+      const wp = u.path && u.path.length ? u.path[0] : { x: nx0, y: ny0 }, sx = Math.sign(wp.x - u.x) || Math.sign(u.vx) || 1, sy = Math.sign(wp.y - u.y) || Math.sign(u.vy) || 1, ax = Math.abs(wp.x - u.x) >= Math.abs(wp.y - u.y); // slide the way that gains on the waypoint
+      const tryX = () => !G.map.bld.hit(u.x + sx * vs * dt, u.y) && (u.vx = sx * vs, u.vy = 0, nx = u.x + u.vx * dt, ny = u.y, true), tryY = () => !G.map.bld.hit(u.x, u.y + sy * vs * dt) && (u.vy = sy * vs, u.vx = 0, ny = u.y + u.vy * dt, nx = u.x, true);
+      if (ax ? (tryX() || tryY()) : (tryY() || tryX())) {}
+      else { nx = u.x; ny = u.y; u.vx = u.vy = 0; if ((u.blockT || 0) < G.t && u.path && u.path.length) { const last = u.path[u.path.length - 1], o = G.map.bld.out(u.x, u.y, 4); u.path = findPath(u.x, u.y, last.x, last.y, false, true); if (hyp(o.x - u.x, o.y - u.y) > 1) u.path.unshift(o); u.blockT = G.t + 1.5; } } } // boxed in: out of the pocket to open ground first
     if (!u.T.fly && ((isDeep(nx, ny) && !isDeep(u.x, u.y) && !(u.ford > G.t)) || crossesWall(u.x, u.y, nx, ny))) { // blocked: find a way round (a unit already in the water may wade out)
       nx = u.x; ny = u.y; u.vx = u.vy = 0; const last = u.path[u.path.length - 1];
       if ((u.blockT || 0) < G.t) { const water = !crossesWall(u.x, u.y, nx0, ny0); u.path = findPath(u.x, u.y, last.x, last.y, false, true); u.blockT = G.t + 1.5; u.stuck = (u.stuck || 0) + 1;
@@ -517,14 +591,14 @@ function escapeOf(u) { if (u.team === 1) return { x: u.x, y: MAP + 50 }; return 
 function separate(dt) {
   const L = G.units.filter(live);
   for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length; j++) {
-    const a = L[i], b = L[j], dx = b.x - a.x, dy = b.y - a.y, d = hyp(dx, dy) || .01, ra = radiusOf(a), rb = radiusOf(b), R0 = (ra + rb) * .75;
+    const a = L[i], b = L[j], dx = b.x - a.x, dy = b.y - a.y, d = hyp(dx, dy) || .01, city = G.map.bld.any && (isUrban(a.x, a.y) || isUrban(b.x, b.y)), ra = city ? Math.min(radiusOf(a), 14) : radiusOf(a), rb = city ? Math.min(radiusOf(b), 14) : radiusOf(b), R0 = (ra + rb) * .75; // in the streets a unit closes into a column
     if (d >= R0) continue;
     if (a.team === b.team) { if (a.T.fly || b.T.fly) continue; const push = (R0 - d) * .5 * Math.min(1, dt * 3); let ux = dx / d, uy = dy / d;
       const va = hyp(a.vx, a.vy) > .3, vb = hyp(b.vx, b.vy) > .3, ma = va ? .35 : 1, mb = vb ? .35 : 1, s = ma + mb; // a halted unit gives way to one on the march
       if (va && vb && a.vx * b.vx + a.vy * b.vy < 0) { ux += -uy * .8; uy += ux * .8; const n = hyp(ux, uy) || 1; ux /= n; uy /= n; } // head-on: slide past each other
       const ax = a.x - ux * push * ma / s * 2, ay = a.y - uy * push * ma / s * 2, bx = b.x + ux * push * mb / s * 2, by = b.y + uy * push * mb / s * 2;
-      if (!crossesWall(a.x, a.y, ax, ay) && (!isDeep(ax, ay) || isDeep(a.x, a.y))) { a.x = ax; a.y = ay; }
-      if (!crossesWall(b.x, b.y, bx, by) && (!isDeep(bx, by) || isDeep(b.x, b.y))) { b.x = bx; b.y = by; } }
+      if (!crossesWall(a.x, a.y, ax, ay) && (!isDeep(ax, ay) || isDeep(a.x, a.y)) && !G.map.bld.hit(ax, ay)) { a.x = ax; a.y = ay; }
+      if (!crossesWall(b.x, b.y, bx, by) && (!isDeep(bx, by) || isDeep(b.x, b.y)) && !G.map.bld.hit(bx, by)) { b.x = bx; b.y = by; } }
   }
 }
 
@@ -926,5 +1000,5 @@ export function runHeadless(spec, seed, maxT) {
   if (!G.over) finish(1, 'Time runs out');
   return result();
 }
-export function spawn(team, type, men, x, y, a, o) { const u = mkUnit(team, type, men, x, y, a, o || {}); u.post = { x, y }; G.units.push(u); return u; }
+export function spawn(team, type, men, x, y, a, o) { if (G.map.bld.any && !(UT[type] && UT[type].fly)) { const p = G.map.bld.out(x, y, 4); x = p.x; y = p.y; } const u = mkUnit(team, type, men, x, y, a, o || {}); u.post = { x, y }; G.units.push(u); return u; }
 export function start(human) { G.human = human; G.def0 = strengthOf(1); G.att0 = G.spec.att.total || 0; }
