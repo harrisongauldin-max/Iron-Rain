@@ -9,7 +9,7 @@ const PI = Math.PI;
 import * as K from './camp.js';
 import { C } from './camp.js';
 import { toWorld, projectTo } from './cam.js';
-import { buildIcon, overlayAPI, portrait, silhouette, fleetGlow, siegeFx, clashFx } from './render.js';
+import { buildIcon, overlayAPI, portrait, silhouette, fleetGlow, siegeFx, clashFx, surfaceFx } from './render.js';
 import { setupFactions } from './sim.js';
 import { fightBattle } from './battle.js';
 import * as GV from './groundview.js';
@@ -148,6 +148,7 @@ function drawOverlay(G, label) {
     else G.screen().circle(q.x, q.y, rr).stroke({ width: selW ? 2.4 : hov ? 1.8 : 1.1, color: oc, alpha: selW || hov ? 1 : .7 });
     if (w.siege) { G.screen().dashed(q.x, q.y, rr + 5, 5, 4).stroke({ width: 1.6, color: 0xff5a4a, alpha: .95 }); if (R >= 3) siegeFx(ctx, q.x, q.y, rr - 3, sil); } // graphics: the bombardment's flashes
     if (R >= 3) { const here = K.fleetsAt(w.id).filter(f => f.ships.length && vis(f)); if (here.some(a => here.some(b => K.hostile(a.owner, b.owner)))) clashFx(ctx, q.x, q.y, rr); } // graphics: hostile fleets in one orbit — the fight seen from afar
+    if (R >= 6 && ((C.risings || []).some(r => r.w === w.id) ? surfaceFx(ctx, q.x, q.y, rr - 3, 'rising') : w.sacked > C.turn ? surfaceFx(ctx, q.x, q.y, rr - 3, 'sacked') : 0)); // graphics: war on the ground, seen from orbit
     if (K.wreckAt(w.id)) debris(ctx, q.x, q.y, rr + (w.siege ? 10 : 6), K.wreckAt(w.id));
     if (selW) { const s = rr + 9, l = 7; ctx.globalAlpha = 1; ctx.strokeStyle = '#f2c14e'; ctx.lineWidth = 1.5; ctx.beginPath();
       for (const [dx, dy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { ctx.moveTo(q.x + dx * s, q.y + dy * s - dy * l); ctx.lineTo(q.x + dx * s, q.y + dy * s); ctx.lineTo(q.x + dx * s - dx * l, q.y + dy * s); } ctx.stroke(); }

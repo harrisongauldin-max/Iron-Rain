@@ -587,6 +587,7 @@ export async function initRender() {
   for (const [r0, r1, col] of [[2.1 * AU, 3.45 * AU, 0xc8b49a], [30 * AU, 50 * AU, 0x9ab0d0]]) { const m = new THREE.Mesh(new THREE.RingGeometry(r0, r1, 256, 1), dustMat(r0, r1, col)); m.rotation.x = -PI / 2; m.renderOrder = -50; m.frustumCulled = false; m.visible = false; scene.add(m); dustM.push(m); }
   // light: the Sun lights the worlds in their own shaders; hulls get a key light from above, the Sun from the side and a cool fill
   scene.add(new THREE.AmbientLight(0x7a84a0, .42));
+  scene.userData.hemi = new THREE.HemisphereLight(0xfff0dc, 0x000000, 0); scene.add(scene.userData.hemi); // the nearest world's light on the hulls, set each frame
   const key = new THREE.DirectionalLight(0xfff2e0, 2.5); key.position.set(-.35, 1, -.45); scene.add(key); scene.add(key.target);
   const fill = new THREE.DirectionalLight(0x5a7cc0, .4); fill.position.set(.5, .4, .8); scene.add(fill); scene.add(fill.target);
   const rim = new THREE.DirectionalLight(0x9fc4ff, 1.5); rim.position.set(.6, -.25, -.9); scene.add(rim); scene.add(rim.target); // a cold edge light from below and behind: hulls separate from the dark
@@ -783,6 +784,11 @@ const STORMS = { // the giants' named storms, on their painted positions (planet
   saturn: [[...UV(-38, 110), 7 / 360, 4 / 180, .09]],
   earthClouds: [[...UV(38, -45), 14 / 360, 11 / 180, .06], [...UV(-42, 95), 13 / 360, 10 / 180, -.055], [...UV(18, 140), 8 / 360, 7 / 180, -.09], [...UV(50, 160), 12 / 360, 9 / 180, .05]], // extratropical cyclones and a typhoon
 };
+// the colour a world throws back onto hulls near it (its albedo, roughly), for the hemisphere light
+const WORLD_LIGHT = { mercury: 0x8a8278, venus: 0xe8c890, earth: 0x6a9ad8, luna: 0x8fa890, mars: 0xc8784a, phobos: 0x6a5a50, deimos: 0x6a5a50, jupiter: 0xd8b890, io: 0xd8c060, europa: 0xb8c8d8, ganymede: 0x9a9890, callisto: 0x7a7470, saturn: 0xe8d8a8, titan: 0xd8a860, rhea: 0xb8b8c0, uranus: 0x9ad8e0, neptune: 0x5a80e0, triton: 0xc8c0c0, pluto: 0xb8a898 };
+function worldLight(cx, cy) { // the nearest world weighted by how large it looms: light from below the hulls in its colour
+  const H = scene.userData.hemi; if (!H) return; let best = null, bk = 0; for (const b of BODIES) { if (b.kind === 'star') continue; const d = hyp(b.x - cx, b.y - cy); const k = clamp(b.r * 3 / Math.max(d, b.r), 0, 1); if (k > bk) { bk = k; best = b; } }
+  if (!best || bk < .02) { H.intensity = 0; return; } H.groundColor.set(WORLD_LIGHT[best.id] || 0x8a8a90); H.intensity = bk * 1.1; H.position.set(0, 1, 0); }
 // rotation periods in days (negative = retrograde); moons are tidally locked and keep one face to their parent
 const ROT_DAYS = { mercury: 58.6, venus: -243, earth: 1, mars: 1.03, jupiter: .41, saturn: .44, uranus: -.72, neptune: .67, pluto: -6.4, ceres: .38, vesta: .22, pallas: .32 };
 // the campaign's clock read off Earth's place in its orbit (one lap a year, 52 turns), plus the wall clock turning the
@@ -1051,7 +1057,7 @@ function flipPulse(s) { const R = Math.max(s.r * 1.3, vrOf(s) * 1.6), c = parseI
 function sceneFrame() {
   shipsG.visible = true; rocksG.visible = true;
   const c = S.cam, z = c.z, px = 1 / z, d = camDist();
-  O.x = c.x; O.y = c.y;
+  O.x = c.x; O.y = c.y; worldLight(c.x, c.y);
   camera.aspect = S.W / S.H; camera.near = d * .04; camera.far = d * 30; camera.position.set(...camOffset(d));
   camera.lookAt(0, 0, 0); camera.updateProjectionMatrix(); camera.updateMatrixWorld();
   // sky parallax, as before
@@ -1128,7 +1134,7 @@ function sceneFrame() {
     // banking, attitude and side thrusters, recoil, hits and damage: shipFx, once a frame (the action window shares the hull)
     if (v.hits === undefined) fxInit(v); if (!inPip) { shipFx(s, v, vr, vz, dark); thrusters(s, v, vr, vz, dark); }
     v.g.position.set(s.x - O.x, 0, s.y - O.y); v.g.rotation.order = 'YXZ'; v.g.rotation.set(v.bank + v.kr, -s.a + v.ky, v.pitch + v.kp); v.g.scale.setScalar(vr);
-    shipFxDraw(s, v, vr, z);
+    shipFxDraw(s, v, vr, z); shipShadow(s, vr, sunP);
     const st = RCLK < v.hvT ? 'f' : dark || s.cold || RCLK < v.ltT ? 'd' : 'n'; /* the hull flashes only on a heavy blow; running cold, or with her power failing, she shows no lights */ if (v.st !== st) { v.st = st; v.hull.material = v.mats[st]; for (const m of v.sup) m.material = v.mats[st]; }
     const thr = clamp(s.throttle, 0, 1), burn = s.throttle > 1 ? 1 + .5 * Math.log1p(s.throttle - 1) : 1; // a transit burn runs the drive past its battle rating
     v.mats.bell.emissiveIntensity = dark ? 0 : thr * 1.6;
@@ -1455,6 +1461,16 @@ function shipFx(s, v, vr, vz, dark) {
   if (hp < .35 && !dark && dt > 0 && RCLK > v.ltT + .15 && Math.random() < 1.6 * dt) v.ltT = RCLK + rand(.04, .12); // her lights stutter
   if (hp < .2 && dt > 0 && RCLK > v.cutT + .3 && Math.random() < .8 * dt) v.cutT = RCLK + rand(.06, .14); // and her drive coughs
   v.sput = hp >= .2 ? 1 : RCLK < v.cutT ? .2 : .82 + .18 * Math.sin(RCLK * 23 + s.id) * Math.sin(RCLK * 7.3 + s.id * .4);
+}
+// a big ship's shadow falling across a smaller one lying behind her from the Sun: a soft dark blot over the shadowed
+// hull, deepest in the middle of the corridor, fading with distance down it. Only where a hull is there to catch it.
+function shipShadow(s, vr, sunP) {
+  if (s.def.static || s.r < 28) return; let lx = s.x - (sunP.x + O.x), ly = s.y - (sunP.z + O.y); const l = hyp(lx, ly) || 1; lx /= l; ly /= l; // away from the Sun
+  const hw = vr * .5, reach = vr * 7;
+  for (const t of S.ships) { if (t === s || t.dead || t.def.static) continue; const dx = t.x - s.x, dy = t.y - s.y, along = dx * lx + dy * ly; if (along < vr * .3 || along > reach) continue;
+    const perp = Math.abs(dx * ly - dy * lx), tv = vrOf(t); if (perp > hw + tv) continue;
+    const k = clamp((hw + tv * .5 - perp) / (tv + 1), 0, 1) * (1 - along / reach) * (tv < vr ? 1 : .4); if (k < .03) continue;
+    B.soot.add(t.x, t.y, tv * .36, tv * 2.6, tv * 2.2, t.a, 0x000000, k * .55, 1); }
 }
 function shipFxDraw(s, v, vr, z) {
   if (!v.hits) return; const ca = Math.cos(s.a), sa = Math.sin(s.a), mn = 3 / Math.max(z, 1e-9);
@@ -1889,6 +1905,17 @@ export function clashFx(ctx, cx, cy, rr) { // hostile fleets sharing an orbit: a
     const g = ctx.createRadialGradient(px, py, 0, px, py, r); g.addColorStop(0, `rgba(255,255,245,${.9 * al})`); g.addColorStop(.4, `rgba(255,210,150,${.4 * al})`); g.addColorStop(1, 'rgba(255,160,90,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, py, r, 0, TAU); ctx.fill();
     if (h2 > .55) { ctx.strokeStyle = `rgba(200,230,255,${.45 * al})`; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + Math.cos(a + 1.2) * 6, py + Math.sin(a + 1.2) * 6); ctx.stroke(); } } // a tracer
   ctx.globalCompositeOperation = 'source-over'; ctx.strokeStyle = 'rgba(190,180,170,.22)'; ctx.lineWidth = 1; ctx.setLineDash([1, 4]); ctx.beginPath(); ctx.arc(cx, cy, rr + 12, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+  ctx.restore();
+}
+export function surfaceFx(ctx, cx, cy, rr, kind = 'rising') { // war on the ground, seen from orbit: tiny flashes over the disc and a smudge of smoke; a sacked world smoulders
+  const now = performance.now() / 1000; ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, rr - 1, 0, TAU); ctx.clip();
+  const n = kind === 'sacked' ? 3 : 7; ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < n; i++) { const t = now * (kind === 'sacked' ? .35 : 1.8) + i * .61, ph = t % 1, sd = Math.floor(t) * 5.17 + i * 1.9, h = Math.abs(Math.sin(sd * 12.9898) * 43758.5453) % 1, h2 = Math.abs(Math.sin(sd * 78.233) * 12345.6789) % 1;
+    const a = h * TAU, rad = Math.sqrt(h2) * rr * .8, px = cx + Math.cos(a) * rad, py = cy + Math.sin(a) * rad, al = kind === 'sacked' ? .35 * Math.sin(ph * PI) : (1 - ph) * (1 - ph) * (ph < .05 ? ph / .05 : 1), r = kind === 'sacked' ? 3 + rr * .06 : 1.2 + 2.5 * (1 - ph);
+    const g = ctx.createRadialGradient(px, py, 0, px, py, r); g.addColorStop(0, kind === 'sacked' ? `rgba(255,120,50,${al})` : `rgba(255,255,240,${al})`); g.addColorStop(1, 'rgba(255,140,80,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, py, r, 0, TAU); ctx.fill(); }
+  ctx.globalCompositeOperation = 'source-over'; // smoke: a few soft grey smudges drifting with the clock
+  for (let i = 0; i < 3; i++) { const a = (now * .03 + i * 2.1) % TAU, rad = rr * (.35 + .25 * ((i * .37) % 1)), px = cx + Math.cos(a) * rad, py = cy + Math.sin(a) * rad, r = rr * (kind === 'sacked' ? .2 : .13);
+    const g = ctx.createRadialGradient(px, py, 0, px, py, r); g.addColorStop(0, 'rgba(70,64,60,.32)'); g.addColorStop(1, 'rgba(70,64,60,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, py, r, 0, TAU); ctx.fill(); }
   ctx.restore();
 }
 export function siegeFx(ctx, cx, cy, rr, sil = null) { // bombardment seen from space: brief flashes along the world's limb and dark side, each fading out, and a faint ring of debris
