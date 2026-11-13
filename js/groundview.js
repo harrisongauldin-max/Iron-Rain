@@ -9,7 +9,7 @@ import { FACTIONS, NEUTRAL_C } from './data.js';
 import { S } from './state.js';
 import { sfx, initAudio, music } from './audio.js';
 import { figureGeo, figureMaterial, corpseGeo, storkGeo, lodGeo, KINDS, MUZZLE, cityGeo, staticMaterial, cityMaterial, CORPSE_KINDS, corpseOf } from './groundmodels.js';
-import { animMesh, animFigure, animEnd, animReset, dyingAdd, drawDying, settle } from './groundanim.js'; // the figures' motion (animator chat)
+import { animMesh, animFigure, animEnd, animReset, dyingAdd, drawDying, settle, shotEnds } from './groundanim.js'; // the figures' motion (animator chat)
 import * as GFX from './groundfx.js'; // textures and effects: the terrain surface, water, sky dome
 import * as PX from './groundpunch.js'; // the fighting: tracer ribbons, muzzle flashes, fireballs, smoke, shake
 import { pass, renderOutput } from 'three/tsl'; // the post: the scene pass and tone mapping before SMAA
@@ -242,10 +242,9 @@ function drawUnits(dt) {
     const col = u.team === 0 ? V.colA : V.colD, base = tmpC.set(col.main);   // the figure's own paint is in the model; this tints only its team-mask areas (crests, pauldrons, capes)
     if (rout) base.lerp(new THREE.Color('#ffffff'), .25 + .2 * Math.sin(t * 8));
     const last = V.lastFig.get(u.id) || [];
-    const figs = [], far = hyp(u.x - cp.x, u.y - cp.z, heightAt(u.x, u.y) - cp.y) > LOD_D + radiusOf(u), C0 = far ? cntL : cnt, IM = far ? V.lo : V.inst;
+    const figs = [], dU = hyp(u.x - cp.x, u.y - cp.z, heightAt(u.x, u.y) - cp.y), rU = radiusOf(u), allFar = dU > LOD_D * 1.2 + rU, allNear = dU < LOD_D * .86 - rU; // (each figure has its own switch distance: groundanim)
     for (let n = 0; n < nf; n++) {
-      const kk = n === 0 && u.leader && kd === 'gold' ? 'lead' : kd, imk = IM[kk];   // the commander's figure carries the standard
-      if (C0[kk] >= imk.instanceMatrix.count) break;
+      const kk = n === 0 && u.leader && kd === 'gold' ? 'lead' : kd;   // the commander's figure carries the standard
       const fi = n % files, ri = Math.floor(n / files), h1 = ((u.id * 928371 + n * 2654435761) >>> 0) / 4294967296, h2 = ((u.id * 1234567 + n * 7654321) >>> 0) / 4294967296;
       let ox = (fi - (files - 1) / 2) * dx + (h1 - .5) * dx * .35, oz = -((ri - (ranks - 1) / 2) * dz) + (h2 - .5) * dz * .35;
       if (rout) { const rt = t - (u.routT || t), sc = 1 + Math.min(4, rt * .4); ox *= sc; oz *= sc; ox += (h2 - .5) * 30 * Math.min(1, rt * .5); } // the scatter grows, it doesn't jump
@@ -254,12 +253,14 @@ function drawUnits(dt) {
       const tyaw = PI / 2 - (rout ? u.a + PI * 0 : u.a) + (mel ? Math.sin(t * 1.7 + n) * .18 : 0); // in melee each turns a little to his own foe
       const P = settle(last[n], u.x + px * ox + ca * oz, u.y + py * ox + sa * oz, tyaw, lift, dtg), wx = P[0], wz = P[1], yaw = P[2], lf = P[3], fv = P[4]; // each walks to his place (groundanim.js)
       const wy = heightAt(wx, wz) + lf;
+      const far = allFar || !allNear && hyp(wx - cp.x, wz - cp.z, wy - cp.y) > LOD_D * (.86 + .34 * h1), C0 = far ? cntL : cnt, imk = (far ? V.lo : V.inst)[kk]; // a cohort thins into stand-ins man by man, not all at once
+      if (C0[kk] >= imk.instanceMatrix.count) { figs.push([wx, wy, wz, yaw, lf]); continue; } // (full: not drawn this frame, but he keeps his place)
       const bob = mv > .5 && kd !== 'pod' ? Math.abs(Math.sin(t * (u.run ? 11 : 7) + h1 * 10)) * .12 : 0;
       tmpV.set(wx, wy + bob, wz); tmpQ.setFromAxisAngle(UP, yaw); tmpS.set(VS, VS, VS); tmpM.compose(tmpV, tmpQ, tmpS);
-      imk.setMatrixAt(C0[kk], tmpM); imk.setColorAt(C0[kk], base); if (!far) animFigure(imk, C0[kk], wx, wy, wz, yaw, u, kk, n, h1, VS, t, fv); C0[kk]++; figs.push([wx, wy, wz, yaw, lf]);
+      imk.setMatrixAt(C0[kk], tmpM); imk.setColorAt(C0[kk], base); if (!far) animFigure(imk, C0[kk], wx, wy, wz, yaw, u, kk, n, h1, VS, t, P); C0[kk]++; figs.push([wx, wy, wz, yaw, lf]);
     }
     // the fallen stay where they fell
-    if (last.length > figs.length) for (let n = figs.length; n < last.length; n++) if (far || !dyingAdd(last[n], u.team, kd, base.clone(), VS, t)) addCorpse(last[n], u.team, false, kd); // near, they fall first
+    if (last.length > figs.length) for (let n = figs.length; n < last.length; n++) { const f = last[n]; if (hyp(f[0] - cp.x, f[2] - cp.z, f[1] - cp.y) > LOD_D || !dyingAdd(f, u.team, kd, base.clone(), VS, t)) addCorpse(f, u.team, false, kd); } // near, they fall first
     if (u.gone && !figs.length) V.lastFig.delete(u.id); else V.lastFig.set(u.id, figs);
   }
   drawDying(V.inst, cnt, t, (f, team, kind) => addCorpse(f, team, true, kind)); animEnd(V.inst);
@@ -348,8 +349,9 @@ const SHOT = { scorch: ['#ffd28a', 900, 14], pulse: ['#ff5a3c', 600, 10], rail: 
 function drawFx(dt) {
   // new events from the rules
   for (const f of G.fx) {
-    if (f.k === 'shot') { const S0 = SHOT[f.f] || SHOT.scorch, gh = (x, y) => heightAt(clamp(x, 0, MAP), clamp(y, 0, MAP)), h0 = f.z0 != null ? gh(f.x0, f.y0) + f.z0 : gh(f.x0, f.y0) + (MUZZLE[WK[f.f]] || MUZZLE.inf)[1] * VS, h1 = f.z1 != null ? gh(f.x1, f.y1) + f.z1 : gh(f.x1, f.y1) + 1.2 * VS, L = hyp(f.x1 - f.x0, f.y1 - f.y0, h1 - h0);
-      if (V.tr.length < 2500) V.tr.push({ x0: f.x0, y0: h0, z0: f.y0, x1: f.x1, y1: h1, z1: f.y1, L, t: -(f.d || 0) * .5, spd: S0[1], len: S0[2], arc: f.f === 'missile' ? Math.min(120, L * .25) : f.f === 'heavy' ? Math.min(40, L * .08) : 0, kind: f.f, mz: false }); }
+    if (f.k === 'shot') { const S0 = SHOT[f.f] || SHOT.scorch, gh = (x, y) => heightAt(clamp(x, 0, MAP), clamp(y, 0, MAP)), E = shotEnds(f), o = E && E[0], e = E && E[1]; // from the posed barrel to a posed man (groundanim.js)
+      const X0 = o ? o[0] : f.x0, Z0 = o ? o[2] : f.y0, X1 = e ? e[0] : f.x1, Z1 = e ? e[2] : f.y1, h0 = o ? o[1] : f.z0 != null ? gh(f.x0, f.y0) + f.z0 : gh(f.x0, f.y0) + (MUZZLE[WK[f.f]] || MUZZLE.inf)[1] * VS, h1 = e ? e[1] : f.z1 != null ? gh(f.x1, f.y1) + f.z1 : gh(f.x1, f.y1) + 1.2 * VS, L = hyp(X1 - X0, Z1 - Z0, h1 - h0);
+      if (V.tr.length < 2500) V.tr.push({ x0: X0, y0: h0, z0: Z0, x1: X1, y1: h1, z1: Z1, L, t: -(f.d || 0) * .5, spd: S0[1], len: S0[2], arc: f.f === 'missile' ? Math.min(120, L * .25) : f.f === 'heavy' ? Math.min(40, L * .08) : 0, kind: f.f, mz: false }); }
     else if (f.k === 'breach') rubble(f.w);
     else if (f.k === 'crash') crash(f);
     else if (f.k === 'land') { PX.blast(f.x, heightAt(f.x, f.y), f.y, !!f.big); near(f.x, f.y) && sfx(f.big ? 'bigboom' : 'boom'); }

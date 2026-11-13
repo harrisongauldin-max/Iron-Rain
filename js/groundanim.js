@@ -37,6 +37,8 @@
 // - A figure that dies is struck back, buckles at the knees, slumps and topples forward, then lies where it fell.
 import * as THREE from 'three';
 import { Fn, attribute, positionGeometry, normalGeometry, normalLocal, vec3, select, cos, sin, textureLoad, instanceIndex, ivec2, int } from 'three/tsl';
+import { G, heightAt } from './ground.js';
+import { MUZZLE } from './groundmodels.js'; // read-only: the units (for aim, shots and hits) and the ground under the feet
 
 const TAU = Math.PI * 2, PI = Math.PI;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v, lerp = (a, b, k) => a + (b - a) * k, ease = k => k * k * (3 - 2 * k);
@@ -141,8 +143,9 @@ export function tagBones(geo, kind) {
 // A0 place x, y, z, yaw          A1 thigh R, knee R, thigh L, knee L     A2 foot R, foot L, pelvis yaw, pelvis tilt
 // A3 pelvis shift, pelvis drop, fall, scale                               A4 spine twist, spine lean, spine bend, head yaw
 // A5 head nod, cape, banner, —   A6 right arm pitch, swing, thrust, elbow  A7 left arm pitch, swing, thrust, elbow
+// A8 hip abduction R, L (+ = foot out to the right), —, —
 // Angles about X are positive backward (a limb hanging down swings its end back; a foot dips its toe).
-const NV = 8, PER_ROW = 64;
+const NV = 9, PER_ROW = 64;
 const v3 = a => vec3(a[0], a[1], a[2]);
 const rX = (p, c, s) => vec3(p.x, p.y.mul(c).sub(p.z.mul(s)), p.y.mul(s).add(p.z.mul(c)));
 const rY = (p, c, s) => vec3(p.x.mul(c).add(p.z.mul(s)), p.y, p.z.mul(c).sub(p.x.mul(s)));
@@ -158,7 +161,7 @@ export function animMesh(im, kind) {
   const SR = v3(R.shR), SL = v3(R.shL), ER = v3(R.elR), EL = v3(R.elL), CP = v3(R.cape), BP = v3(R.banner), PV = vec3(0, R.hipR[1], 0);
   const m = im.material;
   m.positionNode = Fn(() => {
-    const b = attribute('bone', 'float'), [a0, a1, a2, a3, a4, a5, a6, a7] = A;
+    const b = attribute('bone', 'float'), [a0, a1, a2, a3, a4, a5, a6, a7, a8] = A;
     const p = positionGeometry.toVar(), n = normalGeometry.toVar();
     const rot = (cond, piv, fn, c, s) => { p.assign(select(cond, fn(p.sub(piv), c, s).add(piv), p)); n.assign(select(cond, fn(n, c, s), n)); };
     const is = v => b.equal(v);
@@ -168,6 +171,7 @@ export function animMesh(im, kind) {
     rot(foot, select(legR, AR, AL), rX, cos(fA), sin(fA));
     rot(shin, select(legR, KR, KL), rX, cos(kA), sin(kA));
     rot(legR.or(legL), select(legR, HR, HL), rX, cos(tA), sin(tA));
+    const ab = select(legR, a8.x, a8.y); rot(legR.or(legL), select(legR, HR, HL), rZ, cos(ab), sin(ab)); // stepping out to the side
     // arms: the forearm about the elbow, then the whole arm about the shoulder (pitch, then swing), then its thrust
     const armR = is(7).or(is(13)), arm = armR.or(is(8)).or(is(14)), fore = is(13).or(is(14));
     const eA = select(armR, a6.w, a7.w); rot(fore, select(armR, ER, EL), rX, cos(eA), sin(eA));
@@ -185,6 +189,7 @@ export function animMesh(im, kind) {
     // body's above it, not the legs')
     const all = b.greaterThan(-1), legs = legR.or(legL), body = is(0).or(up), lb = a3.x.mul(-1 / R.leg);
     rot(legs, select(legR, HR, HL), rZ, cos(lb), sin(lb));
+    rot(legs, PV, rY, cos(a8.z), sin(a8.z));                            // the legs keep the step's heading: the pelvis's swing (and a turn to aim) turns in the hip sockets, not under the planted feet
     rot(all, PV, rY, cos(a2.z), sin(a2.z)); rot(body, PV, rZ, cos(a2.w), sin(a2.w)); p.assign(p.add(vec3(a3.x, a3.y, 0)));
     rot(all, vec3(0, 0, 0), rX, cos(a3.z), sin(a3.z));                // a fall, about the feet
     const cy = cos(a0.w), sy = sin(a0.w);
@@ -201,13 +206,14 @@ export function animMesh(im, kind) {
 // last frame (L = [x, y, z, yaw, lift]) toward its slot, turns it at its own pace and lifts it smoothly; it returns
 // [x, z, yaw, lift, speed], the speed being how fast the figure itself is moving, so its legs step when it shuffles into
 // a new place. Far jumps (a landing, a first frame) are taken at once.
-const SET = [0, 0, 0, 0, 0];
+const SET = [0, 0, 0, 0, 0, 0, 0]; // x, z, yaw, lift, speed, forward speed, rightward speed
 export function settle(L, tx, tz, tyaw, lift, dt) {
-  if (globalThis.__irNoSettle || !L || !(dt >= 0) || Math.hypot(L[0] - tx, L[2] - tz) > 40) { SET[0] = tx; SET[1] = tz; SET[2] = tyaw; SET[3] = lift; SET[4] = 0; return SET; }
+  if (globalThis.__irNoSettle || !L || !(dt >= 0) || Math.hypot(L[0] - tx, L[2] - tz) > 40) { SET[0] = tx; SET[1] = tz; SET[2] = tyaw; SET[3] = lift; SET[4] = SET[5] = SET[6] = 0; return SET; }
   const k = 1 - Math.exp(-dt * 7), ky = 1 - Math.exp(-dt * 8), kl = 1 - Math.exp(-dt * 3), l0 = L[4] ?? lift;
   let da = tyaw - L[3]; da -= TAU * Math.round(da / TAU);
   SET[0] = L[0] + (tx - L[0]) * k; SET[1] = L[2] + (tz - L[2]) * k; SET[2] = L[3] + da * ky; SET[3] = l0 + (lift - l0) * kl;
-  SET[4] = dt > 0 ? Math.hypot(SET[0] - L[0], SET[1] - L[2]) / dt : 0; return SET;
+  const vx = dt > 0 ? (SET[0] - L[0]) / dt : 0, vz = dt > 0 ? (SET[1] - L[2]) / dt : 0, cy = Math.cos(SET[2]), sy = Math.sin(SET[2]);
+  SET[4] = Math.hypot(vx, vz); SET[5] = vx * sy + vz * cy; SET[6] = vx * cy - vz * sy; return SET; // model +Z (forward) is (sin yaw, cos yaw) in the world, +X (right) is (cos yaw, −sin yaw)
 }
 
 // ---------------------------------------------------------------- the gait
@@ -242,9 +248,10 @@ function legH(R, sd, F, K, P) {
 }
 
 // ---------------------------------------------------------------- per-unit clocks
-const U = new Map();   // per unit: stride phase, gait, turn, melee and fire blends, flight
+const U = new Map();   // per unit: stride phase, gait, turn, melee and fire blends, flight, losses, ground slope
+const POSE = new Map(); // per unit, per figure: the last pose written (near figures only), for shots
 function unitClock(u, t, kind, scale) {
-  let s = U.get(u.id); if (!s) { s = { ph: Math.random(), g: 0, a: u.a, turn: 0, fire: 0, fly: 0, mel: 0, run: 0, t }; U.set(u.id, s); }
+  let s = U.get(u.id); if (!s) { s = { ph: Math.random(), g: 0, a: u.a, turn: 0, fire: 0, fly: 0, mel: 0, run: 0, t, hits: [], hn: 0, men: null, gx: 0, gy: 0 }; U.set(u.id, s); }
   const dt = Math.max(0, Math.min(.1, t - s.t)); s.t = t; if (dt <= 0) return s;
   const R = RIG[kind], L = R.leg * scale, T = u.T || {}, ca = Math.cos(u.a), sa = Math.sin(u.a);
   const v0 = Math.hypot(u.vx || 0, u.vy || 0), along = (u.vx || 0) * ca + (u.vy || 0) * sa;
@@ -263,6 +270,12 @@ function unitClock(u, t, kind, scale) {
   const f = v > .3 ? v * beta / Math.max(.15, reach * Math.max(.35, s.g)) : .7;
   s.ph += f * dt * (along < -.3 ? -1 : 1);       // walking backward plays the stride backward
   s.mel += ((u.melee ? 1 : 0) - s.mel) * (1 - Math.exp(-dt * 6));
+  // men lost since the last look: a flinch runs through the ranks, from the side the blow came
+  if (s.men != null && u.men < s.men) { const foe = u.melee && u.melee.x != null ? u.melee : u.aim && u.aim.x != null ? u.aim : null;
+    s.hits.push({ t, k: clamp(.22 + 8 * (s.men - u.men) / Math.max(1, s.men), .22, .95), from: foe ? Math.atan2(foe.y - u.y, foe.x - u.x) : u.a + (Math.random() - .5) * 2, id: s.hn++ }); if (s.hits.length > 4) s.hits.shift(); }
+  s.men = u.men;
+  // the slope of the ground under the unit (dh per metre east and north), for the feet
+  if (!(t - (s.gT ?? -9) < .25)) { s.gT = t; const e = 2; s.aimH = u.aim && u.aim.x != null ? heightAt(u.aim.x, u.aim.y) : null; s.gx = (heightAt(u.x + e, u.y) - heightAt(u.x - e, u.y)) / (2 * e); s.gy = (heightAt(u.x, u.y + e) - heightAt(u.x, u.y - e)) / (2 * e); }
   s.fire += ((u.firing || u.state === 'fire' ? 1 : 0) - s.fire) * (1 - Math.exp(-dt * 4));
   return s;
 }
@@ -276,15 +289,21 @@ const kick = (k, w = .08) => k < w ? Math.sin(k / w * PI / 2) : Math.exp(-(k - w
 // a hold-and-turn glance: the head picks a new mark every few seconds, turns to it and holds
 function glance(t, h, amp) { const P = 2.6 + 2.4 * h, i = Math.floor((t + h * 13) / P), k = clamp(((t + h * 13) / P - i) / .22, 0, 1); return amp * lerp(hash(i, h) * 2 - 1, hash(i + 1, h) * 2 - 1, ease(k)) * (1 - .3 * hash(i + 7, h)); }
 // write one figure: (x, y, z) its feet, yaw as groundview turns it, n its index in the unit, h a stable 0..1 hash
-export function animFigure(im, i, x, y, z, yaw, u, kind, n, h, scale, t, fv = 0) {
+export function animFigure(im, i, x, y, z, yaw, u, kind, n, h, scale, t, mv = 0) {
   const D = im.userData.anim; if (!D) return false;
+  // mv: settle()'s result (or just the figure's speed): how fast and which way, in its own frame, the figure itself moves
+  const fv = typeof mv === 'number' ? mv : mv[4], vf = typeof mv === 'number' ? mv : mv[5], vr = typeof mv === 'number' ? 0 : mv[6];
   const s = unitClock(u, t, kind, scale), R = D.rig, st = R.style, q = Q; q.fill(0);
   const T = u.T || {}, walk = T.walk || 3;
   // how much the figure walks: the unit's gait, or the figure's own shuffle into its place
   const g = clamp(Math.max(s.g, (1 - s.fly) * clamp((fv - .4) / walk, 0, 1) * .9), 0, 1), idle = 1 - g, k = s.run;
   // its own stride: Grays keep step within a few percent, the others each their own pace and size
   const own = st === 'gray' ? .02 : .07, c = s.ph * (1 + own * (h - .5)) + (st === 'gray' ? (h - .5) * .06 : h);
-  const amp = (1 + (hash(h, 3) - .5) * .1) * g; // stride size, ±5% from one man to the next
+  let amp = (1 + (hash(h, 3) - .5) * .1) * g; // stride size, ±5% from one man to the next
+  // which way he is going, in his own frame: forward, or crabbing sideways as the outer files do when the line wheels.
+  // People turn the hips toward their way and keep the chest on the enemy; what is left over is taken in side steps.
+  let hipTurn = 0, tr = 0;
+  if (fv > .5 && g > .05 && s.fly < .5) { const th = Math.atan2(vr, Math.max(-.2, vf)), lim = .9; hipTurn = clamp(th, -lim, lim) * Math.min(1, fv / 1.5); const rest = th - hipTurn; tr = Math.tan(clamp(rest, -1.2, 1.2)) * Math.min(1, g); amp *= Math.max(.25, Math.abs(Math.cos(rest))); }
   const heavy = st === 'shell' ? 1.9 : st === 'obs' ? 1.45 : 1;
   // ---- legs: from the gait cycle, blended to a stance
   leg(c, k, LR, R, 'R'); leg(c + .5, k, LL, R, 'L');
@@ -293,23 +312,53 @@ export function animFigure(im, i, x, y, z, yaw, u, kind, n, h, scale, t, fv = 0)
   const brace = .1 * s.fire;
   const Fr = lerp(.1 * Math.max(0, -ws) + .03, LR[0] * amp + (1 - amp) * .03, g), Fl = lerp(.1 * Math.max(0, ws) + .03, LL[0] * amp + (1 - amp) * .03, g);
   const Kr = lerp(.05 + .34 * Math.max(0, -ws) + brace, LR[1] * amp + (1 - amp) * .08, g), Kl = lerp(.05 + .34 * Math.max(0, ws) + brace, LL[1] * amp + (1 - amp) * .08, g);
-  const Pr = lerp(-.04 * Math.max(0, -ws), LR[2] * amp, g), Pl = lerp(-.04 * Math.max(0, ws), LL[2] * amp, g);
+  let Pr = lerp(-.04 * Math.max(0, -ws), LR[2] * amp, g), Pl = lerp(-.04 * Math.max(0, ws), LL[2] * amp, g);
+  // side steps: each foot swings out and plants beside its own hip (the feet never cross), as the sagittal sweep does
+  // the foot's sideways place keeps a fixed ratio to its fore-aft place (tan of the crab angle), so it moves with the
+  // ankle's even stance sweep and stays planted on the diagonal; the swing carries it back out in the same proportion
+  const [GFx, GFn, beta] = gaitEnds(k), aF = (F, K) => [F * amp + (1 - amp) * .03, K * amp + (1 - amp) * .08];
+  const zMid = sd => (ankZ(R, sd, ...aF(GFx, kneeAt(0, k))) + ankZ(R, sd, ...aF(GFn, kneeAt(beta, k)))) / 2;
+  const abOf = (sd, F, K) => tr ? Math.asin(clamp(tr * (ankZ(R, sd, F, K) - zMid(sd)) / (R['Lt' + sd] * Math.cos(F) + R['Ls' + sd] * Math.cos(F - K) + R['ank' + sd][1]), -.3, .3)) : 0;
+  const abR = abOf('R', Fr, Kr), abL = abOf('L', Fl, Kl);
+  // the ground under each foot: the slope along and across the way he faces (model +Z and +X), from the unit's slope
+  const sy = Math.sin(yaw), cy = Math.cos(yaw), sF = clamp((s.gx || 0) * sy + (s.gy || 0) * cy, -.7, .7), sX = clamp((s.gx || 0) * cy - (s.gy || 0) * sy, -.7, .7);
+  const cR = fract(c), cL = fract(c + .5), downR = g < .1 || cR < beta, downL = g < .1 || cL < beta; // which feet are on the ground
+  const sA = Math.atan(sF); Pr -= sA; Pl -= sA;                                                // soles lie along the slope (toe up, climbing)
+  let Fr2 = Fr, Kr2 = Kr, Fl2 = Fl, Kl2 = Kl;
+  // the pelvis height this leg needs so neither its toe nor its heel goes under the ground there
+  const need = (sd, F, K, P, ab) => { const zA = R['hip' + sd][2] + ankZ(R, sd, F, K), d0 = R['Lt' + sd] * Math.cos(F) + R['Ls' + sd] * Math.cos(F - K) + R['ank' + sd][1], dA = d0 * Math.cos(ab), gX = sX * (R['hip' + sd][0] + d0 * Math.sin(ab)), c = Math.cos(P), sn = Math.sin(P);
+    return Math.max(sF * (zA + R.toe * c) + dA + R.toe * sn, sF * (zA - R.heel * c) + dA - R.heel * sn) + gX; };
+  let nR = need('R', Fr, Kr, Pr, abR), nL = need('L', Fl, Kl, Pl, abL);
+  // the pelvis sits as high as the lowest planted foot allows (on flat ground, the standing leg); a leg whose ground is
+  // higher than that bends to fit (knee and hip together, as in a squat), so no foot sinks and no planted foot floats
+  const Y = downR && downL ? Math.min(nR, nL) : downR ? nR : downL ? nL : Math.max(nR, nL);
+  // bend by dk at the knee and re-solve the hip so the ankle stays exactly over the same ground (a planted foot holds)
+  const keepF = (sd, F, K, dk) => { const z = ankZ(R, sd, F, K); let f = F + dk / 2; for (let it = 0; it < 4; it++) { const e = ankZ(R, sd, f, K + dk) - z, d = R['Lt' + sd] * Math.cos(f) + R['Ls' + sd] * Math.cos(f - K - dk); f -= e / Math.max(.2, d); } return f; };
+  const fit = (sd, F, K, P, ab) => { const hAt = dk => need(sd, keepF(sd, F, K, dk), K + dk, P, ab) - Y; let dk = 0;
+    for (let it = 0; it < 4; it++) { const e = hAt(dk); if (e <= 1e-4) break; const d = (hAt(dk + .02) - e) / .02; if (d > -1e-5) break; dk = clamp(dk - e / d, 0, 1.6); } return dk; };
+  if (nR - Y > 1e-4) { const dk = fit('R', Fr, Kr, Pr, abR); Fr2 = keepF('R', Fr, Kr, dk); Kr2 += dk; }
+  if (nL - Y > 1e-4) { const dk = fit('L', Fl, Kl, Pl, abL); Fl2 = keepF('L', Fl, Kl, dk); Kl2 += dk; }
   // joint commands relative to the model's rest pose (positive = backward)
-  q[4] = R.F0R - Fr; q[5] = R.S0R - R.F0R + Kr; q[6] = R.F0L - Fl; q[7] = R.S0L - R.F0L + Kl;
-  q[8] = Pr - q[4] - q[5]; q[9] = Pl - q[6] - q[7];
-  // the pelvis rides at the height the stance leg allows
-  const hR = legH(R, 'R', Fr, Kr, Pr), hL = legH(R, 'L', Fl, Kl, Pl), h0 = R.hipR[1];
-  let drop = Math.max(hR, hL) - h0; // the leg that reaches lowest is the one standing; the other swings clear
+  q[4] = R.F0R - Fr2; q[5] = R.S0R - R.F0R + Kr2; q[6] = R.F0L - Fl2; q[7] = R.S0L - R.F0L + Kl2;
+  q[8] = Pr - q[4] - q[5]; q[9] = Pl - q[6] - q[7]; q[32] = abR; q[33] = abL;
+  const h0 = R.hipR[1];
+  let drop = Y - h0;
   if (k > .2) drop += R.leg * .06 * k * g * Math.max(0, Math.sin(TAU * 2 * (c - .08)));  // the run's flight
   // ---- pelvis and spine: turning with the swinging leg, tilting down on the swing side, over the stance foot
   const cs = Math.cos(TAU * c), sn = Math.sin(TAU * c);
   let pYaw = -.1 * cs * amp * (1 + .3 * k), pTilt = .07 * sn * amp * heavy * (1 - .5 * k), pShift = .035 * R.leg * sn * amp * heavy * (1 - .6 * k);
   pTilt += idle * -.075 * ws; pShift += idle * .05 * R.leg * ws;         // standing, the hip drops toward the relaxed knee
+  pYaw += hipTurn;
   const sway = Math.sin(TAU * (t / (5.5 + 2 * h) + h * 3)); // and the whole body sways a little, as standing people do
-  let twist = -1.15 * pYaw + .06 * sway * idle, bend = -.8 * pTilt, lean = lerp(.04, .2, k) * g + .02 * idle + .025 * sway * idle;
+  let twist = -1.15 * (pYaw - hipTurn) - hipTurn + .06 * sway * idle, bend = -.8 * pTilt, lean = lerp(.04, .2, k) * g + .02 * idle + .025 * sway * idle;
+  lean += Math.atan(sF) * (.35 * g + .15);                                   // leaning into a climb, back against a descent
+  // ---- aim: firing, he turns from the hips and chest to his own mark in the target unit and lifts or drops the weapon to it
+  let aimY = 0, aimE = 0;
+  if (s.fire > .03 && u.aim && u.aim.x != null) { const dx = u.aim.x - x, dz = u.aim.y - z, d = Math.hypot(dx, dz) || 1; let dy = Math.atan2(dx, dz) - yaw; dy -= TAU * Math.round(dy / TAU);
+    aimY = clamp(dy, -.85, .85) * s.fire; aimE = clamp(Math.atan2((s.aimH ?? y) + 1.2 * scale - (y + R.shR[1] * scale), d), -.6, .6) * s.fire; pYaw += aimY * .3; twist += aimY * .7; lean -= aimE * .25; }
   const br = Math.sin(TAU * (t / (3.4 + h) + h * 5)); lean += .03 * br * idle; // breathing
   lean += .04 * s.fire;
-  let headYaw = -(twist + pYaw) * .85 + glance(t, h, st === 'shell' ? .35 : .55) * idle * (1 - .7 * s.fire) * (1 - s.mel), nod = -lean * .55 + .03 * br * idle;
+  let headYaw = -(twist + pYaw - aimY) * .85 + glance(t, h, st === 'shell' ? .35 : .55) * idle * (1 - .7 * s.fire) * (1 - s.mel), nod = -lean * .55 + .03 * br * idle;
   // ---- arms
   const ac = Math.cos(TAU * (c - .04)); // the arms swing a beat behind the legs
   let rp = 0, ry = 0, rz = 0, re = 0, lp = 0, ly = 0, lz = 0, le = 0;
@@ -331,6 +380,17 @@ export function animFigure(im, i, x, y, z, yaw, u, kind, n, h, scale, t, fv = 0)
   if (st === 'obs') { lp = lerp(lp, -.55, s.fire) + .25 * rk; le = lerp(le, -.1, s.fire); twist += .1 * s.fire; }
   if (st === 'gold') { lp = lerp(lp, -.75, s.fire) + .22 * rk; le = lerp(le, .05, s.fire); lz = -.04 * rk; twist -= .12 * s.fire; }
   if (st === 'shell') { rp -= .3 * rk; rz = -.08 * rk; re += .15 * rk; lean -= .05 * rk; twist += .06 * rk; }
+  // the weapon arm follows the mark up or down
+  if (aimE) { if (st === 'gray' || st === 'shell') rp -= aimE; else lp -= aimE; }
+  // ---- hit: when the unit loses men a flinch runs through the ranks, from the side the blow came (each man his own
+  // moment, a share of them as the loss is heavy); a jerk back, the head snapping, the weapon dipping, the knees giving
+  for (const e of s.hits) { const dtE = t - e.t - h * .09; if (dtE < 0 || dtE > .55 || hash(h * 7.13, e.id) > e.k) continue;
+    const f = kick(dtE / .55, .07) * (.6 + .4 * hash(h, e.id + 3)), rb = e.from - u.a, fr = Math.cos(rb), sd = Math.sin(rb);
+    lean -= .32 * f * fr; twist -= .22 * f * sd; bend += .14 * f * sd; nod -= .35 * f;
+    // the knees give: hip and knee together (half and whole, so the ankles stay over the same ground), the soles flat, the pelvis down by what that costs
+    const dF = .16 * f, dK = .32 * f, dR = legH(R, 'R', Fr2, Kr2, 0) - legH(R, 'R', Fr2 + dF, Kr2 + dK, 0), dL = legH(R, 'L', Fl2, Kl2, 0) - legH(R, 'L', Fl2 + dF, Kl2 + dK, 0);
+    drop -= Math.max(0, downR && downL ? Math.min(dR, dL) : downR ? dR : downL ? dL : 0); q[4] -= dF; q[6] -= dF; q[5] += dK; q[7] += dK; q[8] -= dK - dF; q[9] -= dK - dF;
+    if (st === 'gray' || st === 'shell') rp += .22 * f; else { lp += .25 * f; rp += .15 * f; } }
   // ---- melee: each figure on its own beat
   if (s.mel > .02) {
     const m = s.mel, mk = fract(t / (st === 'obs' ? 1.5 : st === 'gold' ? 1.3 : st === 'shell' ? 1.6 : 1.1) + h * 3.7);
@@ -354,7 +414,11 @@ export function animFigure(im, i, x, y, z, yaw, u, kind, n, h, scale, t, fv = 0)
   q[16] = twist; q[17] = lean; q[18] = bend; q[19] = headYaw;
   q[20] = nod; q[21] = cape; q[22] = banner; q[23] = 0;
   q[24] = rp; q[25] = ry; q[26] = rz; q[27] = re; q[28] = lp; q[29] = ly; q[30] = lz; q[31] = le;
+  q[34] = (hipTurn - pYaw) * g; // legs keep the step's heading; standing, they follow the pelvis
   write(D, i, q);
+  // keep the pose, so a shot can leave this figure's own barrel and land on a figure (shotEnds)
+  let PU = POSE.get(u.id); if (!PU) POSE.set(u.id, PU = new Map()); let pe = PU.get(n); if (!pe) PU.set(n, pe = { q: new Float32Array(NV * 4), kind, t: 0 });
+  pe.q.set(q); pe.kind = kind; pe.t = t; pe.scale = scale;
   const ST = globalThis.__irAnimStats; if (ST) { // test hook: how far each figure moves against its own unit, frame to frame
     const key = u.id * 4096 + n, rx = x - u.x, rz2 = z - u.y, p = ST.last.get(key);
     if (p && t > p[3]) { const d = Math.hypot(rx - p[0], rz2 - p[1]); let dy = yaw - p[2]; dy = Math.abs(dy - TAU * Math.round(dy / TAU)); ST.n++; ST.d.push(d); ST.y.push(dy); }
@@ -363,9 +427,50 @@ export function animFigure(im, i, x, y, z, yaw, u, kind, n, h, scale, t, fv = 0)
 }
 function write(D, i, q) { const o = i * NV * 4, a = D.data; for (let k = 0; k < NV * 4; k++) a[o + k] = q[k]; }
 export function animEnd(meshes) { for (const k in meshes) { const D = meshes[k].userData.anim; if (D) D.tex.needsUpdate = true; } }
-export function animReset() { U.clear(); DY.length = 0; }
+export function animReset() { U.clear(); DY.length = 0; POSE.clear(); }
 // for tests: the gait's leg angles, the pelvis height rule, and the rest geometry
 export const gaitProbe = { leg, legH, reachOf, RIG };
+
+// ---------------------------------------------------------------- shots from the barrel, onto a man
+// The sim draws a shot between random points in the two units' footprints. shotEnds(f) moves its ends onto the figures
+// as drawn: it leaves the muzzle of the nearest posed figure of the firing unit, where the barrel is this frame (kicked,
+// aimed, turned), and lands on the chest of the nearest posed figure of the unit it was fired at. It returns
+// [[x, y, z] | null, [x, y, z] | null] in world space, or null to keep the sim's own ends (aircraft, far units).
+const MZB = { inf: 7, rail: 7, obs: 14, gold: 14, lead: 14, shell: 13 };  // the bone that holds the muzzle
+const jX = (p, a) => { const c = Math.cos(a), s = Math.sin(a); return [p[0], p[1] * c - p[2] * s, p[1] * s + p[2] * c]; };
+const jY = (p, a) => { const c = Math.cos(a), s = Math.sin(a); return [p[0] * c + p[2] * s, p[1], p[2] * c - p[0] * s]; };
+const jZ = (p, a) => { const c = Math.cos(a), s = Math.sin(a); return [p[0] * c - p[1] * s, p[0] * s + p[1] * c, p[2]]; };
+const about = (p, v, f, a) => { const r = f([p[0] - v[0], p[1] - v[1], p[2] - v[2]], a); return [r[0] + v[0], r[1] + v[1], r[2] + v[2]]; };
+// a point on an arm, chest or head bone, posed exactly as the shader poses it
+export function poseP(R, q, b, p) {
+  const right = b === 7 || b === 13;
+  if (b === 13 || b === 14) p = about(p, right ? R.elR : R.elL, jX, right ? q[27] : q[31]);
+  if (b === 7 || b === 8 || b === 13 || b === 14) { const S = right ? R.shR : R.shL; p = about(p, S, jX, right ? q[24] : q[28]); p = about(p, S, jY, right ? q[25] : q[29]); p = [p[0], p[1], p[2] + (right ? q[26] : q[30])]; }
+  if (b === 6) { p = about(p, R.neck, jY, q[19]); p = about(p, R.neck, jX, q[20]); }
+  p = about(p, R.waist, jY, q[16]); p = about(p, R.waist, jZ, q[18]); p = about(p, R.waist, jX, q[17]);
+  const PV = [0, R.hipR[1], 0]; p = about(p, PV, jY, q[10]); p = about(p, PV, jZ, q[11]); p = [p[0] + q[12], p[1] + q[13], p[2]];
+  p = jX(p, q[14]); p = jY([p[0] * q[15], p[1] * q[15], p[2] * q[15]], q[3]);
+  return [p[0] + q[0], p[1] + q[1], p[2] + q[2]];
+}
+function nearUnit(x, y, team, foe) {
+  let best = null, bd = 140 * 140;
+  for (const u of G.units || []) { if (u.T && u.T.air || (foe ? u.team === team : u.team !== team) || !POSE.has(u.id)) continue; const d = (u.x - x) ** 2 + (u.y - y) ** 2; if (d < bd) { bd = d; best = u; } }
+  return best;
+}
+function nearFig(u, x, y) {
+  let best = null, bd = 1e18; const now = G.t;
+  for (const pe of POSE.get(u.id).values()) { if (now - pe.t > .5) continue; const d = (pe.q[0] - x) ** 2 + (pe.q[2] - y) ** 2; if (d < bd) { bd = d; best = pe; } }
+  return best;
+}
+export function shotEnds(f) {
+  if (f.z0 != null || !RIG) return null;
+  const a = nearUnit(f.x0, f.y0, f.team, false), fa = a && nearFig(a, f.x0, f.y0), M = fa && MUZZLE[fa.kind];
+  const o = fa && M && MZB[fa.kind] ? poseP(RIG[fa.kind], fa.q, MZB[fa.kind], M) : null;
+  let e = null;
+  if (f.z1 == null) { const b = nearUnit(f.x1, f.y1, f.team, true), fb = b && nearFig(b, f.x1, f.y1); if (fb) { const R = RIG[fb.kind]; e = poseP(R, fb.q, 5, [0, (R.waist[1] + R.neck[1]) / 2, .1]); } }
+  const st = globalThis.__irShotStats; if (st) { st.n++; if (o) { st.o++; st.dO = Math.max(st.dO || 0, Math.hypot(o[0] - f.x0, o[2] - f.y0)); } if (e) { st.e++; st.dE = Math.max(st.dE || 0, Math.hypot(e[0] - f.x1, e[2] - f.y1)); } } // test hook
+  return o || e ? [o, e] : null;
+}
 
 // ---------------------------------------------------------------- the dying: struck back, they buckle, slump and topple
 const DY = [], FALL = 1.05;
