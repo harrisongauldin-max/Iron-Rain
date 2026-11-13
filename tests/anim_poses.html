@@ -4,7 +4,7 @@
 #hud{position:fixed;left:10px;top:8px;background:#0008;padding:6px 10px;border-radius:4px;line-height:1.5}#hud b{color:#f2c14e}</style>
 <script type="importmap">{"imports":{"three":"../vendor/three/three.webgpu.js","three/webgpu":"../vendor/three/three.webgpu.js","three/tsl":"../vendor/three/three.tsl.js"}}</script>
 </head><body><canvas id="cv"></canvas>
-<div id="hud"><b>Ground figure animation lab</b> (groundanim.js) — rows: Gray, RailRifle, Obsidian, Peerless, Legate, StarShell · columns: idle, walk, run, fire, melee, walk backward, turning, fly (Golds), dying<br>
+<div id="hud"><b>Ground figure animation lab</b> (groundanim.js) — rows: Gray, RailRifle, Obsidian, Peerless, Legate, StarShell · columns: idle, walk, run, fire (aim sweeping across the front), hit (losing men), melee, walk backward, turning, fly (Golds), dying<br>
 drag to orbit · wheel to zoom · <span id="st"></span></div>
 <script type="module">
 // Every figure kind in every state the game uses, posed live by groundanim.js exactly as groundview poses them.
@@ -12,7 +12,7 @@ drag to orbit · wheel to zoom · <span id="st"></span></div>
 import * as THREE from 'three';
 import { figureGeo, figureMaterial } from '../js/groundmodels.js';
 import { animMesh, animFigure, animEnd, dyingAdd, drawDying, animReset } from '../js/groundanim.js';
-const KINDS = ['inf', 'rail', 'obs', 'gold', 'lead', 'shell'], COLS = ['idle', 'walk', 'run', 'fire', 'melee', 'back', 'turn', 'fly', 'dying'];
+const KINDS = ['inf', 'rail', 'obs', 'gold', 'lead', 'shell'], COLS = ['idle', 'walk', 'run', 'fire', 'hit', 'melee', 'back', 'turn', 'fly', 'dying'];
 const VS = 2.2, GAP = 9, ROW = 12;
 const cv = document.getElementById('cv'), R = new THREE.WebGPURenderer({ canvas: cv, antialias: true });
 R.setPixelRatio(Math.min(2, devicePixelRatio)); R.shadowMap.enabled = true;
@@ -38,10 +38,14 @@ function frame(now) {
     const u = units[k + c], solo = !!lab.only, x = solo ? 0 : (j - (COLS.length - 1) / 2) * GAP, z = solo ? 0 : (r - (KINDS.length - 1) / 2) * ROW, im = meshes[k];
     if (c === 'dying') return;
     if (lab.only && (lab.only[0] !== k || lab.only[1] !== c)) return;
-    const sp = { idle: 0, walk: u.T.walk, run: u.T.run, fire: 0, melee: 0, back: u.T.walk * .6, turn: 0, fly: 14 }[c];
+    const sp = { idle: 0, walk: u.T.walk, run: u.T.run, fire: 0, hit: 0, melee: 0, back: u.T.walk * .6, turn: 0, fly: 14 }[c];
     if (c === 'fly' && k !== 'gold' && k !== 'lead') return;
     u.a = c === 'turn' ? Math.PI / 2 + Math.sin(t * .8) * 1.4 : Math.PI / 2;
     const dir = c === 'back' ? -1 : 1; u.vx = Math.cos(u.a) * sp * dir; u.vy = Math.sin(u.a) * sp * dir;
+    u.x = x; u.y = z; if (u.men == null) u.men = 60;
+    // firing: the target swings from his left to his right and back, near and far, so the aim shows; hit: a man lost every 1.5 s
+    u.aim = c === 'fire' ? { x: x + Math.sin(t * .5) * 40, y: z + 30 + Math.sin(t * .23) * 25 } : null;
+    if (c === 'hit') { const n = Math.floor(t / 1.5); if (u.lostN !== n) { u.lostN = n; u.men = Math.max(5, u.men - 2); if (u.men <= 5) u.men = 60; } }
     u.melee = c === 'melee' ? {} : null; u.firing = c === 'fire'; u.state = c === 'melee' ? 'melee' : c === 'fire' ? 'fire' : sp ? 'move' : 'idle';
     const y = c === 'fly' ? 3 + Math.sin(t * 3) * 1.5 : 0, yaw = Math.PI / 2 - u.a;
     animFigure(im, cnt[k], x, y, z, yaw, u, k, 0, ((u.id * 2654435761) >>> 0) / 4294967296, VS, t); im.setColorAt(cnt[k], team); cnt[k]++;
