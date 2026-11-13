@@ -27,6 +27,7 @@ import * as QS from './quests.js';
 import { initAudio, sfx } from './audio.js';
 import { OPTS, saveOpts } from './ui.js';
 import { toggleGfx, gfxOpen } from './gfxmenu.js';
+import { toggleSound, soundOpen } from './audiomenu.js';
 import { DEFS } from './data.js';
 import * as SV from './save.js';
 import * as PA from './parley.js';
@@ -1208,8 +1209,8 @@ function warUI(f) {
     .then(v => { if (v === 'war') { if (council) { P.react(me, 'war', 3); toastS('The council is against it: the Moon Lords will not forget', 'bad'); } const e = K.declareWar(me, f, !!tl); if (e) toastS('The truce holds', 'bad'); else toastS(`${K.BLOC_NAME[me]} is at war with ${K.BLOC_NAME[f]}`, 'bad'); } refresh(); });
 }
 function menuUI() {
-  modal(`<h2>Campaign</h2><p class="dim">${date(C.turn)} · ${K.BLOC_NAME[C.player]}</p><div class="keys"><b>Click</b> select a world or fleet · <b>Right-click</b> send the selected fleet · <b>Wheel</b> zoom · <b>Drag / WASD</b> pan · <b>Tab</b> next fleet · <b>Space</b> home · <b>F</b> faction · <b>P</b> diplomacy · <b>H</b> ledger and chronicle · <b>L</b> lists · <b>R</b> dispatches · <b>Q</b> lay down a hull · <b>Enter</b> end turn · <b>Ctrl+S</b> save · <b>F10</b> graphics</div>`, [['back', 'Back to the war', 'go'], ['save', 'Save'], ['load', 'Load'], ['gfx', 'Graphics'], ['quit', 'Quit to the main menu']], { esc: 'back' })
-    .then(v => { if (v === 'quit') quitToMenu(); else if (v === 'save' || v === 'load') savesUI(v); else if (v === 'gfx' && !gfxOpen()) toggleGfx(); });
+  modal(`<h2>Campaign</h2><p class="dim">${date(C.turn)} · ${K.BLOC_NAME[C.player]}</p><div class="keys"><b>Click</b> select a world or fleet · <b>Right-click</b> send the selected fleet · <b>Wheel</b> zoom · <b>Drag / WASD</b> pan · <b>Tab</b> next fleet · <b>Space</b> home · <b>F</b> faction · <b>P</b> diplomacy · <b>H</b> ledger and chronicle · <b>L</b> lists · <b>R</b> dispatches · <b>Q</b> lay down a hull · <b>Enter</b> end turn · <b>Ctrl+S</b> save · <b>F10</b> graphics</div>`, [['back', 'Back to the war', 'go'], ['save', 'Save'], ['load', 'Load'], ['gfx', 'Graphics'], ['snd', 'Sound'], ['quit', 'Quit to the main menu']], { esc: 'back' })
+    .then(v => { if (v === 'quit') quitToMenu(); else if (v === 'save' || v === 'load') savesUI(v); else if (v === 'gfx' && !gfxOpen()) toggleGfx(); else if (v === 'snd' && !soundOpen()) toggleSound(); });
 }
 // the save slots: an autosave written every week, three of the player's own, and files for safe keeping
 const SIDE_NAME = { rep: 'The Solar Republic', soc: 'The Society Remnant', rim: 'The Rim Dominion' };
@@ -1249,7 +1250,7 @@ async function rainUI(fl, preferAssault) {
   if (go === 'ground') return groundUI(fl);
   if (go !== 'go') return;
   const r = K.ironRain(fl); if (r.err) return toastS(r.err, 'bad');
-  sfx && sfx(r.won ? 'built' : 'alarm');
+  sfx && sfx(r.won ? 'victory' : 'defeat');
   const last = C.log[0];
   await modal(`${rainArt(w.id, r.won ? 'won' : 'lost')}<div class="kicker">${date(C.turn)}</div><h2 class="${r.won ? 'good' : 'bad'}">${r.won ? 'Iron Rain: ' + name + ' falls' : 'The drop on ' + name + ' fails'}</h2><p>${esc(last ? last.msg : '')}</p>${r.won ? `<p class="dim">${name} was held by ${K.BLOC_NAME[before]}. Its loyalty starts low: garrison it and build a Fortress before it revolts.</p>` : ''}`, [['ok', 'Continue', 'go']], { esc: 'ok', enter: 'ok', cls: 'rain' });
   await pendingUI();
@@ -1268,7 +1269,7 @@ async function groundUI(fl) {
   enterStrat();
   if (!r) r = { won: false, why: 'the landing came apart.', attLeft: 0, defLeft: 1, def0: 1, leaderLost: [false, false], city: name, sites: [] };
   K.groundSettle(fl, w.id, r, r.def0);
-  sfx && sfx(r.won ? 'built' : 'alarm');
+  sfx && sfx(r.won ? 'victory' : 'defeat');
   const last = C.log[0];
   await modal(`${rainArt(w.id, r.won ? 'won' : 'lost')}<div class="kicker">${date(C.turn)}</div><h2 class="${r.won ? 'good' : 'bad'}">${r.won ? 'Iron Rain: ' + name + ' falls' : 'The drop on ' + name + ' fails'}</h2><p>${esc(last ? last.msg : '')}</p><div class="fgrid"><div class="stat"><i>Lost in the sky</i><b>${fmt(r.sky || 0)}</b></div><div class="stat"><i>Legionnaires left</i><b>${fmt(r.attLeft)}</b></div><div class="stat"><i>Garrison killed</i><b>${fmt((r.killed || [0])[0])}</b></div><div class="stat"><i>Garrison now (troops)</i><b>${fmt(w.garrison)}</b></div></div>${r.won ? `<p class="dim">${name} was held by ${K.BLOC_NAME[before]}. Its loyalty starts low: garrison it and build a Fortress before it revolts.</p>` : `<p class="dim">The siege goes on. Every week of it wears the garrison down.</p>`}`, [['ok', 'Continue', 'go']], { esc: 'ok', enter: 'ok', cls: 'rain' });
   await pendingUI(); V.busy = false;

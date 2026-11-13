@@ -1100,7 +1100,7 @@ function startThroes(s, byTeam) {
   const k = clamp(((s.def.len || 1500) - 1500) / 6500, 0, 1);
   S.wrecks.push({ id: s.id, type: s.type, team: s.team, def: s.def, x: s.x, y: s.y, vx: s.vx, vy: s.vy, a: s.a, av: s.av + rand(-.04, .04), roll: 0, rollV: (Math.random() < .5 ? -1 : 1) * rand(.06, .14),
     t0: S.time, T: 4 + 4 * k + rand(0, .6), r: s.r, vt: s.vt, cmdr: s.cmdr ? { name: s.cmdr.name } : null, title: s.title, byTeam, vent: 0, pop: rand(.6, 1.2) });
-  burst(s.x, s.y, s.vx, s.vy, 30, 0xffcf8a, s.r * 4, .8); sfx('boom', s.x, s.y, s.r * .3);
+  burst(s.x, s.y, s.vx, s.vy, 30, 0xffcf8a, s.r * 4, .8); sfx('throes', s.x, s.y, s.r * .3);
 }
 function wreckTick(dt) {
   for (const w of S.wrecks) {
@@ -1479,7 +1479,7 @@ function updShots(dt) {
       else if (p.D.kind === 'slug') { const n = p.D.huge ? 40 : p.D.big ? 24 : 7, ha = Math.atan2(p.vy, p.vx); /* sparks off the armour, thrown back along the shot */
         for (let i = 0; i < n * (S.fxK || 1); i++) { const a = ha + PI + rand(-1.1, 1.1), v = rand(120, p.D.big ? 700 : 420); S.parts.push({ x: hx, y: hy, vx: hit.vx + Math.cos(a) * v, vy: hit.vy + Math.sin(a) * v, life: rand(.25, .7), max: .7, size: 2, col: Math.random() < .6 ? 0xffd080 : 0xfff4e0, spark: 1, drag: 1.2 }); }
         if (p.D.big || p.D.huge) S.flashes.push({ x: hx, y: hy, vx: hit.vx, vy: hit.vy, r: p.D.huge ? 30 : 16, life: .35, max: .35, fire: 1, col: 0xffc080 }); }
-      if (p.D.kind === 'slug') { S.rings.push({ x: hx, y: hy, vx: hit.vx, vy: hit.vy, r: 3, max: p.D.huge ? 180 : p.D.big ? 90 : 26, life: .3, maxl: .3, col: shielded ? 0x8fd3ff : 0xffe0b0, soft: !p.D.big && !p.D.huge }); sfx('hit', hx, hy); } }
+      if (p.D.kind === 'slug') { S.rings.push({ x: hx, y: hy, vx: hit.vx, vy: hit.vy, r: 3, max: p.D.huge ? 180 : p.D.big ? 90 : 26, life: .3, maxl: .3, col: shielded ? 0x8fd3ff : 0xffe0b0, soft: !p.D.big && !p.D.huge }); sfx(shielded ? 'shhit' : 'hit', hx, hy, p.D.huge ? 3 : p.D.big ? 2 : 1); } }
       p.dead = true; continue;
     }
     const b = bodyHit(p.x, p.y, 0); if (b) { p.dead = true; if (p.D.kind === 'slug') burst(p.x, p.y, b.vx, b.vy, 8, 0xff9a6a, 120, .6); }

@@ -1512,3 +1512,21 @@ svg.face.dead{filter:grayscale(1) brightness(.75)}
 .rcard .rlog{display:flex;flex-direction:column;margin-top:4px;opacity:.7;font-size:11px}
 .rcard .rlog span{cursor:pointer}
 .rcard .rlog span:hover{opacity:1;text-decoration:underline}
+/* the sound menu (js/audiomenu.js): the graphics menu's look */
+#sndp{position:fixed;top:50px;right:46px;width:470px;background:linear-gradient(180deg,rgba(18,15,17,.99),rgba(9,10,15,.99));max-height:calc(100vh - 70px);display:flex;flex-direction:column;z-index:12;padding:0}
+#sndp .gx-head{display:flex;align-items:center;gap:10px;padding:9px 10px 8px 14px;border-bottom:1px solid var(--line)}
+#sndp .gx-head b{font-family:Cinzel,Georgia,serif;font-size:14px;letter-spacing:.16em;text-transform:uppercase;color:var(--gold-hi,#e8c87e)}
+#sndp .gx-head span{flex:1;font-size:10px;opacity:.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#sndp .gx-body{overflow:auto;padding:4px 14px 10px}
+#sndp .gx-sec{margin:10px 0 4px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold,#c8a95a);opacity:.85}
+#sndp .gx-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:3px 0}
+#sndp .gx-name{font-size:12px;opacity:.9;white-space:nowrap}
+#sndp .gx-opts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:3px}
+#sndp .btn.sm{font-size:10px;padding:3px 7px;letter-spacing:.08em}
+#sndp .gx-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px;border-top:1px solid var(--line);font-size:10px;opacity:.75}
+#sndp .sx-vol{display:flex;align-items:center;gap:8px}
+#sndp .sx-vol input{width:190px;accent-color:var(--gold,#c8a95a)}
+#sndp .sx-vol i{font-style:normal;font-size:10px;width:32px;text-align:right;opacity:.75}
+#sndp .sx-test{display:flex;flex-wrap:wrap;gap:3px;align-items:center;margin:3px 0 6px}
+#sndp .sx-test span{width:100%;font-size:10px;opacity:.6;letter-spacing:.08em}
+body.strat #sndp{top:64px;right:12px;z-index:45;max-height:calc(100vh - 84px)}

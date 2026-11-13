@@ -7,7 +7,7 @@ import * as GR from './ground.js';
 import { G, MAP, NH, CH, UT, heightAt, footprint, radiusOf, fighting, live } from './ground.js';
 import { FACTIONS, NEUTRAL_C } from './data.js';
 import { S } from './state.js';
-import { sfx, initAudio, music } from './audio.js';
+import { sfx, initAudio, music, setGroundWorld } from './audio.js';
 import { figureGeo, figureMaterial, corpseGeo, storkGeo, lodGeo, KINDS, MUZZLE, cityGeo, staticMaterial, cityMaterial, CORPSE_KINDS, corpseOf } from './groundmodels.js';
 import { animMesh, animFigure, animEnd, animReset, dyingAdd, drawDying, settle, shotEnds } from './groundanim.js'; // the figures' motion (animator chat)
 import * as GFX from './groundfx.js'; // textures and effects: the terrain surface, water, sky dome
@@ -88,14 +88,14 @@ export function fight(spec, meta = {}) {
     const c = G.map.city; Object.assign(V.cam, { tx: c.x, tz: c.y - 2600, yaw: PI, pitch: .55, dist: 4200 });
     V.root.querySelector('#gbName').textContent = `${G.map.B.city}, ${meta.world || ''}`;
     showBrief(); hud(true);
-    try { initAudio(); music(.6); } catch (e) { /* no audio */ }
+    try { initAudio(); music(.6); setGroundWorld(meta.world); S.groundEar = earAt; } catch (e) { /* no audio */ }
   });
 }
 function teardown() {
   V.on = false; V.root.classList.add('hide'); document.body.classList.remove('ground');
   if (V.scene) V.scene.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { if (m.map) m.map.dispose(); m.dispose(); }); });
   V.scene = null;  G.on = false;
-  try { music(0); } catch (e) { /* no audio */ }
+  try { music(0); S.groundEar = null; } catch (e) { /* no audio */ }
 }
 
 // ---------------------------------------------------------------- the scene
@@ -308,7 +308,7 @@ function drawAir(dt) {
   for (const w of V.wrecks) {
     w.vy -= 9.8 * G.map.B.g * step; w.vx *= 1 - .25 * step; w.vz *= 1 - .25 * step; w.x += w.vx * step; w.y += w.vy * step; w.z += w.vz * step; w.roll += w.spin * step; w.pitch = Math.max(-1.2, w.pitch - .35 * step);
     const gh = heightAt(clamp(w.x, 0, MAP), clamp(w.z, 0, MAP));
-    if (w.y <= gh + 2) { PX.blast(w.x, gh, w.z, w.kind === 'thunder'); GFX.scorch(w.x, w.z, w.kind === 'thunder' ? 26 : 14); near(w.x, w.z) && sfx(w.kind === 'thunder' ? 'bigboom' : 'boom'); continue; }
+    if (w.y <= gh + 2) { PX.blast(w.x, gh, w.z, w.kind === 'thunder'); GFX.scorch(w.x, w.z, w.kind === 'thunder' ? 26 : 14); sfx(w.kind === 'thunder' ? 'bigboom' : 'boom', w.x, w.z, 22); continue; }
     put(w.kind, w.x, w.y, w.z, w.yaw, w.pitch, w.roll, tmpC.setRGB(.25, .22, .2), clamp(hyp(w.x - cp.x, w.y - cp.y, w.z - cp.z) * 2 * tanH * 12 / (12 * H), AIR_VS, 7));
     PX.trail(w.x, w.y, w.z); PX.glow(w.x, w.y, w.z, 10, .9, 2.6, 1.4, .5); keep.push(w);
   }
@@ -324,7 +324,7 @@ function crash(f) {
   for (let i = 0; i < Math.min(f.n, 4); i++) { const kind = f.type === 'thunderwing' ? 'thunder' : 'rip', sp = (f.v || 100) * (.5 + Math.random() * .3), a = f.a + (Math.random() - .5) * .6;
     V.wrecks.push({ kind, x: f.x + (Math.random() - .5) * 40, y: y0 + (Math.random() - .5) * 20, z: f.y + (Math.random() - .5) * 40, vx: Math.cos(a) * sp, vy: -5 - Math.random() * 15, vz: Math.sin(a) * sp, yaw: PI / 2 - a, pitch: -.1, roll: 0, spin: (Math.random() < .5 ? -1 : 1) * (1.5 + Math.random() * 3) });
     PX.blast(f.x, y0, f.y, false); }
-  near(f.x, f.y) && sfx('boom');
+  sfx('boom', f.x, f.y, 14);
 }
 // the fallen: kept as a list, sorted into the near and far meshes again when the camera has moved or more have fallen
 function drawCorpses(dt) {
@@ -354,9 +354,9 @@ function drawFx(dt) {
       if (V.tr.length < 2500) V.tr.push({ x0: X0, y0: h0, z0: Z0, x1: X1, y1: h1, z1: Z1, L, t: -(f.d || 0) * .5, spd: S0[1], len: S0[2], arc: f.f === 'missile' ? Math.min(120, L * .25) : f.f === 'heavy' ? Math.min(40, L * .08) : 0, kind: f.f, mz: false }); }
     else if (f.k === 'breach') rubble(f.w);
     else if (f.k === 'crash') crash(f);
-    else if (f.k === 'land') { PX.blast(f.x, heightAt(f.x, f.y), f.y, !!f.big); near(f.x, f.y) && sfx(f.big ? 'bigboom' : 'boom'); }
-    else if (f.k === 'melee') { if (Math.random() < .18) PX.sparks(f.x + (Math.random() - .5) * 8, heightAt(f.x, f.y) + 2.2, f.y + (Math.random() - .5) * 8, 3, 9, f.t === 0 ? [2.4, 1.7, .8] : [2.4, 2, 1.2], .3); near(f.x, f.y) && Math.random() < .2 && sfx('clang'); }
-    else if (f.k === 'charge') { near(f.x, f.y) && sfx('hit'); }
+    else if (f.k === 'land') { PX.blast(f.x, heightAt(f.x, f.y), f.y, !!f.big); sfx(f.big ? 'bigboom' : 'boom', f.x, f.y, 18); }
+    else if (f.k === 'melee') { if (Math.random() < .18) PX.sparks(f.x + (Math.random() - .5) * 8, heightAt(f.x, f.y) + 2.2, f.y + (Math.random() - .5) * 8, 3, 9, f.t === 0 ? [2.4, 1.7, .8] : [2.4, 2, 1.2], .3); near(f.x, f.y) && Math.random() < .35 && sfx('melee', f.x, f.y); }
+    else if (f.k === 'charge') { sfx('hit', f.x, f.y, 1.5); }
   }
   G.fx.length = 0;
   // shots in flight: a lit ribbon from tail to head; the heavy rounds carry a glowing head, missiles a smoke trail
@@ -365,10 +365,10 @@ function drawFx(dt) {
     s.t += step; if (s.t < 0) { keep.push(s); continue; }
     const Lk = PX.LOOK[s.kind] || PX.LOOK.scorch, head = s.t * s.spd, k1 = Math.min(1, head / s.L), k0 = Math.max(0, (head - (Lk.len || s.len)) / s.L);
     if (!s.mz) { s.mz = true; if (hyp(s.x0 - cp.x, s.z0 - cp.z) < 3200) PX.muzzle(s.x0, s.y0, s.z0, s.x1 - s.x0, s.y1 - s.y0, s.z1 - s.z0, s.kind);
-      if (near(s.x0, s.z0)) { if (s.kind === 'rail') sfx('rail'); else if (s.kind === 'cannon') sfx('cannon'); else if (s.kind === 'missile') sfx('missile'); } }
+      sfx(SND[s.kind] || 'scorch', s.x0, s.z0); }
     if (k0 >= 1) { // it lands
       PX.impact(s.x1, s.y1, s.z1, s.kind);
-      const big = s.kind === 'missile' || s.kind === 'cannon' || s.kind === 'heavy'; if (big && near(s.x1, s.z1)) sfx(s.kind === 'missile' ? 'boom' : 'hit');
+      const big = s.kind === 'missile' || s.kind === 'cannon' || s.kind === 'heavy'; if (big) sfx(s.kind === 'missile' ? 'boom' : 'hit', s.x1, s.z1, s.kind === 'missile' ? 8 : 1.5);
       continue; }
     const px = k => s.x0 + (s.x1 - s.x0) * k, py = k => s.y0 + (s.y1 - s.y0) * k + s.arc * 4 * k * (1 - k), pz = k => s.z0 + (s.z1 - s.z0) * k, c = Lk.c;
     PX.ribbon(px(k0), py(k0), pz(k0), px(k1), py(k1), pz(k1), Lk.w, 1, c[0], c[1], c[2], s.kind === 'rail' ? .06 : .3);
@@ -394,6 +394,11 @@ function drawFx(dt) {
   V.drop.count = nd; V.drop.instanceMatrix.needsUpdate = true; if (V.drop.instanceColor) V.drop.instanceColor.needsUpdate = true;
 }
 const near = (x, z) => hyp(x - V.cam.tx, z - V.cam.tz) < V.cam.dist * 1.1 + 200;
+// for audio.js: where a sound at (x, z) is, as [pan -1..1 from the camera's right, distance in metres]
+const earV = new THREE.Vector3(), earR = new THREE.Vector3();
+function earAt(x, z) { if (!V || !V.camera) return [0, 0]; const cp = V.camera.position; earR.setFromMatrixColumn(V.camera.matrixWorld, 0); earV.set(x - cp.x, heightAt(clamp(x, 0, MAP), clamp(z, 0, MAP)) - cp.y, z - cp.z); const d = earV.length() || 1; return [clamp(earV.dot(earR) / d, -1, 1), d]; }
+// which sound each weapon makes
+const SND = { scorch: 'scorch', pulse: 'pulse', rail: 'rail', cannon: 'cannon', missile: 'missile', heavy: 'heavy', plasma: 'plasma', sarissa: 'sarissa' };
 // a breached stretch of wall: a low spill of rubble across the gap (the towers at its ends still stand)
 function rubble(id) {
   const w = G.map.walls[id]; if (!w || !V.wmh) return;

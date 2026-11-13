@@ -7,6 +7,7 @@ import { buildUI, updUI, togglePause, showHelp, endGame, $, buildMenu, toggleCmd
 import { setAim, commanderAction, setFormation, setStance, setHelm, braceSel, formGroup, cycle, selGroup } from './commands.js';
 import { disbandGroup, groupOrder, FORMATIONS, STANCES, HELMS } from './sim.js';
 import { initAudio, audio } from './audio.js';
+import { toggleSound, initSoundButton } from './audiomenu.js';
 import { startCampaign, stratFrame, setQuitHandler, loadCampaign, slotsHTML } from './stratview.js';
 import * as SV from './save.js';
 import { FACTIONS } from './data.js';
@@ -49,7 +50,7 @@ async function boot() {
   $('bDir').onclick = () => { OPTS.director = !OPTS.director; S.dirShot = null; saveOpts(); syncOpts(); };
   syncOpts();
   $('bPause').onclick = togglePause;
-  $('bSnd').onclick = () => { initAudio(); audio.muted = !audio.muted; $('bSnd').classList.toggle('on', !audio.muted); $('bSnd').textContent = audio.muted ? 'Muted' : 'Sound'; };
+  initSoundButton($('bSnd')); $('bSnd').onclick = e => { e.stopPropagation(); initAudio(); toggleSound($('bSnd')); }; // the sound menu (audiomenu.js)
   $('bHelp').onclick = () => showHelp(true);
   $('bCmd').onclick = toggleCmdPanel;
   // delegated clicks for the rebuilt-on-change panels

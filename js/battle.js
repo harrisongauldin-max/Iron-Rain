@@ -29,7 +29,7 @@ import * as OPS from './ops.js';
 import * as SNS from './sensors.js';
 import * as CQ from './conquest.js';
 import * as QS from './quests.js';
-import { music } from './audio.js';
+import { music, sfx } from './audio.js';
 const FF_X = 12;
 
 const $ = id => document.getElementById(id);
@@ -280,6 +280,7 @@ function showAAR(r) {
   const W = whyOf(), won = r && ((r.attWin && B.attTeam === 0) || (!r.attWin && B.defTeam === 0)), f = v => v >= 10000 ? (v / 1000).toFixed(0) + 'k' : v >= 1000 ? (v / 1000).toFixed(1) + 'k' : String(v), mm = t => Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0');
   const tot = Math.max(1, W.dmgTotal[0], W.dmgTotal[1]), bars = t => W.dmg[t].slice(0, 4).map(e => `<div class="aw"><span>${e.name}</span><i style="width:${Math.round((e.sh + e.hull) / tot * 100)}%"></i><b>${f(e.sh + e.hull)}</b></div>`).join('') || '<div class="aw"><span>Nothing landed</span></div>';
   const tl = W.timeline, mx = Math.max(1, ...tl.map(e => Math.max(e[1], e[2]))), pts = t => tl.map((e, i) => `${(i / Math.max(1, tl.length - 1) * 200).toFixed(1)},${(40 - e[t] / mx * 38).toFixed(1)}`).join(' ');
+  if (r) sfx(won ? 'victory' : 'defeat'); // the stinger (audio.js); showAAR runs once per battle
   el.innerHTML = `<div class="ah ${won ? 'good' : 'bad'}">${won ? 'Victory' : 'Defeat'} · ${mm(S.time)}</div>
     <svg class="atl" viewBox="0 0 200 42" preserveAspectRatio="none"><polyline points="${pts(1)}" style="stroke:${S.teamc[0].main}"/><polyline points="${pts(2)}" style="stroke:${S.teamc[1].main}"/>${W.swing ? `<rect x="${(tl.findIndex(e => e[0] >= W.swing.t0) / Math.max(1, tl.length - 1) * 200).toFixed(1)}" y="0" width="${Math.max(2, 10 / Math.max(1, S.time) * 200).toFixed(1)}" height="42"/>` : ''}</svg>
     ${W.swing ? `<div class="asw">${W.swing.text}</div>` : ''}
