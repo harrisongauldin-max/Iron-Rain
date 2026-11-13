@@ -645,7 +645,8 @@ function buildPost() {
     composer.outputColorTransform = !P.smaa;
     // lens dirt: a faint field of specks and smears that only shows where the bloom is bright
     const dirt = TSL.texture(TEX.dirt || (TEX.dirt = tex(dirtC()))), dirtK = TSL.smoothstep(.05, .6, TSL.luminance ? TSL.luminance(bloomPass.rgb) : bloomPass.r.add(bloomPass.g).add(bloomPass.b).div(3));
-    composer.outs = { on: finish(col.add(bloomPass).add(bloomPass.mul(dirt.r).mul(dirtK).mul(.9))), off: finish(col) };
+    composer.dirtU = TSL.uniform(.9); // graphics menu: dirt off = 0, cinematic = 1.6
+    composer.outs = { on: finish(col.add(bloomPass).add(bloomPass.mul(dirt.r).mul(dirtK).mul(composer.dirtU))), off: finish(col) };
     composer.outputNode = composer.outs.off;
   } catch (e) { console.warn('post-processing unavailable', e); composer = null; bloomPass = null; }
   setBloom(S.bloom);
@@ -1003,7 +1004,7 @@ const PUNCH = { shards: [], pulses: [], seen: new Map(), shake: 0, shx: 0, shy: 
 function slugBooms(p) { if (p._boomed === undefined) p._boomed = new Set(); for (const o of S.ships) { if (o.dead || o.def.static || p._boomed.has(o.id)) continue; const d = hyp(o.x - p.x, o.y - p.y); if (d > o.r + 30 || d < o.r * .3) continue; p._boomed.add(o.id);
   PUNCH.pulses.push({ x: p.x, y: p.y, vx: p.vx * .3, vy: p.vy * .3, r: Math.max(8, o.r * .25), life: .32, max: .32, col: 0xdfe8f0, kind: 'ring' }); } }
 // flak bursts leave grey puffs that hang for a few seconds, so a point-defence screen reads as a wall
-function flakPuff(x, y, vx, vy) { const life = 3.5 + Math.random() * 2; PUNCH.puffs.push({ x, y, vx: vx * .05 + rand(-6, 6), vy: vy * .05 + rand(-6, 6), life, max: life, sz: 10 + Math.random() * 8, a: Math.random() * TAU, spin: rand(-.4, .4) }); if (PUNCH.puffs.length > 600) PUNCH.puffs.shift(); }
+function flakPuff(x, y, vx, vy) { if (!GXF().dust) return; const life = 3.5 + Math.random() * 2; PUNCH.puffs.push({ x, y, vx: vx * .05 + rand(-6, 6), vy: vy * .05 + rand(-6, 6), life, max: life, sz: 10 + Math.random() * 8, a: Math.random() * TAU, spin: rand(-.4, .4) }); if (PUNCH.puffs.length > 600) PUNCH.puffs.shift(); }
 // a ship's death leaves a cooling cloud: embers scattered through the wreck's volume and a smear of frozen vapour, both fading over twelve seconds
 function wreckGlow(w) { const R = Math.max(w.def.r || 20, 20), n = Math.min(40, 8 + R * .4), em = []; for (let i = 0; i < n; i++) { const a = Math.random() * TAU, d = Math.sqrt(Math.random()) * R * 1.3; em.push({ ox: Math.cos(a) * d, oy: Math.sin(a) * d, vx: Math.cos(a) * rand(4, 18), vy: Math.sin(a) * rand(4, 18), f: rand(3, 9), p: Math.random() * TAU, s: .5 + Math.random() * 1.1 }); }
   PUNCH.glows.push({ x: w.x, y: w.y, vx: w.vx, vy: w.vy, R, life: 12, max: 12, em, a: Math.random() * TAU }); }
@@ -1054,8 +1055,11 @@ function punchTick(z, px) {
 }
 // a hull that just changed hands (capture, mutiny, a turncoat) pulses in its new colour
 function flipPulse(s) { const R = Math.max(s.r * 1.3, vrOf(s) * 1.6), c = parseInt((S.teamc[s.team] || { light: '#ffffff' }).light.slice(1), 16); PUNCH.pulses.push({ x: s.x, y: s.y, vx: s.vx || 0, vy: s.vy || 0, r: R, life: 1.1, max: 1.1, col: c, kind: 'ring' }); PUNCH.pulses.push({ x: s.x, y: s.y, vx: s.vx || 0, vy: s.vy || 0, r: R * .6, life: .5, max: .5, col: 0xffffff, kind: 'ring' }); }
+// the graphics menu's switches for the effects (entries belong to the campaign chat's menu; the flags are read here)
+const GXF = () => { const g = S.gx || {}; return { weather: g.weather !== false, dust: g.dust !== false, dirt: g.dirt !== false, cine: !!g.cine, shake: g.shake !== false }; };
 function sceneFrame() {
   shipsG.visible = true; rocksG.visible = true;
+  if (composer && composer.dirtU) { const f = GXF(); composer.dirtU.value = !f.dirt ? 0 : f.cine ? 1.6 : .9; }
   const c = S.cam, z = c.z, px = 1 / z, d = camDist();
   O.x = c.x; O.y = c.y; worldLight(c.x, c.y);
   camera.aspect = S.W / S.H; camera.near = d * .04; camera.far = d * 30; camera.position.set(...camOffset(d));
