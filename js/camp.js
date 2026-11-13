@@ -726,6 +726,16 @@ export function groundSpec(fl) {
 export function groundDrop(fl) { const w = C.worlds[fl.at]; senateDefied(fl.owner, w.id); spendDrop(fl); C.fleets = C.fleets.filter(f => f.ships.length); }
 // the battle's verdict, written back: the city taken and held by what is left of the legions, or the garrison holding
 // with what is left of it (its losses on the field are its losses everywhere, in proportion)
+// the ripWings shot down over a ground battle come off the fleet (ground battles chat): at legion scale two on the field
+// are one in the campaign (groundSpec doubles them). Taken from the hangars and the fighter hulls alike, the fullest first
+function airLosses(fl, r, nm) {
+  if (!r.rip0 || !r.rip0[0]) return;
+  let lost = Math.round((r.rip0[0] - r.rip[0]) / 2); if (lost <= 0) return; const n0 = lost;
+  const src = []; for (const s of fl.ships) { if (s.t === 'ripwing' && s.hp > 0) src.push({ s, ship: true, n: 1 }); else { const H = hangarOf(fl.owner, s); if (H && H.cur.ripwing > 0) { if (!s.hangar) s.hangar = { ...H.cur }; src.push({ s, n: H.cur.ripwing }); } } }
+  while (lost > 0) { const x = src.reduce((b, v) => v.n > 0 && (!b || v.n > b.n) ? v : b, null); if (!x) break; x.n--; lost--; if (x.ship) x.s.hp = 0; else x.s.hangar.ripwing = x.n; }
+  fl.ships = fl.ships.filter(s => s.hp > 0);
+  if (fl.owner === C.player) note(`${n0 - lost} ripWing${n0 - lost === 1 ? '' : 's'} lost over ${nm}.`, 'bad', fl.at);
+}
 export function groundSettle(fl, wid, r, def0) {
   const w = C.worlds[wid], nm = bodyOf(wid).name, c = CM.cmdrOf(fl);
   if (r.won) {
@@ -738,6 +748,7 @@ export function groundSettle(fl, wid, r, def0) {
     note(`The Iron Rain on ${nm} is thrown back: ${r.why}`, fl.owner === C.player ? 'bad' : 'good', w.id);
     chron('battle', `The Iron Rain on ${nm} fails before ${r.city}.`, w.id, w.owner);
   }
+  airLosses(fl, r, nm);
   if (c && r.leaderLost && r.leaderLost[0]) CM.wound(c, fl, nm); // after the capture, which his talents and his experience count toward
   C.fleets = C.fleets.filter(f => f.ships.length); CM.tidy(); EC.govTick();
   return { won: r.won };

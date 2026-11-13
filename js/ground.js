@@ -426,7 +426,7 @@ function deployDefender(spec) {
   }
   G.drop = buildDrop(spec);
   G.airQ = []; // the air: the garrison's squadrons scramble from the city as the Rain begins; the fleet's arrive behind the first wave
-  airWing(1, D.air, 20); airWing(0, spec.att.air, 50); G.air0 = [0, 1].map(t => G.airQ.filter(q => q.team === t).reduce((a, q) => a + q.men, 0));
+  airWing(1, D.air, 20); airWing(0, spec.att.air, 50); G.air0 = [0, 1].map(t => G.airQ.filter(q => q.team === t).reduce((a, q) => a + q.men, 0)); G.rip0 = [0, 1].map(t => G.airQ.filter(q => q.team === t && q.type === 'ripwing').reduce((a, q) => a + q.men, 0));
   // the anti-air umbrella: the city's guns, and each Sarissa battery's own reach
   G.aaCity = (D.gun || 0) * .12 + (D.shield || 0) * .05;
 }
@@ -929,8 +929,8 @@ export function finish(win, why) {
 export function result() {
   const left = t => G.units.reduce((a, u) => a + (u.team === t && !u.T.air && !u.gone && u.men > 0 ? u.men * u.eq : 0), 0) + ((G.escaped || [0, 0])[t]) * (t === 1 ? .5 : 0);
   const won = G.over ? G.over.win === 0 : false;
-  const airLeft = t => G.units.reduce((a, u) => a + (u.team === t && u.T.air && !u.gone ? u.men : 0), 0) + (G.airQ || []).reduce((a, q) => a + (q.team === t ? q.men : 0), 0); // and the squadrons not yet come
-  return { won, why: G.over ? G.over.why : '', t: G.t, air: [airLeft(0), airLeft(1)], air0: G.air0 || [0, 0], att0: G.att0, def0: G.def0, attLeft: Math.round(left(0)), defLeft: Math.round(left(1)), sky: Math.round(G.skyLost || 0), killed: [Math.round(G.stats[0].killed), Math.round(G.stats[1].killed)],
+  const airLeft = (t, ty) => G.units.reduce((a, u) => a + (u.team === t && u.T.air && (!ty || u.type === ty) && !u.gone ? u.men : 0), 0) + (G.airQ || []).reduce((a, q) => a + (q.team === t && (!ty || q.type === ty) ? q.men : 0), 0); // and the squadrons not yet come
+  return { won, why: G.over ? G.over.why : '', t: G.t, air: [airLeft(0), airLeft(1)], air0: G.air0 || [0, 0], rip: [airLeft(0, 'ripwing'), airLeft(1, 'ripwing')], rip0: G.rip0 || [0, 0], // the campaign takes the fleet's lost ripWings off its hangars att0: G.att0, def0: G.def0, attLeft: Math.round(left(0)), defLeft: Math.round(left(1)), sky: Math.round(G.skyLost || 0), killed: [Math.round(G.stats[0].killed), Math.round(G.stats[1].killed)],
     storks: G.storksDone && G.units.some(u => u.wave === 1), leaderLost: G.leaderLost.slice(), city: G.map.B.city, sites: G.map.sites.map(s => ({ name: s.name, own: s.own })) };
 }
 export function log(msg, cls) { G.feed.unshift({ t: G.t, msg, cls: cls || '' }); if (G.feed.length > 40) G.feed.pop(); }
