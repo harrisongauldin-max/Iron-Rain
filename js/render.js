@@ -10,7 +10,7 @@ import { smaa } from '../vendor/three/tsl/SMAANode.js';
 import { loadGfx, preset, meterTick, gpuTimer } from './gfx.js';
 import { HAS_3D, buildHull, hullTextures, paintOf, buildStation, missileGeoOf, missileMaterial, MISSILE_M , planetGeo } from './hulls.js';
 import { mergeGeometries } from '../vendor/three/utils/BufferGeometryUtils.js';
-import { buildSlip, ganymedeDocks, phobosTraffic } from './yards.js';
+import { buildSlip, ganymedeDocks, venusDocks, phobosTraffic } from './yards.js';
 import { S } from './state.js';
 import { SHAPES, BODIES, ICON_SCALE, DEFS, fshape, HULL_REF, M_TO_UNITS } from './data.js';
 import { TAU, PI, rand, clamp, hyp, hex, angDiff } from './util.js';
@@ -861,6 +861,18 @@ function ganymedeYard(O, z) {
   const on = onScr(b.x, b.y, (b.r + 900) * z * 2) && b.r * z > .25; GD.g.visible = on; if (!on) return;
   GD.g.position.set(b.x - O.x, 0, b.y - O.y); GD.g.rotation.y = -GD.ang; GD.update(S.time);
 }
+// the Dockyards of Venus (model builder's hook, like Ganymede's): the Carthii's crown of columns, centred on the Venus dockyard
+let VD = null;
+function venusYard(O, z) {
+  const b = BODIES.find(o => o.id === 'venus'); if (!b) return;
+  const D = S.ships.find(s => s.type === 'dockyard' && s.world === 'venus' && !s.dead), team = D ? D.team : VD ? VD.team : 1;
+  if (!VD || VD.team !== team || VD.b !== b) { if (VD) bodiesG.remove(VD.g);
+    const M = structMats(team, false), gold = new THREE.MeshStandardMaterial({ color: 0xc9a24c, metalness: .85, roughness: .3, emissive: 0x3a2a08, emissiveIntensity: .4 });
+    const Y = venusDocks(b.r + 600, b.r, M, shipMats3('dread', team).n, facKey(team) || 'soc', gold); VD = { ...Y, team, b, ang: 0 }; bodiesG.add(VD.g); }
+  if (D) VD.ang = Math.atan2(D.y - b.y, D.x - b.x);
+  const on = onScr(b.x, b.y, (b.r + 1000) * z * 2) && b.r * z > .25; VD.g.visible = on; if (!on) return;
+  VD.g.position.set(b.x - O.x, 0, b.y - O.y); VD.g.rotation.y = -VD.ang; VD.update(S.time);
+}
 function phobosDocks() {
   const g = new THREE.Group(), metal = new THREE.MeshStandardMaterial({ color: 0x2c2d33, metalness: .7, roughness: .4 }), lit = new THREE.MeshStandardMaterial({ color: 0xff3020, emissive: 0xff2a1a, emissiveIntensity: 2 });
   const white = new THREE.MeshStandardMaterial({ color: 0xd8d8d0, emissive: 0xd8d8d0, emissiveIntensity: .35 });
@@ -1076,7 +1088,7 @@ function sceneFrame() {
   if ((S.bodyVer || 0) !== bodyVerSeen) buildBodies();
   const sun = BODIES[0], sunP = new THREE.Vector3(sun.x - O.x, 0, sun.y - O.y);
   scene.userData.sun.position.copy(sunP);
-  ganymedeYard(O, z);
+  ganymedeYard(O, z); venusYard(O, z);
   for (const v of bodyVis) {
     const b = v.b, x = b.x - O.x, y = b.y - O.y, vis = onScr(b.x, b.y, Math.max(b.r * z * 2.6, 40)) && b.r * z > .6;
     v.g.visible = vis; if (v.atmo) v.atmo.visible = vis; if (v.ring) v.ring.visible = vis;

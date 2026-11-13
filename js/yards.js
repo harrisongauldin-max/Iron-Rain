@@ -155,6 +155,67 @@ export function ganymedeDocks(R0, rMoon, M, hullMats, fac) {
   return { g, update, span };
 }
 
+// ---------------------------------------------------------------- Venus: the Carthii's dockyards, 120 km at the equator
+// The books give the Dockyards of Venus no picture, only a pedigree: the Carthii "built the Columns of Venus" and the yards
+// turned out the Remnant's warships through the Solar War. So they are drawn as the Columns' heirs: a crown of great
+// fluted towers standing off the planet, two tiers of berths slung between them (hulls on the stocks above and below the
+// spine), gilt trim, warm lights, every berth working — the Society's one yard that was never wrecked.
+export function venusDocks(R0, rPlanet, M, hullMats, fac, gold) {
+  const g = new THREE.Group(), R = rnd(2271), KM = 18, span = 120 * KM / R0 / 2, NB = 10, NC = NB + 1, TIER = 150;
+  const at = (phi, r, y = 0) => new THREE.Vector3(Math.cos(phi) * r, y, Math.sin(phi) * r);
+  const place = (m, phi, r, y = 0, yaw = 0) => { m.position.copy(at(phi, r, y)); m.rotation.y = -phi - Math.PI / 2 + yaw; };
+  // the columns: fluted towers 460 units tall standing radially off the spine, a capital at each end, gilt bands
+  const col = (() => { const parts = [], h = 460, n = 12; for (let i = 0; i < n; i++) { const a = i / n * TAU; const f = new THREE.BoxGeometry(14, h, 9); f.translate(Math.cos(a) * 30, 0, Math.sin(a) * 30); f.rotateY(-a); parts.push(f); }
+    parts.push(new THREE.CylinderGeometry(28, 28, h, 12)); return merge(parts); })();
+  const cap = merge([new THREE.CylinderGeometry(44, 34, 40, 12, 1, false), box(96, 14, 96, 0, 27, 0)]);
+  const cols = new THREE.InstancedMesh(col, M.hull, NC), caps = new THREE.InstancedMesh(cap, gold || M.trim, NC * 2), bands = new THREE.InstancedMesh(new THREE.CylinderGeometry(33, 33, 10, 12), gold || M.trim, NC * 4), o = new THREE.Object3D();
+  let nc = 0, nk = 0, nb = 0;
+  for (let c = 0; c < NC; c++) { const phi = -span + c * span * 2 / NB;
+    o.position.copy(at(phi, R0)); o.rotation.set(0, -phi, 0); o.scale.set(1, 1, 1); o.updateMatrix(); cols.setMatrixAt(nc++, o.matrix);   // the tower stands across the plane, the tiers hung between
+    for (const s of [-1, 1]) { o.position.copy(at(phi, R0, s * 235)); o.rotation.set(s < 0 ? Math.PI : 0, -phi, 0); o.updateMatrix(); caps.setMatrixAt(nk++, o.matrix); }
+    for (const d of [-180, -70, 70, 180]) { o.position.copy(at(phi, R0, d)); o.rotation.set(0, -phi, 0); o.updateMatrix(); bands.setMatrixAt(nb++, o.matrix); } }
+  g.add(cols, caps, bands);
+  // the spine between the columns, and the two tier rails the berths hang from
+  const segs = 50, dphi = span * 2 / segs, spine = [], rails = [];
+  for (let i = 0; i < segs; i++) { const phi = -span + (i + .5) * dphi, L = R0 * dphi * 1.04;
+    const sp = box(L, 34, 70); sp.rotateY(-phi - Math.PI / 2); sp.translate(...at(phi, R0).toArray()); spine.push(sp);
+    for (const y of [-TIER, TIER]) for (const off of [-120, 120]) { const r2 = box(L, 8, 10); r2.rotateY(-phi - Math.PI / 2); r2.translate(...at(phi, R0 + off, y).toArray()); rails.push(r2); } }
+  g.add(new THREE.Mesh(merge(spine), M.armour || M.hull), new THREE.Mesh(merge(rails), gold || M.trim));
+  // the berths: a cradle on each tier between every pair of columns, a hull on the stocks in most
+  const cradle = (() => { const L = 190, W = 60, H = 36, f = []; for (let i = 0; i <= 5; i++) { const x = -L / 2 + i * L / 5; f.push(box(5, H * 2, 5, x, 0, W), box(5, H * 2, 5, x, 0, -W), box(5, 5, W * 2, x, H, 0), box(5, 5, W * 2, x, -H, 0)); }
+    for (const z of [-W, W]) for (const y of [-H, H]) f.push(box(L, 6, 6, 0, y, z)); return merge(f); })();
+  const live = new THREE.InstancedMesh(cradle, M.hull, NB * 2); let nl = 0;
+  const pick = ['moonbreaker', 'dread', 'destroyer', 'dread', 'moonbreaker', 'dread', 'destroyer', 'dread'];
+  for (let b = 0; b < NB; b++) for (const y of [-TIER, TIER]) {
+    const phi = -span + (b + .5) * span * 2 / NB, r = R0;
+    o.position.copy(at(phi, r, y)); o.rotation.set(0, -phi - Math.PI / 2, 0); o.scale.set(1, 1, 1); o.updateMatrix(); live.setMatrixAt(nl++, o.matrix);
+    const k = b * 2 + (y > 0 ? 1 : 0); if (k % 5 === 4) continue;                                    // a berth in five stands empty
+    const type = pick[k % pick.length], part = hullOnStocks(type, fac, .1 + R() * .9), vr = VR(type), hull = new THREE.Group();
+    hull.add(new THREE.Mesh(part.geo, hullMats), new THREE.Mesh(part.ribs, M.hull)); hull.scale.setScalar(vr); place(hull, phi, r, y); g.add(hull); }
+  live.count = nl; g.add(live);
+  // the anchor towers: three tethers down to the planet's upper air, each with a station at the foot
+  for (let i = 0; i < 3; i++) { const phi = -span * .8 + i * span * .8, len = R0 - 40 - rPlanet * 1.03, c = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, len, 6), M.hull); c.rotation.z = Math.PI / 2; const h = new THREE.Group(); h.add(c); c.position.x = -len / 2 - 40; place(h, phi, R0); g.add(h);
+    const st = new THREE.Mesh(merge([box(60, 24, 60), box(90, 8, 90, 0, -14, 0)]), gold || M.trim); place(st, phi, rPlanet * 1.03 + 30); g.add(st); }
+  // lights: warm, along both tier rails and up the columns
+  const nLt = 300, lights = new THREE.InstancedMesh(new THREE.SphereGeometry(4, 6, 4), M.lt, nLt); let li = 0;
+  for (let i = 0; i < nLt; i++) { const phi = -span + (i + .5) * span * 2 / nLt, y = i % 2 ? -TIER - 10 : TIER + 10; o.position.copy(at(phi, R0 + (i % 4 < 2 ? -124 : 124), y)); o.rotation.set(0, 0, 0); o.scale.setScalar(1); o.updateMatrix(); lights.setMatrixAt(li++, o.matrix); }
+  lights.count = li; g.add(lights);
+  // haulers and the Carthii's own yachts in lanes along the yard, shuttles to the berths
+  const fg = merge([box(14, 5, 6), box(5, 6, 7, -6, 1, 0), box(8, 3, 9, 3, 0, 0)]), nF = 220;
+  const ships = new THREE.InstancedMesh(fg, M.hull, nF), burns = new THREE.InstancedMesh(new THREE.BoxGeometry(3, 2.4, 2.4), new THREE.MeshBasicMaterial({ color: 0xffd090, toneMapped: false }), nF), lane = [];
+  for (let i = 0; i < nF; i++) { const out = R() < .7, r = out ? R0 + 380 + R() * 500 : R0 - 380 - R() * Math.min(200, R0 - rPlanet * 1.03 - 500); lane.push(R() < .75 ? { r, y: (R() - .5) * 400, ph: R() * span * 2.6 - span * 1.3, v: (.04 + R() * .08) * (out ? 1 : -1) * (R() < .5 ? 1 : -1), s: .5 + R() * .8 } : { berth: Math.floor(R() * NB), tier: R() < .5 ? -TIER : TIER, ph: R() * TAU, v: .05 + R() * .08, s: .4 + R() * .5 }); }
+  g.add(ships, burns);
+  const update = t => {
+    for (let i = 0; i < nF; i++) { const l = lane[i];
+      if (l.berth !== undefined) { const bphi = -span + (l.berth + .5) * span * 2 / NB, u = (Math.sin(t * l.v + l.ph) + 1) / 2; o.position.copy(at(bphi + Math.sin(l.ph) * .01, R0 + 200 + u * 500, l.tier)); o.rotation.set(0, -bphi - (Math.cos(t * l.v + l.ph) > 0 ? 0 : Math.PI), 0); }
+      else { const w = span * 1.3; const phi = ((l.ph + t * l.v + w) % (2 * w) + 2 * w) % (2 * w) - w; o.position.copy(at(phi, l.r, l.y)); o.rotation.set(0, -phi - Math.sign(l.v) * Math.PI / 2, 0); }
+      o.scale.setScalar(l.s); o.updateMatrix(); ships.setMatrixAt(i, o.matrix); o.translateX(-9); o.updateMatrix(); burns.setMatrixAt(i, o.matrix); }
+    ships.instanceMatrix.needsUpdate = true; burns.instanceMatrix.needsUpdate = true;
+  };
+  update(0);
+  return { g, update, span };
+}
+
 // ---------------------------------------------------------------- Phobos: trams and cargo vessels on the two rings
 export function phobosTraffic(ringR) {
   const g = new THREE.Group(), R = rnd(31), n = 36, tram = new THREE.InstancedMesh(new THREE.BoxGeometry(.07, .022, .03), new THREE.MeshStandardMaterial({ color: 0x8a8a90, emissive: 0xffe2b0, emissiveIntensity: .5, metalness: .6, roughness: .4 }), n * 2);
