@@ -4,6 +4,7 @@ Each publish of `main` to the claude.ai artifact (slug `fc8b77cf-d69b-4cca-9154-
 
 | Artifact version | Date | Commit | What changed |
 |---|---|---|---|
+| 1794581346-6cf6 | 2026-11-13 | 2a07413 | `js/camp.js`, `js/ground.js`, `js/groundview.js`: ground air polish — ripWings shot down come off the fleet's hangars and fighter hulls (two on the field = one in the campaign); aircraft drawn bigger with distance so they stay ~12 px long; camera follows a unit at its own height (C, or double-click an aircraft's card; W A S D lets go). |
 | 1794580557-7590 | 2026-11-13 | 7beb518 | `js/render.js`: the renderer reads the graphics switches from `S.gx` (`dirt` off/on/cinematic for the lens dirt, `dust` for flak puffs). Menu entries are the campaign chat's — hand-off in claude/graphics-upgrade.md. |
 | 1794580496-2135 | 2026-11-13 | 72aa71d | `js/groundfx.js`: ground tracks pass — formations leave trodden ground (browned, flattened; StarShells cut ruts) fading over three minutes; lightning bolts and sky/ground flash in the rain; graphics toggles read from `S.gx` (`weather`, `dust`, `cine`) for the campaign chat's menu. |
 | 1794580178-8fc7 | 2026-11-13 | 9765973 | `js/groundmodels.js`, `js/groundview.js`, `js/groundanim.js`: joint caps — a ball on every pivot (hips, knees, ankles, shoulders, elbows, waist, neck) with the limb ends tapered inside it, so bent joints show no gap; a fallen model per kind of body (Gray, Obsidian, Gold, StarShell): CORPSE_KINDS/corpseOf, one corpse mesh pair per kind in groundview, groundanim passes the kind to the hand-off. |
