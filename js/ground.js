@@ -1,6 +1,7 @@
 // The ground war: a battle fought on a world's surface after an Iron Rain, in the manner of a Total War field battle.
-// The first wave (starShells and the leechCraft legions) falls from the spitTubes onto drop zones the attacker picks;
-// the second (the Storks) lands only on a beachhead that still holds. The defenders hold the city's three key sites.
+// The first wave falls onto drop zones the attacker picks, each cohort on the zone the drop plan gives it, and each in
+// its own way: starShells in their own ablative shells from the spitTubes, Peerless knights in pulseArmor braking on
+// their gravBoots, the rest of the legions in drop pods. The second (the Storks) lands only on a beachhead that still holds. The defenders hold the city's three key sites.
 // Pure rules, no DOM and no campaign imports: the battle is built from a plain spec (groundSpec in camp.js) so it can
 // be run headless. One unit is a cohort or a detachment; men are counted one by one, figures are only for the view.
 //
@@ -383,7 +384,7 @@ export const mixOf = f => MIX[f] || MIX.neu;
 export function setup(spec, opts = {}) {
   R = opts.seed != null ? rng(opts.seed) : Math.random; UID = 1;
   for (const k in G) delete G[k];
-  Object.assign(G, { army: null, on: true, spec, t: 0, phase: 'deploy', units: [], fx: [], feed: [], pods: [], zones: [], over: null, speed: 1, paused: false, stats: [{ killed: 0, lost: 0 }, { killed: 0, lost: 0 }], storkT: 100, storksDone: false, holdT: 0, maxT: spec.maxT || 1800, leaderLost: [false, false], aaCover: [], human: opts.human == null ? 0 : opts.human, broke: [false, false] });
+  Object.assign(G, { army: null, on: true, spec, t: 0, phase: 'deploy', units: [], fx: [], feed: [], pods: [], zones: [], planAuto: true, zoneLast: null, over: null, speed: 1, paused: false, stats: [{ killed: 0, lost: 0 }, { killed: 0, lost: 0 }], storkT: 100, storksDone: false, holdT: 0, maxT: spec.maxT || 1800, leaderLost: [false, false], aaCover: [], human: opts.human == null ? 0 : opts.human, broke: [false, false] });
   cAcc = 0; aiAcc = [0, 0]; mAcc = 0; // each battle starts its clocks from zero
   G.map = buildMap(spec); buildNav(); G.bombs = [];
   deployDefender(spec);
@@ -575,37 +576,74 @@ export function aaAt(x, y) {
   for (const u of G.units) if (!u.gone && u.T.aa && u.men > 0 && u.state !== 'rout') { const d = hyp(u.x - x, u.y - y), R0 = u.wpn.aa; if (d < R0) k += .16 * (1 - d / R0 * .6) * (u.men / u.men0); }
   return clamp(k, 0, .75);
 }
-export function addZone(x, y) { const e = zoneOK(x, y); if (e) return e; if (G.zones.length >= MAXZ) G.zones.shift(); G.zones.push({ x, y, id: G.zones.length }); return null; }
+// ---- the drop plan: which cohort falls on which zone. Each first-wave and Stork cohort carries the zone it is meant for
+// (o.zone, a zone's id: its letter A–D, which it keeps when moved). Until the player assigns a cohort himself the plan
+// spreads itself evenly over the zones; a cohort whose zone is taken away goes to the others.
+// How each comes down (Red Rising: starShells fall in ablative shells; Golds in pulseArmor ride their gravBoots down
+// (Golden Son's Iron Rain on Mars); the legions in drop pods (Dark Age's Rain on Mercury); the Storks are dropships):
+export const deliveryOf = (k, wave) => wave ? 'stork' : k === 'starshell' ? 'shell' : k === 'peerless' ? 'boots' : 'pod';
+export const DELIVERY = { shell: 'its own ablative shell, from the spitTubes', boots: 'pulseArmor and gravBoots, no pod', pod: 'drop pods', stork: 'the Storks' };
+const SKY_K = { shell: .5, boots: .4, pod: 1, stork: 1 }; // how much of the guns' toll each takes: a knight braking on his boots is a small, quick target
+const SCATTER = { shell: 240, boots: 110, pod: 240, stork: 160 };
+export const zoneById = id => G.zones.find(z => z.id === id) || null;
+let zoneN = 0;
+export function addZone(x, y, slot) {
+  const e = zoneOK(x, y); if (e) return e;
+  let id = slot != null && zoneById(slot) ? slot : [0, 1, 2, 3].slice(0, MAXZ).find(i => !zoneById(i));
+  if (slot != null && zoneById(slot)) { const z = zoneById(slot); z.x = x; z.y = y; z.n = ++zoneN; G.zoneLast = id; return null; } // moved, keeping its letter and its cohorts
+  if (id == null) { const z = G.zones.reduce((a, b) => b.n < a.n ? b : a); z.x = x; z.y = y; z.n = ++zoneN; G.zoneLast = z.id; return null; } // all four placed: the oldest moves here
+  G.zones.push({ x, y, id, n: ++zoneN }); G.zones.sort((a, b) => a.id - b.id); G.zoneLast = id;
+  planFix(); return null;
+}
+export function removeZone(id) { G.zones = G.zones.filter(z => z.id !== id); planFix(); }
+const planList = () => [...G.drop[0].map((d, i) => [0, i, d]), ...G.drop[1].map((d, i) => [1, i, d])];
+export function planSpread() { // evenly, kind by kind, so each zone has its share of suits, knights and legions
+  if (!G.zones.length) return; const ids = G.zones.map(z => z.id);
+  for (const w of [0, 1]) { const L = G.drop[w].map((d, i) => [d, i]).sort((a, b) => (a[0][0] > b[0][0] ? 1 : a[0][0] < b[0][0] ? -1 : b[0][1] - a[0][1])); L.forEach(([d], j) => { d[2].zone = ids[j % ids.length]; }); }
+  G.planAuto = true;
+}
+function planFix() { // after a zone is placed or taken away
+  if (G.planAuto !== false) { planSpread(); return; }
+  const ids = G.zones.map(z => z.id); let j = 0;
+  for (const [, , d] of planList()) if (!ids.includes(d[2].zone)) d[2].zone = ids.length ? ids[j++ % ids.length] : undefined;
+}
+export function assignDrop(list, id) { // list: [wave, index] pairs
+  if (!zoneById(id)) return; for (const [w, i] of list) { const d = G.drop[w][i]; if (d) d[2].zone = id; } G.planAuto = false;
+}
 export function aiZones() { // the attacker AI: drop wide of the guns, one zone on each flank and one on the axis
   const c = G.map.city; G.zones = [];
   for (const a of [-.9, -.3, .3, .9]) { let best = null, bs = -Infinity;
     for (let k = 0; k < 40; k++) { const ang = -PI / 2 + a + (R() - .5) * .4, d = c.r + 600 + R() * 800, x = c.x + Math.cos(ang) * d, y = c.y + Math.sin(ang) * d; if (zoneOK(x, y)) continue;
       const s = -aaAt(x, y) * 3000 - Math.abs(d - (c.r + 1000)) - (isUrban(x, y) ? 200 : 0); if (s > bs) { bs = s; best = { x, y }; } }
-    if (best) G.zones.push({ x: best.x, y: best.y, id: G.zones.length }); }
+    if (best) G.zones.push({ x: best.x, y: best.y, id: G.zones.length, n: ++zoneN }); }
+  planSpread();
 }
 // the Rain begins: the first wave falls, split between the zones, the heavy suits first
 export function beginRain() {
   if (!G.zones.length) aiZones();
   if (!G.zones.length) { // nowhere the AI likes: the driest open ground on the plain below the city
     let best = null, bh = -Infinity; for (let k = 0; k < 200; k++) { const x = 400 + R() * (MAP - 800), y = 400 + R() * (G.map.city.y - G.map.city.r - 800); if (isWater(x, y) || isUrban(x, y)) continue; const h = heightAt(x, y); if (h > bh) { bh = h; best = { x, y }; } }
-    G.zones.push(Object.assign(best || { x: MAP / 2, y: MAP * .2 }, { id: 0 })); }
-  G.zones.forEach((z, i) => { z.id = i; });
+    G.zones.push(Object.assign(best || { x: MAP / 2, y: MAP * .2 }, { id: 0, n: ++zoneN })); }
+  if (G.planAuto !== false) planSpread(); else planFix();
+  const re = new Map(G.zones.map((z, i) => [z.id, i])); G.zones.forEach((z, i) => { z.id = i; }); for (const [, , d] of planList()) d[2].zone = re.has(d[2].zone) ? re.get(d[2].zone) : 0;
   G.phase = 'battle'; G.t = 0;
-  const W = G.drop[0].slice().sort((a, b) => (b[0] === 'starshell') - (a[0] === 'starshell'));
-  W.forEach(([k, m, o], i) => { const z = G.zones[i % G.zones.length]; land(k, m, o, z, 4 + i * 1.6 + R() * 2, 0); });
-  log(`The Iron Rain falls on ${G.map.B.city}: ${W.length} cohorts from the spitTubes.`, 'gold');
+  // the suits first, then the knights on their boots, then the pods; each zone's cohorts in turn
+  const ord = { starshell: 0, peerless: 1 }, W = G.drop[0].slice().sort((a, b) => (ord[a[0]] ?? 2) - (ord[b[0]] ?? 2));
+  W.forEach(([k, m, o], i) => land(k, m, o, G.zones[o.zone] || G.zones[0], 4 + i * 1.6 + R() * 2, 0));
+  const n = G.zones.map(z => W.filter(d => d[2].zone === z.id).length);
+  log(`The Iron Rain falls on ${G.map.B.city}: ${W.length} cohorts${G.zones.length > 1 ? ` (${G.zones.map((z, i) => 'ABCD'[i] + ' ' + n[i]).join(', ')})` : ''}.`, 'gold');
 }
 function land(k, m, o, z, t, wave) {
-  const sc = wave ? 160 : 240; let x = z.x, y = z.y;
+  const how = deliveryOf(k, wave), sc = SCATTER[how]; let x = z.x, y = z.y;
   for (let k = 0; k < 12; k++) { const a = R() * TAU, r = sc * R(), tx = clamp(z.x + Math.cos(a) * r, 60, MAP - 60), ty = clamp(z.y + Math.sin(a) * r, 60, MAP - 60); if (!isWater(tx, ty)) { x = tx; y = ty; break; } } // the scatter never puts a cohort in the sea
   const u = mkUnit(0, k, m, x, y, PI / 2, Object.assign({}, o, { fall: { t, z: z.id, wave } }));
   // facing: toward the city
-  u.a = Math.atan2(G.map.city.y - y, G.map.city.x - x); u.state = 'fall'; u.zone = z.id;
+  u.a = Math.atan2(G.map.city.y - y, G.map.city.x - x); u.state = 'fall'; u.zone = z.id; u.how = how;
   G.units.push(u); G.pods.push({ u, t0: G.t, t1: G.t + t, x, y, wave });
 }
 // a falling unit reaches the ground: what the sky took is gone
 function touchDown(u) {
-  const aa = aaAt(u.x, u.y), lost = u.type === 'starshell' ? aa * .5 : aa; // the heavy suits ride through more of it
+  const aa = aaAt(u.x, u.y), lost = aa * (SKY_K[u.how] ?? 1); // the heavy suits ride through more of it, the knights are hard to hit
   const dead = Math.round(u.men * clamp(lost * (.75 + R() * .5), 0, .9));
   u.men -= dead; u.men0 = Math.max(u.men, 1); u.sh = (u.T.shield || 0) * u.men; G.stats[0].lost += dead; G.skyLost = (G.skyLost || 0) + dead * u.eq;
   u.state = 'idle'; u.fall = null; u.width = defaultWidth(u);
@@ -620,9 +658,12 @@ function storks() {
   const held = G.zones.filter(zoneHeld), W = G.drop[1];
   if (!W.length) { G.storksDone = true; return; }
   if (!held.length) { if (G.t > 420) { G.storksDone = true; log('The Storks turn back: there is no beachhead left to land on.', 'bad'); } else G.storkT = G.t + 30; return; }
-  G.storksDone = true;
-  W.forEach(([k, m, o], i) => land(k, m, Object.assign({}, o), held[i % held.length], 8 + i * 2 + R() * 3, 1));
-  log(`The Storks come down on ${held.length} beachhead${held.length > 1 ? 's' : ''} with ${W.reduce((a, x) => a + x[1], 0).toLocaleString()} legionnaires.`, 'gold');
+  G.storksDone = true; let moved = 0;
+  W.forEach(([k, m, o], i) => { const want = G.zones[o.zone]; let z = want && held.includes(want) ? want : null; // where the plan sends it, if that beachhead holds; else the nearest that does
+    if (!z) { z = want ? held.reduce((b, h) => hyp(h.x - want.x, h.y - want.y) < hyp(b.x - want.x, b.y - want.y) ? h : b) : held[i % held.length]; moved++; }
+    land(k, m, Object.assign({}, o), z, 8 + i * 2 + R() * 3, 1); });
+  const on = [...new Set(G.pods.filter(p => p.wave === 1).map(p => p.u.zone))].length;
+  log(`The Storks come down on ${on} beachhead${on > 1 ? 's' : ''} with ${W.reduce((a, x) => a + x[1], 0).toLocaleString()} legionnaires${moved ? `; ${moved} cohort${moved > 1 ? 's' : ''} turned to a beachhead that holds` : ''}.`, 'gold');
 }
 
 // ---------------------------------------------------------------- orders

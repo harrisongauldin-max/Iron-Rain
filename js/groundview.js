@@ -43,6 +43,7 @@ function makeDOM() {
   <div class="gb-cards" id="gbCards"></div>
   <div class="gb-feed" id="gbFeed"></div>
   <div class="gb-brief hide" id="gbBrief"></div>
+  <div class="gb-plan hide" id="gbPlan"></div>
   <div class="gb-end hide" id="gbEnd"></div>
   <div class="gb-help">Left-drag select · Right-click move or attack · Right-click a wall: breach it (StarShells, RailRifles) · Right-drag to set a line · Double right-click: run · W A S D pan · Q E turn · wheel zoom · middle-drag orbit · Space pause · R run · F hold fire · H halt · C follow</div>`;
   document.body.appendChild(root);
@@ -87,7 +88,7 @@ export function fight(spec, meta = {}) {
     // the camera opens over the plain, looking up at the city
     const c = G.map.city; Object.assign(V.cam, { tx: c.x, tz: c.y - 2600, yaw: PI, pitch: .55, dist: 4200 });
     V.root.querySelector('#gbName').textContent = `${G.map.B.city}, ${meta.world || ''}`;
-    showBrief(); hud(true);
+    V.plSel = new Set(); showBrief(); planPanel(); hud(true);
     try { initAudio(); music(.6); setGroundWorld(meta.world); S.groundEar = earAt; } catch (e) { /* no audio */ }
   });
 }
@@ -378,7 +379,7 @@ function drawFx(dt) {
     keep.push(s);
   }
   V.tr = keep;
-  // the drop: pods streak down out of the sky, burning; the Storks come down slow on their thrusters, hover, and lift away
+  // the drop: shells and pods streak down out of the sky, burning, the knights on their gravBoots; the Storks come down slow on their thrusters, hover, and lift away
   let ns = 0, nd = 0;
   for (const p of G.pods) {
     const k = clamp((G.t - p.t0) / Math.max(.1, p.t1 - p.t0), 0, 1), gh = heightAt(p.x, p.y);
@@ -387,7 +388,11 @@ function drawFx(dt) {
       continue; }
     if (p.u.state !== 'fall') continue;
     const alt = gh + 5000 * Math.pow(1 - k, 1.5), x = p.x - 1800 * (1 - k), z = p.y - 1000 * (1 - k);
-    if (nd < 400) { DIR.set(1800, -7500 * Math.sqrt(Math.max(0, 1 - k)) - 200, 1000).normalize(); tmpQ.setFromUnitVectors(NZ, DIR); tmpV.set(x, alt, z); tmpS.set(3, 3, 3); tmpM.compose(tmpV, tmpQ, tmpS); V.drop.setMatrixAt(nd, tmpM); V.drop.setColorAt(nd, tmpC.set(V.colA.main)); nd++; }
+    if (p.u.how === 'boots') { // a Peerless knight has no pod: a white-hot streak in pulseArmor, then the gravBoots fire blue to brake him
+      const tl = 1.1 - k; PX.ribbon(x - 120 * tl, alt + 260 * tl, z - 70 * tl, x, alt, z, 3, .9, 2.4, 2.1, 1.4, .2); PX.glow(x, alt, z, 9, 1, 2.6, 2.3, 1.6);
+      if (k > .78) { const b = (k - .78) / .22; PX.glow(x, alt - 4, z, 10 + 16 * b, .9, .9, 1.4, 2.8); PX.ribbon(x, alt - 2, z, x, alt - 18 - 30 * b, z, 4 + 4 * b, .7, .8, 1.3, 2.6, 0); }
+      continue; }
+    if (nd < 400) { const sc = p.u.how === 'pod' ? 4 : 3; DIR.set(1800, -7500 * Math.sqrt(Math.max(0, 1 - k)) - 200, 1000).normalize(); tmpQ.setFromUnitVectors(NZ, DIR); tmpV.set(x, alt, z); tmpS.set(sc, sc, sc); tmpM.compose(tmpV, tmpQ, tmpS); V.drop.setMatrixAt(nd, tmpM); V.drop.setColorAt(nd, tmpC.set(V.colA.main)); nd++; } // a starShell's own shell; a legion's drop pod drawn a size up
     const tl = 1.1 - k; PX.ribbon(x - 180 * tl, alt + 320 * tl * 1.2, z - 100 * tl, x, alt, z, 7, .9, 2.6, 1.5, .5, .25); PX.glow(x, alt, z, 22, 1, 2.6, 1.8, .9); // the burn of re-entry
   }
   V.stork.count = ns; V.stork.instanceMatrix.needsUpdate = true; if (V.stork.instanceColor) V.stork.instanceColor.needsUpdate = true;
@@ -424,7 +429,12 @@ function overlay() {
   // the drop zones and the guns' umbrella, before the Rain and while it falls
   if (G.phase === 'deploy' || G.t < 30) {
     for (const u of G.units) if (u.T.aa && !u.gone) { c.beginPath(); ringPath(c, u.x, u.y, u.wpn.aa, 64); c.setLineDash([6, 6]); c.strokeStyle = 'rgba(255,80,60,.55)'; c.lineWidth = 1.5; c.stroke(); c.setLineDash([]); }
-    for (const z of G.zones) { c.beginPath(); ringPath(c, z.x, z.y, 240); c.strokeStyle = '#f2c14e'; c.lineWidth = 2; c.stroke(); const p = gpt(z.x, z.y, 4); if (p) { c.fillStyle = '#f2c14e'; c.textAlign = 'center'; c.fillText(`ZONE ${'ABCD'[z.id] || ''} · ${Math.round(GR.aaAt(z.x, z.y) * 100)}% lost in the sky`, p.x, p.y - 12); } }
+    for (const z of G.zones) { const hot = G.phase === 'deploy' && V.hoverG && V.plSel && V.plSel.size && hyp(V.hoverG.x - z.x, V.hoverG.z - z.y) < 320;
+      c.beginPath(); ringPath(c, z.x, z.y, 240); c.strokeStyle = '#f2c14e'; c.lineWidth = hot ? 4 : 2; c.stroke(); const p = gpt(z.x, z.y, 4);
+      if (p) { c.fillStyle = '#f2c14e'; c.textAlign = 'center'; c.fillText(`ZONE ${'ABCD'[z.id] || ''} · ${Math.round(GR.aaAt(z.x, z.y) * 100)}% lost in the sky`, p.x, p.y - 12);
+        if (G.phase === 'deploy') { const n0 = G.drop[0].filter(d => d[2].zone === z.id), n1 = G.drop[1].filter(d => d[2].zone === z.id), cnt = k => n0.filter(d => d[0] === k).length;
+          const parts = [cnt('starshell') && `${cnt('starshell')} shells`, cnt('peerless') && `${cnt('peerless')} knights`, (n0.length - cnt('starshell') - cnt('peerless')) && `${n0.length - cnt('starshell') - cnt('peerless')} pods`, n1.length && `${n1.length} Storks`].filter(Boolean);
+          c.fillStyle = '#e9e3d4'; c.fillText(hot ? `Drop the ${V.plSel.size} picked here` : parts.join(' · ') || 'nothing falls here', p.x, p.y + 4); } } }
     if (G.phase === 'deploy' && V.hoverG) { const e = GR.zoneOK(V.hoverG.x, V.hoverG.z); c.beginPath(); ringPath(c, V.hoverG.x, V.hoverG.z, 240); c.strokeStyle = e ? 'rgba(255,90,70,.8)' : 'rgba(242,193,78,.6)'; c.setLineDash([4, 4]); c.stroke(); c.setLineDash([]); const p = gpt(V.hoverG.x, V.hoverG.z, 4); if (p) { c.textAlign = 'center'; c.fillStyle = e ? '#ff8a6e' : '#e9e3d4'; c.fillText(e || `${Math.round(GR.aaAt(V.hoverG.x, V.hoverG.z) * 100)}% of the drop lost here`, p.x, p.y + 16); } }
   }
   // the sites' names and how they stand
@@ -514,11 +524,42 @@ function airBrief() { // the air, as the battle opens: who has what, and when it
   const w = (r, b) => [r && `<b>${r}</b> ripWings`, b && `<b>${b}</b> thunderWing bombers`].filter(Boolean).join(' and ');
   return `<p>In the air: ${r0 || b0 ? `the fleet sends ${w(r0, b0)} down behind the first wave` : 'the fleet has no aircraft to send'}; ${r1 || b1 ? `the garrison scrambles ${w(r1, b1)} as the Rain begins` : 'the garrison has none'}. They fight for the sky on their own, then strafe and bomb; select them to give them a target.</p>`;
 }
+// ---------------------------------------------------------------- the drop plan (before the Rain)
+// Every cohort of the first wave and of the Storks as a chip under the zone it will fall on. Click chips to pick them
+// (shift: every cohort of that kind in that wave), then click a zone's heading here, or a zone on the map, or open ground
+// to make a new zone there: they go to it. Right-click a zone on the map to take it away.
+const HOWS = { shell: 'falls in its own ablative shell from the spitTubes', boots: 'falls in pulseArmor and brakes on gravBoots: no pod; the guns barely touch it', pod: 'falls in drop pods', stork: 'lands from the Storks, behind the first wave, on a beachhead that still holds' };
+const kShort = n => n >= 1000 ? (n / 1000).toFixed(n % 1000 ? 1 : 0) + 'k' : String(n);
+function planPanel() {
+  const el = V.root.querySelector('#gbPlan'); if (!el) return;
+  if (G.phase !== 'deploy') { el.classList.add('hide'); return; } el.classList.remove('hide');
+  const sel = V.plSel, chip = (w, i) => { const [k, m, o] = G.drop[w][i], T = UT[k], key = w + ':' + i, how = GR.deliveryOf(k, w);
+    return `<span class="gb-chip ${sel.has(key) ? 'on' : ''} h-${how}" data-p="${key}" title="${esc((o.leader ? o.cmdr + ' · ' : '') + T.name)}: ${m.toLocaleString()} ${esc(HOWS[how])}"><i style="background:${V.colA.main}">${o.leader ? '★' : T.glyph}</i>${kShort(m)}</span>`; };
+  const row = (w, id) => G.drop[w].map((d, i) => d[2].zone === id ? chip(w, i) : '').join('');
+  const men = (w, id) => G.drop[w].reduce((a, d) => a + (d[2].zone === id ? d[1] : 0), 0);
+  let h = `<div class="ph"><b>Drop plan</b><span>${sel.size ? `${sel.size} picked: click a zone, or the ground for a new one` : 'Pick cohorts, then a zone'}</span></div>`;
+  if (!G.zones.length) h += `<p class="dim">Click the plain to place a drop zone (up to ${GR.MAXZ}). Every cohort goes to it until you place more; then pick cohorts here and send each where you want it.</p>`;
+  for (const z of G.zones) { const L = 'ABCD'[z.id], m0 = men(0, z.id), m1 = men(1, z.id), sky = Math.round(GR.aaAt(z.x, z.y) * 100);
+    h += `<div class="pz ${sel.size ? 'tgt' : ''}" data-z="${z.id}"><div class="pzh"><b>Zone ${L}</b><span class="${sky > 25 ? 'bad' : sky > 10 ? 'gold' : 'good'}">${sky}% lost in the sky</span><span>${(m0 + m1).toLocaleString()} men</span><button class="x" data-zx="${z.id}" title="Take this zone away: its cohorts go to the others">×</button></div>
+      <div class="pw"><em>First wave</em>${row(0, z.id) || '<span class="dim">nothing falls here</span>'}</div>
+      ${G.drop[1].length ? `<div class="pw"><em>Storks</em>${row(1, z.id) || '<span class="dim">no Storks</span>'}</div>` : ''}</div>`; }
+  const loose = [0, 1].flatMap(w => G.drop[w].map((d, i) => d[2].zone == null || !GR.zoneById(d[2].zone) ? chip(w, i) : '')).join('');
+  if (loose && G.zones.length) h += `<div class="pz"><div class="pzh"><b>Not yet placed</b></div><div class="pw">${loose}</div></div>`;
+  h += `<div class="pk"><span class="h-shell">▲</span> own shell <span class="h-boots">▲</span> gravBoots <span class="h-pod">▲</span> drop pod <span class="h-stork">▲</span> Stork</div>
+    <div class="gb-bb"><button class="btn" data-g="plall">Pick all</button><button class="btn" data-g="plspread" ${G.zones.length > 1 ? '' : 'disabled'}>Spread evenly</button></div>`;
+  el.innerHTML = h;
+}
+function planSend(id) { // the picked cohorts go to zone id
+  if (!V.plSel.size) return false; GR.assignDrop([...V.plSel].map(k => k.split(':').map(Number)), id); const n = V.plSel.size; V.plSel.clear();
+  toast(`${n} cohort${n > 1 ? 's' : ''} to fall on zone ${'ABCD'[id]}`); sfx('click'); planPanel(); return true;
+}
+const zoneAtG = g => G.zones.reduce((b, z) => { const d = hyp(z.x - g.x, z.y - g.z); return d < 320 && (!b || d < b.d) ? { z, d } : b; }, null);
 function showBrief() {
   const el = V.root.querySelector('#gbBrief'), sp = V.spec, men = G.drop[0].reduce((a, x) => a + x[1], 0), st = G.drop[1].reduce((a, x) => a + x[1], 0), gar = G.units.reduce((a, u) => a + u.men, 0);
   el.classList.remove('hide'); V.modal = false;
   el.innerHTML = `<div class="kicker">${esc(V.meta.date || '')} · ${esc(G.map.B.lore)}</div><h2>The Iron Rain on ${esc(G.map.B.city)}</h2>
-    <p>Choose up to <b>${GR.MAXZ} drop zones</b> on the plain: click the ground. The battle is fought at legion scale: ten men for every troop in the campaign. The first wave, <b>${men.toLocaleString()}</b> in starShells and leechCraft, falls on them${sp.att.cmdr ? ` with <b>${esc(sp.att.cmdr)}</b>` : ''}. The <b>${st.toLocaleString()}</b> legionnaires in the Storks follow ${G.storkT} seconds later, and land only on a zone your men still hold.</p>
+    <p>Choose up to <b>${GR.MAXZ} drop zones</b> on the plain: click the ground. The battle is fought at legion scale: ten men for every troop in the campaign. The first wave, <b>${men.toLocaleString()}</b>, falls on them${sp.att.cmdr ? ` with <b>${esc(sp.att.cmdr)}</b>` : ''}: the <b>starShells</b> in their own ablative shells from the spitTubes, the <b>Peerless</b> in pulseArmor braking on their gravBoots, the rest of the legions in <b>drop pods</b>. The <b>${st.toLocaleString()}</b> legionnaires in the <b>Storks</b> follow ${G.storkT} seconds later; a Stork lands on its own zone only while your men hold it, and turns to the nearest beachhead that does if not.</p>
+    <p>The <b>drop plan</b> on the right says which cohort falls where: pick cohorts there, then click a zone. Until you do, every zone gets an even share.</p>
     <p>The red rings are the <b>Sarissa batteries</b>: the nearer the guns you drop, the more of the Rain dies in the sky. Kill them, and the Storks come down safe.</p>
     <p><b>${gar.toLocaleString()}</b> of the garrison stand to arms in ${esc(G.map.B.city)}${V.meta.garrison ? ` (of ${V.meta.garrison.toLocaleString()}; the rest are pinned by the siege)` : ''}. Hold ${GR.NEED()} of its ${G.map.sites.length} sites for ${GR.HOLD_WIN} seconds, or break the garrison, before ${mmss(G.maxT)} runs out.</p>
     ${airBrief()}
@@ -575,11 +616,14 @@ function bindInput() {
     if (!V.on) return; const mx = e.clientX, my = e.clientY;
     if (e.button === 1) V.orbit = null;
     if (e.button === 0 && V.drag) { const d = V.drag; V.drag = null; if (V.modal) return;
-      if (G.phase === 'deploy') { if (!d.box) { const g = groundAt(mx, my); if (g) { const er = GR.addZone(g.x, g.z); if (er) toast(er); else sfx('click'); } } return; }
+      if (G.phase === 'deploy') { if (!d.box) { const g = groundAt(mx, my); if (g) { const hit = zoneAtG(g);
+          if (hit && V.plSel.size) planSend(hit.z.id); else if (!hit) { const er = GR.addZone(g.x, g.z); if (er) toast(er); else { sfx('click'); if (V.plSel.size) planSend(G.zoneLast); } } } planPanel(); } return; }
       if (d.box) { const x0 = Math.min(d.x0, d.x1), x1 = Math.max(d.x0, d.x1), y0 = Math.min(d.y0, d.y1), y1 = Math.max(d.y0, d.y1); const got = mine().filter(u => { const p = ppt(u, 2); return p && p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1; }); V.sel = d.shift ? [...new Set(V.sel.concat(got))] : got; if (got.length) sfx('sel'); }
       else { const u = unitAt(mx, my, 0); if (u) { if (d.shift) V.sel = V.sel.includes(u) ? V.sel.filter(x => x !== u) : V.sel.concat(u); else V.sel = [u]; sfx('sel'); } else if (!d.shift) V.sel = []; }
       hud(true); }
-    if (e.button === 2 && V.rdrag) { const d = V.rdrag; V.rdrag = null; if (V.modal || G.phase !== 'battle') return; const sel = V.sel.filter(u => live(u) && u.state !== 'rout'); if (!sel.length) return;
+    if (e.button === 2 && V.rdrag) { const d = V.rdrag; V.rdrag = null; if (V.modal) return;
+      if (G.phase === 'deploy') { const hit = zoneAtG(d.g0); if (hit) { GR.removeZone(hit.z.id); sfx('click'); planPanel(); } return; }
+      if (G.phase !== 'battle') return; const sel = V.sel.filter(u => live(u) && u.state !== 'rout'); if (!sel.length) return;
       const now = performance.now(), dbl = now - (V.lastR || 0) < 320; V.lastR = now;
       const foe = !d.line && unitAt(mx, my, 1), wid = !d.line && G.map.wl.length ? GR.wallAt(d.g0.x, d.g0.z, 40) : -1;
       // the aircraft: fighters attack what was clicked, in the air or on the ground; bombers bomb what was clicked, a stretch of
@@ -613,11 +657,19 @@ function bindInput() {
   addEventListener('keyup', e => { if (V) V.keys[e.key.toLowerCase()] = false; });
   addEventListener('blur', () => { if (V) V.keys = {}; });
   V.root.addEventListener('click', e => {
+    if (G.phase === 'deploy') { // the drop plan's chips and zones
+      const x = e.target.closest('[data-zx]'); if (x) { GR.removeZone(+x.dataset.zx); sfx('click'); planPanel(); return; }
+      const c = e.target.closest('[data-p]'); if (c) { const key = c.dataset.p, [w, i] = key.split(':').map(Number), on = !V.plSel.has(key);
+        if (e.shiftKey) { const kd = G.drop[w][i][0]; G.drop[w].forEach((d, j) => { if (d[0] === kd) on ? V.plSel.add(w + ':' + j) : V.plSel.delete(w + ':' + j); }); } else on ? V.plSel.add(key) : V.plSel.delete(key);
+        sfx('sel'); planPanel(); return; }
+      const z = e.target.closest('[data-z]'); if (z && V.plSel.size) { planSend(+z.dataset.z); return; } }
     const b = e.target.closest('[data-g],[data-u]'); if (!b) return;
     if (b.dataset.u) { const u = G.units.find(x => x.id === +b.dataset.u); if (!u) return; if (e.shiftKey) V.sel = V.sel.includes(u) ? V.sel.filter(x => x !== u) : V.sel.concat(u); else V.sel = [u]; if (e.detail > 1 && u.state !== 'fall') { if (u.T.air) follow(u); else { V.cam.tx = u.x; V.cam.tz = u.y; } V.cam.dist = Math.min(V.cam.dist, u.T.air ? 900 : 700); } hud(true); return; }
     const g = b.dataset.g;
-    if (g === 'autoz') { GR.aiZones(); sfx('click'); }
-    else if (g === 'rain') { if (!G.zones.length) GR.aiZones(); V.root.querySelector('#gbBrief').classList.add('hide'); GR.beginRain(); GR.start(0); sfx('alarm'); const z = G.zones[0]; if (z) Object.assign(V.cam, { tx: z.x, tz: z.y, dist: 2000, pitch: .5 }); hud(true); }
+    if (g === 'autoz') { GR.aiZones(); V.plSel.clear(); sfx('click'); planPanel(); }
+    else if (g === 'plall') { if (V.plSel.size) V.plSel.clear(); else for (const w of [0, 1]) G.drop[w].forEach((d, i) => V.plSel.add(w + ':' + i)); planPanel(); }
+    else if (g === 'plspread') { GR.planSpread(); V.plSel.clear(); sfx('click'); planPanel(); }
+    else if (g === 'rain') { if (!G.zones.length) GR.aiZones(); V.root.querySelector('#gbBrief').classList.add('hide'); V.plSel.clear(); GR.beginRain(); planPanel(); GR.start(0); sfx('alarm'); const z = G.zones[0]; if (z) Object.assign(V.cam, { tx: z.x, tz: z.y, dist: 2000, pitch: .5 }); hud(true); }
     else if (g === 'pause') { if (G.phase === 'battle') G.paused = !G.paused; hud(true); }
     else if (g === 'spd') { V.speedI = (V.speedI + 1) % 3; G.speed = [1, 2, 4][V.speedI]; hud(true); }
     else if (g === 'run') { const on = !V.sel.every(u => u.run); for (const u of V.sel) u.run = on; hud(true); }
