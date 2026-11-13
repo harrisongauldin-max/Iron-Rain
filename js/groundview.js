@@ -44,7 +44,7 @@ function makeDOM() {
   <div class="gb-feed" id="gbFeed"></div>
   <div class="gb-brief hide" id="gbBrief"></div>
   <div class="gb-end hide" id="gbEnd"></div>
-  <div class="gb-help">Left-drag select · Right-click move or attack · Right-click a wall: breach it (StarShells, RailRifles) · Right-drag to set a line · Double right-click: run · W A S D pan · Q E turn · wheel zoom · middle-drag orbit · Space pause · R run · F hold fire · H halt</div>`;
+  <div class="gb-help">Left-drag select · Right-click move or attack · Right-click a wall: breach it (StarShells, RailRifles) · Right-drag to set a line · Double right-click: run · W A S D pan · Q E turn · wheel zoom · middle-drag orbit · Space pause · R run · F hold fire · H halt · C follow</div>`;
   document.body.appendChild(root);
   return root;
 }
@@ -217,9 +217,13 @@ export function groundFrame(dt) {
 const tmpV = new THREE.Vector3(), tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpS = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0), tmpC = new THREE.Color(), DIR = new THREE.Vector3(), NZ = new THREE.Vector3(0, 0, -1);
 function camUpdate(dt) {
   const c = V.cam, k = V.keys, sp = c.dist * 1.1 * dt, fx = -Math.sin(c.yaw), fz = -Math.cos(c.yaw), rx = -fz, rz = fx;
+  if (c.follow && (k.w || k.s || k.a || k.d || k.arrowup || k.arrowdown || k.arrowleft || k.arrowright)) c.follow = null; // a pan lets go
+  const f = c.follow; if (f && (f.gone || f.away || f.men <= 0 || f.state === 'fall')) { c.follow = null; } const kf = Math.min(1, dt * 3);
+  if (c.follow) { c.tx += (f.x + (f.vx || 0) * .6 - c.tx) * kf; c.tz += (f.y + (f.vy || 0) * .6 - c.tz) * kf; }
+  c.lift = (c.lift || 0) + ((c.follow && f.T.air ? airY(f) - heightAt(clamp(c.tx, 0, MAP), clamp(c.tz, 0, MAP)) : 0) - (c.lift || 0)) * kf; // aim at the squadron's height, not the ground under it
   if (!V.modal) { if (k.w || k.arrowup) { c.tx += fx * sp; c.tz += fz * sp; } if (k.s || k.arrowdown) { c.tx -= fx * sp; c.tz -= fz * sp; } if (k.a || k.arrowleft) { c.tx -= rx * sp; c.tz -= rz * sp; } if (k.d || k.arrowright) { c.tx += rx * sp; c.tz += rz * sp; } if (k.q) c.yaw += 1.4 * dt; if (k.e) c.yaw -= 1.4 * dt; }
-  c.tx = clamp(c.tx, -400, MAP + 400); c.tz = clamp(c.tz, -400, MAP + 400);
-  const ty = heightAt(clamp(c.tx, 0, MAP), clamp(c.tz, 0, MAP)), cp = Math.cos(c.pitch);
+  const B = c.follow ? 2600 : 400; c.tx = clamp(c.tx, -B, MAP + B); c.tz = clamp(c.tz, -B, MAP + B);
+  const ty = heightAt(clamp(c.tx, 0, MAP), clamp(c.tz, 0, MAP)) + c.lift, cp = Math.cos(c.pitch);
   let x = c.tx + Math.sin(c.yaw) * cp * c.dist, y = ty + Math.sin(c.pitch) * c.dist, z = c.tz + Math.cos(c.yaw) * cp * c.dist;
   const gy = heightAt(clamp(x, 0, MAP), clamp(z, 0, MAP)) + 6; if (y < gy) y = gy;
   V.camera.position.set(x, y, z); V.camera.lookAt(c.tx, ty, c.tz);
@@ -275,24 +279,27 @@ function slot(u, i) { // [right, back] in metres from the leader
 export const airY = u => V && V.airY.has(u.id) ? V.airY.get(u.id) : heightAt(clamp(u.x, 0, MAP), clamp(u.y, 0, MAP)) + (u.alt || 0); // the height the squadron is drawn at
 function drawAir(dt) {
   const n = { rip: 0, riplead: 0, thunder: 0 }, t = G.t, step = G.paused ? 0 : dt * (G.speed || 1), cp = V.camera.position;
-  const put = (k, x, y, z, yaw, pitch, roll, col) => { const im = V.air[k]; if (n[k] >= im.instanceMatrix.count) return;
+  const H = Math.max(240, V.cv.clientHeight || 720), tanH = Math.tan(V.camera.fov * PI / 360); let sc = AIR_VS;
+  const put = (k, x, y, z, yaw, pitch, roll, col, s0 = sc) => { const im = V.air[k]; if (n[k] >= im.instanceMatrix.count) return;
     tmpQ.setFromAxisAngle(UP, yaw); qA.setFromAxisAngle(XA, -pitch); qB.setFromAxisAngle(ZA, roll); tmpQ.multiply(qA).multiply(qB);
-    tmpV.set(x, y, z); tmpS.set(AIR_VS, AIR_VS, AIR_VS); tmpM.compose(tmpV, tmpQ, tmpS); im.setMatrixAt(n[k], tmpM); im.setColorAt(n[k], col); n[k]++; };
+    tmpV.set(x, y, z); tmpS.set(s0, s0, s0); tmpM.compose(tmpV, tmpQ, tmpS); im.setMatrixAt(n[k], tmpM); im.setColorAt(n[k], col); n[k]++; };
   for (const u of G.units) {
     if (!u.T.air) continue;
     if (u.gone || u.away || u.men <= 0) continue; // its last height is kept for the wrecks
     const k0 = airKind(u), gh = heightAt(clamp(u.x, 0, MAP), clamp(u.y, 0, MAP)); let g = V.airG.has(u.id) ? V.airG.get(u.id) : gh;
     g += (gh - g) * Math.min(1, step * .6); V.airG.set(u.id, g); const y0 = Math.max(g + u.alt, gh + 30); V.airY.set(u.id, y0);
     const ca = Math.cos(u.a), sa = Math.sin(u.a), yaw = PI / 2 - u.a, pitch = clamp(u.pitch || 0, -.45, .45), roll = (u.bank || 0) * (k0 === 'thunder' ? .45 : 1.05);
-    const col = tmpC.set((u.team === 0 ? V.colA : V.colD).main), far = hyp(u.x - cp.x, y0 - cp.y, u.y - cp.z) > 6000, L = (k0 === 'thunder' ? 7 : 5) * AIR_VS;
+    const D = hyp(u.x - cp.x, y0 - cp.y, u.y - cp.z), col = tmpC.set((u.team === 0 ? V.colA : V.colD).main), far = D > 6000;
+    sc = clamp(D * 2 * tanH * 12 / ((k0 === 'thunder' ? 14 : 10.5) * H), AIR_VS, 7); // far off, an aircraft is drawn up to 3.5× bigger so it stays some 12 px long
+    const sp = Math.max(1, sc / AIR_VS * .8), L = (k0 === 'thunder' ? 3.5 : 2.5) * sc; // the vics open out as the aircraft grow, so they don't overlap
     for (let i = 0; i < u.men; i++) {
-      const [r, b] = slot(u, i), h = ((u.id * 7919 + i * 104729) % 1000) / 1000, wob = Math.sin(t * .9 + h * 9) * 4;
+      const [r0, b0] = slot(u, i), r = r0 * sp, b = b0 * sp, h = ((u.id * 7919 + i * 104729) % 1000) / 1000, wob = Math.sin(t * .9 + h * 9) * 4;
       const wx = u.x + (-sa) * r - ca * b + Math.sin(t * .6 + h * 7) * 3, wz = u.y + ca * r - sa * b + Math.cos(t * .5 + h * 5) * 3, wy = y0 + wob - Math.sin(pitch) * b - roll * r * .25; // the formation tilts with the bank
       put(i === 0 && k0 === 'rip' ? 'riplead' : k0, wx, wy, wz, yaw, pitch, roll + Math.sin(t * 1.3 + h * 11) * .04, col);
       if (far) continue;
       const ex = wx - ca * L, ez = wz - sa * L, ey = wy - Math.sin(pitch) * L; // the engines: a glow and a streak behind
-      PX.glow(ex, ey, ez, k0 === 'thunder' ? 3.5 : 2.2, .6, 1.1, 1.5, 2.6);
-      PX.ribbon(ex, ey, ez, ex - ca * 22, ey - Math.sin(pitch) * 22, ez - sa * 22, k0 === 'thunder' ? 1.8 : 1.2, .35, .8, 1.1, 2, .2);
+      PX.glow(ex, ey, ez, (k0 === 'thunder' ? 1.75 : 1.1) * sc, .6, 1.1, 1.5, 2.6);
+      PX.ribbon(ex, ey, ez, ex - ca * 11 * sc, ey - Math.sin(pitch) * 11 * sc, ez - sa * 11 * sc, (k0 === 'thunder' ? .9 : .6) * sc, .35, .8, 1.1, 2, .2);
     }
   }
   // the wrecks: thrown on along their heading, falling, burning, trailing smoke; a fireball where they come down
@@ -301,7 +308,7 @@ function drawAir(dt) {
     w.vy -= 9.8 * G.map.B.g * step; w.vx *= 1 - .25 * step; w.vz *= 1 - .25 * step; w.x += w.vx * step; w.y += w.vy * step; w.z += w.vz * step; w.roll += w.spin * step; w.pitch = Math.max(-1.2, w.pitch - .35 * step);
     const gh = heightAt(clamp(w.x, 0, MAP), clamp(w.z, 0, MAP));
     if (w.y <= gh + 2) { PX.blast(w.x, gh, w.z, w.kind === 'thunder'); GFX.scorch(w.x, w.z, w.kind === 'thunder' ? 26 : 14); near(w.x, w.z) && sfx(w.kind === 'thunder' ? 'bigboom' : 'boom'); continue; }
-    put(w.kind, w.x, w.y, w.z, w.yaw, w.pitch, w.roll, tmpC.setRGB(.25, .22, .2));
+    put(w.kind, w.x, w.y, w.z, w.yaw, w.pitch, w.roll, tmpC.setRGB(.25, .22, .2), clamp(hyp(w.x - cp.x, w.y - cp.y, w.z - cp.z) * 2 * tanH * 12 / (12 * H), AIR_VS, 7));
     PX.trail(w.x, w.y, w.z); PX.glow(w.x, w.y, w.z, 10, .9, 2.6, 1.4, .5); keep.push(w);
   }
   V.wrecks = keep;
@@ -479,7 +486,7 @@ function hud(force) {
       <div class="row"><span>${esc(u.wpn.name)}</span><b>${u.wpn.airOnly ? 'aircraft only' : u.wpn.range + ' m'} · ${Math.round(clamp(u.ammo / T.ammo, 0, 1) * 100)}%</b></div>
       ${u.wpn2 ? `<div class="row"><span>${esc(u.wpn2.name)}</span><b>${u.ammo2} left</b></div>` : ''}${T.bombs ? `<div class="row"><span>Bombs</span><b>${u.bombs} left</b></div>` : ''}
       <div class="row"><span>Kills</span><b>${u.kills}</b></div>${more}
-      <div class="dim">${T.bombs ? 'Right-click an enemy unit or a stretch of wall to bomb it.' : 'Right-click an enemy, in the air or on the ground, to attack it.'} Right-click the ground to patrol over it; H to let it fight on its own. Out of ${T.bombs ? 'bombs' : 'ammunition'}, or half the ${T.bombs ? 'flight' : 'squadron'} lost, it goes home to rearm.</div>`; }
+      <div class="dim">${T.bombs ? 'Right-click an enemy unit or a stretch of wall to bomb it.' : 'Right-click an enemy, in the air or on the ground, to attack it.'} Right-click the ground to patrol over it; H to let it fight on its own; C (or double-click its card) to follow it with the camera. Out of ${T.bombs ? 'bombs' : 'ammunition'}, or half the ${T.bombs ? 'flight' : 'squadron'} lost, it goes home to rearm.</div>`; }
   else { el.classList.remove('hide'); const u = sel[0], w = u.wpn, T = u.T, more = sel.length > 1 ? `<div class="dim">+ ${sel.length - 1} more selected</div>` : '';
     el.innerHTML = `<h3>${esc(u.name)}</h3><div class="role">${esc(T.role)}</div>
       <div class="row"><span>Men</span><b>${u.men.toLocaleString()} / ${u.men0.toLocaleString()}</b></div>
@@ -592,6 +599,7 @@ function bindInput() {
     else if (k === 'r') { const on = !V.sel.every(u => u.run); for (const u of V.sel) u.run = on; hud(true); }
     else if (k === 'f') { const on = !V.sel.every(u => !u.fire); for (const u of V.sel) u.fire = !on; hud(true); }
     else if (k === 'h') { for (const u of V.sel) GR.order(u, { type: 'halt' }); hud(true); }
+    else if (k === 'c') { const u = V.sel[0]; if (V.cam.follow || !u) V.cam.follow = null; else follow(u); hud(true); }
     else if (k === 'escape') { V.sel = []; hud(true); }
     else if (k === 'a' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); V.sel = mine(); hud(true); }
   });
@@ -599,7 +607,7 @@ function bindInput() {
   addEventListener('blur', () => { if (V) V.keys = {}; });
   V.root.addEventListener('click', e => {
     const b = e.target.closest('[data-g],[data-u]'); if (!b) return;
-    if (b.dataset.u) { const u = G.units.find(x => x.id === +b.dataset.u); if (!u) return; if (e.shiftKey) V.sel = V.sel.includes(u) ? V.sel.filter(x => x !== u) : V.sel.concat(u); else V.sel = [u]; if (e.detail > 1 && u.state !== 'fall') { V.cam.tx = u.x; V.cam.tz = u.y; V.cam.dist = Math.min(V.cam.dist, 700); } hud(true); return; }
+    if (b.dataset.u) { const u = G.units.find(x => x.id === +b.dataset.u); if (!u) return; if (e.shiftKey) V.sel = V.sel.includes(u) ? V.sel.filter(x => x !== u) : V.sel.concat(u); else V.sel = [u]; if (e.detail > 1 && u.state !== 'fall') { if (u.T.air) follow(u); else { V.cam.tx = u.x; V.cam.tz = u.y; } V.cam.dist = Math.min(V.cam.dist, u.T.air ? 900 : 700); } hud(true); return; }
     const g = b.dataset.g;
     if (g === 'autoz') { GR.aiZones(); sfx('click'); }
     else if (g === 'rain') { if (!G.zones.length) GR.aiZones(); V.root.querySelector('#gbBrief').classList.add('hide'); GR.beginRain(); GR.start(0); sfx('alarm'); const z = G.zones[0]; if (z) Object.assign(V.cam, { tx: z.x, tz: z.y, dist: 2000, pitch: .5 }); hud(true); }
@@ -614,4 +622,5 @@ function bindInput() {
     else if (g === 'done') { const r = GR.result(); teardown(); const res = V.resolve; V.resolve = null; res && res(r); }
   });
 }
+function follow(u) { if (u.away) return; V.cam.follow = u; toast(`Following ${u.name}: W A S D or C to let go`); }
 function toast(msg) { const el = document.createElement('div'); el.className = 'gb-toast'; el.textContent = msg; V.root.appendChild(el); setTimeout(() => el.remove(), 1800); }
