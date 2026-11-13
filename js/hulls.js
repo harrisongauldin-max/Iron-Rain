@@ -430,6 +430,21 @@ const BUILD = {
     navLights(K, -.85, .26 * s, .02);
     K.top = top; return [x0, x1];
   },
+  stork(K, st, R) { // the Stork in space: the same slab-sided lifter the ground war sees — a deep belly, a raised flight deck forward, stub wings with lift nacelles, a tall fin
+    const x0 = -1.1, x1 = 1.1;
+    K.loft(SLOT.hull, [{ x: x0, w: .2, h: .12, y: .04, b: .3 }, { x: -.85, w: .44, h: .2, y: 0, b: .3 }, { x: -.3, w: .52, h: .24, y: -.02, b: .3 }, { x: .35, w: .5, h: .23, y: -.02, b: .3 }, { x: .75, w: .36, h: .17, y: 0, b: .32 }, { x: 1.02, w: .14, h: .08, y: -.03, b: .35 }], x0, x1);
+    const body = K.body;
+    K.add(SLOT.armour, loft(smooth([{ x: .3, w: .2, h: .07, y: .24, b: .4 }, { x: .62, w: .22, h: .08, y: .22, b: .4 }, { x: .86, w: .12, h: .04, y: .16, b: .4 }], 1), x0, x1));   // the flight deck
+    K.add(SLOT.glow, box(.84, .2, 0, .06, .03, .2));                                                                                            // its viewport, lit
+    K.add(SLOT.dark, box(-.25, -.26, 0, 1.1, .03, .7)); K.add(SLOT.dark, box(-.98, -.12, 0, .16, .2, .5));                                       // belly plate, the stern ramp
+    for (const side of [-1, 1]) { K.add(SLOT.hull, fin(-.35, -.5, .02, .3, .5, .03, side));                                                     // stub wings
+      for (const dx of [-.3, .08]) { K.add(SLOT.armour, cylX(dx - .12, dx + .12, -.02, side * .74, .085, 12)); K.add(SLOT.glow, box(dx, -.11, side * .74, .12, .01, .1)); } // lift nacelles, lit below
+      stripe(K, body, x0 + .2, x1 - .4, side, .3);
+      for (let i = 0; i < 5; i++) K.add(SLOT.red, box(-.7 + i * .26, -.1, side * (at(body, -.7 + i * .26).w + .004), .04, .02, .006)); }         // launch-bay lights
+    K.add(SLOT.trim, fin(-.95, -1.12, .22, .34, .34, .02, 0));                                                                                  // the tail fin, in the owner's colour
+    engines(K, x0 + .02, .04, [[0, .16], [0, -.16]], .1, .16); navLights(K, .2, .55, .05);
+    K.top = .56; return [x0, x1];
+  },
   boarder(K, st, R) { // the assault pod: an armoured slug, banded, with a drill head and one heavy engine
     const x0 = -1, x1 = 1.25;
     K.loft(SLOT.armour, [{ x: x0, w: .2, h: .2, b: .45 }, { x: -.55, w: .27, h: .26, b: .45 }, { x: .25, w: .25, h: .24, b: .45 }, { x: .75, w: .19, h: .18, b: .45 }, { x: .95, w: .13, h: .13, b: .45 }], x0, x1);
@@ -438,6 +453,10 @@ const BUILD = {
     { const g = new THREE.ConeGeometry(.12, .32, 12); g.rotateZ(-Math.PI / 2); g.translate(1.1, 0, 0); K.add(SLOT.gun, g); } // the drill head
     for (let i = 0; i < 3; i++) { const a = i * Math.PI * 2 / 3; K.add(SLOT.dark, box(.98, Math.sin(a) * .11, Math.cos(a) * .11, .1, .03, .03)); } // its cutter mounts
     K.add(SLOT.trim, box(-.2, .27, 0, .6, .01, .05)); // a painted line along the back
+    { const g = new THREE.TorusGeometry(.2, .03, 6, 20); g.rotateY(Math.PI / 2); g.translate(.78, 0, 0); K.add(SLOT.gun, g); }                  // the clamp collar that seals to a hull
+    for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + Math.PI / 4, cy = Math.sin(a), cz = Math.cos(a); const g = box(0, 0, 0, .34, .035, .05); g.rotateZ(-.35); g.rotateX(-a + Math.PI / 2); g.translate(.95, cy * .2, cz * .2); K.add(SLOT.armour, g);
+      const t = box(0, 0, 0, .1, .03, .04); t.rotateZ(.6); t.rotateX(-a + Math.PI / 2); t.translate(1.13, cy * .2, cz * .2); K.add(SLOT.gun, t); } // four grapple claws, hooked
+    for (const side of [-1, 1]) K.add(SLOT.red, box(.4, .05, side * .25, .05, .02, .006));                                                    // breach lights
     engines(K, x0, 0, [[0, 0]], .13, .2);
     K.top = .3; return [x0, x1];
   },

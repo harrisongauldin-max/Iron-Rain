@@ -26,7 +26,7 @@ import { mergeGeometries } from '../vendor/three/utils/BufferGeometryUtils.js';
 const PI = Math.PI;
 export const KINDS = ['inf', 'rail', 'obs', 'gold', 'lead', 'shell', 'pod', 'aa'];
 // where each kind's weapon fires from (metres, before VS): x right, y up, z forward
-export const MUZZLE = { inf: [.16, 1.22, .8], rail: [.16, 1.24, 1.2], obs: [-.42, 1.5, .5], gold: [-.3, 1.3, .6], lead: [-.3, 1.3, .6], shell: [.8, 1.95, 1.4], pod: [0, 1.25, 3.3], aa: [0, 2.4, 1.0] };
+export const MUZZLE = { inf: [.16, 1.22, .8], rail: [.16, 1.24, 1.2], obs: [-.42, 1.5, .5], gold: [-.3, 1.3, .6], lead: [-.3, 1.3, .6], shell: [.8, 1.95, 1.4], pod: [0, 1.25, 3.3], aa: [0, 2.55, 1.36] };
 
 // paints
 const C = {
@@ -124,6 +124,17 @@ class Fig {
 // upper arm, elbow, forearm; torso half-widths at hips, waist, ribs, chest and shoulders; depths; head radius. P: paints.
 // Anatomy that reads at battle distance: thighs thicker at the top, a calf, a ball at every joint, a V torso from wide
 // shoulders to a narrow waist over a pelvis, a neck, a rounded skull. Armour goes on over it in each kind's builder.
+// a helmet on a head centred at height y, radius r: one lofted shell (flared neck guard, dome, tapering crown), a
+// T-shaped visor, cheek guards, and a comb along the top (a thin diamond-section fin) in a paint of its own
+function helm(F, y, r, paint, o = {}) {
+  F.loft([[y - r * 1.1, r * .86, r * .95, 0, -r * .12], [y - r * .55, r * 1.1, r * 1.16, 0, -r * .06], [y, r * 1.16, r * 1.22], [y + r * .62, r * 1.02, r * 1.1], [y + r * 1.0, r * .56, r * .64, 0, -r * .04], [y + r * 1.13, r * .14, r * .18, 0, -r * .04]], 12, 0, 0, 0, paint);
+  const w = o.wide ? 1.7 : 1.35;
+  F.box(r * w, r * .3, r * .2, 0, y + r * .08, r * 1.16, o.visor, 0, 0, 0, 0, o.em || 0);                 // the eye slit
+  if (!o.wide) F.box(r * .26, r * .62, r * .2, 0, y - r * .36, r * 1.1, o.visor, 0, 0, 0, 0, (o.em || 0) * .5); // and the nose-to-chin slit: a T
+  if (o.cheek) F.both(s => F.rbox(r * .3, r * .7, r * .5, r * .08, 2, s * r * .86, y - r * .45, r * .62, o.cheek, 0, s * .35));
+  if (o.crest) F.hull([[-r * 1.15, r * .1, r * .22, 0], [-r * .2, r * .15, r * .34 * (o.tall || 1), r * .06 * (o.tall || 1)], [r * .95, r * .09, r * .2, 0]], 4, 0, y + r * 1.12, 0, o.crest, o.tm || 0);
+  return F;
+}
 function human(F, J, D, P) {
   const { thigh, knee, shin, ankle, upper, elbow, fore, hand } = D, s = D.seg || 10;
   // joint caps: a ball centred exactly on every pivot, a little wider than the limb ends that meet there, so when the rig
@@ -177,11 +188,7 @@ function grayBody(F, o = {}) {
   F.rbox(.34, .36, .12, .04, 3, 0, 1.3, -.17, C.pack);                                                                   // pack
   F.both(s => F.rbox(.05, .3, .04, .01, 2, s * .12, 1.34, .06, C.pack, 0, 0, .1));                                       // pack straps
   F.both(s => F.sph(.105, 10, 7, s * .245, 1.51, .01, C.team, 1, .62, 1.1));                                               // pauldrons: half-domes (team)
-  F.sph(.125, 14, 10, 0, 1.71, 0, dark, 0, 1.08, 1.02);                                                                  // helmet shell
-  F.loft([[1.6, .11, .1, 0, -.02], [1.66, .135, .125, 0, -.01], [1.72, .13, .12]], 12, 0, 0, 0, dark);                   // helmet skirt / neck guard
-  F.box(.16, .04, .03, 0, 1.7, .12, C.visor, 0, 0, 0, 0, .6);                                                            // visor slit (faint glow)
-  F.rbox(.2, .05, .22, .02, 2, 0, 1.8, .01, arm, 0, 0, .08);                                                             // brow ridge
-  F.box(.04, .07, .18, 0, 1.87, -.02, C.team, 1);                                                                        // crest (team)
+  helm(F, 1.71, .105, dark, { visor: C.visor, em: .6, crest: C.team, tm: 1, cheek: arm });                              // helmet: dome, T-visor, cheek guards, a team comb
   return F;
 }
 function legionnaire() {
@@ -215,9 +222,7 @@ function obsidian() {
   F.rbox(.56, .36, .12, .06, 3, 0, 1.98, .2, C.obsD, 0, 0, .12);                                                         // breast plate (dark)
   F.loft([[2.2, .5, .28, 0, -.02], [2.3, .56, .3, 0, -.02], [2.4, .5, .27, 0, -.03]], 12, 0, 0, 0, C.fur);               // fur mantle round the shoulders
   F.both(s => { F.sph(.2, 10, 7, s * .5, 2.3, 0, C.team, 1, .7, 1.2); F.cyl(.0, .04, .26, 6, s * .62, 2.5, 0, C.bone, 0, 0, -s * .5); }); // pauldrons (team), tusk spikes
-  F.sph(.18, 12, 9, 0, 2.6, 0, C.obs, 0, 1.05, 1.0);                                                                    // helm over the skull
-  F.loft([[2.44, .16, .15], [2.52, .19, .17], [2.6, .19, .17]], 12, 0, 0, 0, C.obs);                                      // helm skirt
-  F.box(.26, .07, .05, 0, 2.6, .17, C.visor, 0, 0, 0, 0, .5);                                                            // eye slit
+  helm(F, 2.6, .165, C.obs, { visor: C.visor, em: .5, crest: null });                                                   // helm over the skull, no comb
   F.rbox(.2, .14, .1, .03, 2, 0, 2.47, .19, C.bone);                                                                     // jaw / skull mask
   F.both(s => F.cyl(.0, .04, .3, 6, s * .18, 2.78, -.02, C.bone, 0, 0, -s * .7));                                        // horns
   F.limb([0, 2.76, -.12], [0, 2.3, -.42], .06, .05, 8, C.hair); F.limb([.1, 2.7, -.14], [.22, 2.1, -.38], .035, .03, 6, C.hair); F.limb([-.1, 2.7, -.14], [-.22, 2.1, -.38], .035, .03, 6, C.hair); // braids down the back
@@ -244,12 +249,9 @@ function goldBody(F) {
   F.rbox(.2, .18, .04, .02, 2, 0, 1.56, .16, C.gilt, 0, 0, .16); F.box(.07, .11, .03, 0, 1.53, .19, C.giltK, 0, 0, .16);    // breastplate relief and sigil
   F.both(s => F.sph(.095, 10, 7, s * .27, 1.7, .01, C.team, 1, .6, 1.15));                                               // pauldrons (team)
   F.both(s => F.sph(.1, 10, 7, s * .27, 1.68, .01, C.giltL, 0, .25, 1.2));                                                // their gilt rims
-  F.sph(.12, 14, 10, 0, 1.88, 0, C.gilt, 0, 1.1, 1.0);                                                                   // helm
-  F.loft([[1.78, .1, .09], [1.84, .125, .115], [1.9, .12, .11]], 12, 0, 0, 0, C.gilt);                                     // helm skirt
-  F.box(.16, .04, .03, 0, 1.885, .12, C.visor, 0, 0, 0, 0, .6);                                                           // visor
-  F.loft([[1.96, .13, .13], [2.0, .15, .14], [2.04, .1, .1]], 12, 0, 0, 0, C.giltL);                                       // lion mane: crown ring
-  F.both(s => F.rbox(.06, .16, .2, .02, 2, s * .14, 2.02, -.02, C.giltL, 0, 0, 0, -s * .5));                              // mane side flares
-  F.rbox(.06, .16, .28, .02, 2, 0, 2.08, -.02, C.team, 1);                                                                // crest (team)
+  helm(F, 1.88, .105, C.gilt, { visor: C.visor, em: .6, crest: C.team, tm: 1, tall: 1.5, cheek: C.giltL });               // helm with a tall horsehair-style comb (team)
+  F.loft([[1.8, .135, .14, 0, -.02], [1.86, .15, .15, 0, -.03], [1.93, .125, .13, 0, -.03]], 12, 0, 0, 0, C.giltL);       // the lion's mane: a gilt collar round the back of the helm
+  F.both(s => F.cyl(0, .022, .13, 6, s * .1, 2.0, .02, C.giltL, 0, .25, -s * .45));                                     // its ears
   F.box(.5, .5, .035, 0, 1.5, -.2, C.team, 1, 0, .1);                                                        // cape, upper
   F.box(.58, .7, .035, 0, .9, -.3, C.team, 1, 0, .18);                                                       // cape, lower, flaring
   F.box(.56, .06, .04, 0, .56, -.36, C.giltL, 0, 0, .18);                                                                 // cape hem
@@ -286,10 +288,7 @@ function starshell() {
   F.loft([[2.4, .36, .2, 0, -.42], [2.75, .4, .22, 0, -.48], [3.15, .34, .18, 0, -.44]], 12, 0, 0, 0, C.shellD);           // back pack
   F.both(s => { F.cyl(.11, .13, .5, 10, s * .25, 2.95, -.74, C.vent); F.cyl(.1, .13, .14, 10, s * .25, 2.62, -.74, C.exhaust, 0, 0, 0, 0, false, .9); }); // twin thrusters, lit
   F.both(s => { F.sph(.34, 12, 8, s * .62, 3.24, 0, C.team, 1, .55, 1.1); F.sph(.35, 12, 8, s * .62, 3.2, 0, C.shellL, 0, .25, 1.12); }); // pauldrons (team) with a rim
-  F.sph(.22, 14, 10, 0, 3.48, .02, C.shellD, 0, 1.0, 1.0);        // helm
-  F.loft([[3.36, .2, .18], [3.44, .24, .22], [3.5, .23, .21]], 12, 0, 0, 0, C.shellD);                                     // helm skirt
-  F.box(.34, .08, .06, 0, 3.49, .2, C.lens, 0, 0, 0, 0, 1.0);     // visor, lit
-  F.rbox(.4, .08, .4, .03, 2, 0, 3.68, 0, C.shell);               // crown plate
+  helm(F, 3.48, .2, C.shellD, { visor: C.lens, em: 1, crest: C.shell, wide: 1 });                                     // helm: wide lit visor, a low steel comb
   F.cyl(.13, .13, 1.0, 12, .8, 1.75, .85, C.cannon, 0, PI / 2 - .35); F.cyl(.15, .12, .22, 12, .8, 1.95, 1.3, C.shellD, 0, PI / 2 - .35); // pulseCannon along the right forearm, muzzle
   F.rbox(.4, .34, .36, .06, 3, -.82, 1.4, .3, C.shellD); F.both(s => F.rbox(.1, .18, .2, .03, 2, -.82 + s * .13, 1.26, .4, C.vent)); // the fist
   F.rbox(.42, .34, .62, .05, 3, -.62, 3.62, -.2, C.shellD, 0, 0, .2); // missile pod over the left pauldron
@@ -320,18 +319,22 @@ function gravpod() {
 // ---------------------------------------------------------------- Sarissa battery (origin: ground): a crewed launcher rack
 function sarissa() {
   const F = new Fig();
-  for (let i = 0; i < 3; i++) { const a = i * PI * 2 / 3 + PI / 2; F.limb([Math.cos(a) * .1, 1.25, Math.sin(a) * .1], [Math.cos(a) * .95, .06, Math.sin(a) * .95], .07, .05, 8, C.podD); F.rbox(.3, .08, .3, .03, 2, Math.cos(a) * .95, .04, Math.sin(a) * .95, C.podD); }
-  F.cyl(.38, .34, .36, 14, 0, 1.2, 0, C.pod);                     // hub
-  F.rbox(.5, .44, .5, .06, 2, 0, 1.52, 0, C.podD);                // pivot
-  const el = PI / 3, ce = Math.cos(el), se = Math.sin(el);        // tubes elevated 60°, pointing up and forward
-  F.rbox(1.16, .86, .36, .05, 3, 0, 2.0, .45, C.pod, 0, 0, el);   // the rack frame
-  F.box(1.2, .12, .38, 0, 2.0, .45, C.team, 1, 0, el);            // team stripe
-  F.both(s => F.rbox(.08, .9, 1.4, .03, 2, s * .64, 2.0, .45, C.podL, 0, 0, el)); // blast shields either side
-  for (let i = 0; i < 6; i++) { const x = -.36 + (i % 3) * .36, yy = -.24 + Math.floor(i / 3) * .48, y = 2.0 + yy * ce, z = .45 + yy * se;
-    F.cyl(.11, .11, 2.3, 12, x, y, z, C.tube, 0, el); F.cyl(.09, .09, .06, 12, x, y + 1.15 * ce, z + 1.15 * se, C.vent, 0, el); }
-  F.cyl(.28, .05, .12, 14, .9, 2.7, -.4, C.podL, 0, -.6); F.cyl(.025, .03, .9, 8, .9, 2.15, -.35, C.podD); // targeting dish on a mast
-  F.both(s => { F.sph(.11, 10, 8, s * 1.05, 1.0, -.6, C.duroD); F.rbox(.34, .5, .24, .05, 2, s * 1.05, .65, -.6, C.duro); F.rbox(.17, .08, .24, .02, 2, s * 1.05, .92, -.6, C.team, 1); }); // crew, crouched
-  F.rbox(.6, .4, .4, .04, 2, 0, .2, -1.3, C.crate); F.rbox(.6, .4, .4, .04, 2, .7, .2, -1.4, C.crate); F.rbox(.5, .3, .5, .04, 2, -.4, .15, -1.5, C.olive); // crates, console
+  // a low turntable on three stabiliser feet, a yoke, and a six-cell launcher box elevated 60° with the tubes' mouths showing
+  F.cyl(.9, 1.0, .22, 20, 0, .16, 0, C.podD); F.cyl(.62, .7, .5, 18, 0, .5, 0, C.pod); F.cyl(.7, .7, .06, 18, 0, .76, 0, C.team, 1, 0, 0, 0, true); // base, pedestal, team ring
+  for (let i = 0; i < 3; i++) { const a = i * PI * 2 / 3 + PI / 6; F.bar([Math.cos(a) * .7, .14, Math.sin(a) * .7], [Math.cos(a) * 1.5, .1, Math.sin(a) * 1.5], .2, .12, C.podD); F.cyl(.2, .24, .1, 10, Math.cos(a) * 1.5, .05, Math.sin(a) * 1.5, C.pod); }
+  F.both(s => F.rbox(.14, 1.1, .5, .05, 2, s * .68, 1.3, .05, C.pod));                                  // the yoke's arms
+  F.cyl(.1, .1, 1.5, 10, 0, 1.75, .05, C.podD, 0, 0, PI / 2);                                           // trunnion
+  const el = PI / 3, ce = Math.cos(el), se = Math.sin(el), cy = 2.0, cz = .4;
+  F.rbox(1.18, .86, 2.2, .1, 3, 0, cy, cz, C.pod, 0, 0, el - PI / 2);                                     // the launcher box
+  F.rbox(1.22, .9, .16, .04, 2, 0, cy + ce * 1.02, cz + se * 1.02, C.podL, 0, 0, el - PI / 2);            // its muzzle frame
+  F.rbox(1.0, .06, 1.9, .02, 2, 0, cy + se * .44, cz - ce * .44, C.team, 1, 0, el - PI / 2);          // team stripe along the top
+  for (let i = 0; i < 6; i++) { const x = -.36 + (i % 3) * .36, v = -.2 + Math.floor(i / 3) * .4, y = cy + ce * 1.11 + se * v, z = cz + se * 1.11 - ce * v;
+    F.cyl(.13, .13, .04, 12, x, y, z, C.vent, 0, el); F.cyl(.07, .1, .1, 10, x, y - ce * .02, z - se * .02, C.red, 0, el, 0, 0, false, .25); } // tube mouths, warheads just visible
+  F.cyl(.03, .04, 1.3, 8, .95, 1.5, -.5, C.podD); F.sph(.34, 14, 8, .95, 2.2, -.5, C.podL, 0, .35, 1); F.cyl(.02, .02, .3, 6, .95, 2.36, -.5, C.podD); // targeting dish on a mast
+  // the crew of two, kneeling at the console behind the launcher
+  F.both(s => { const x = s * .9; F.loft([[.34, .14, .12], [.62, .19, .13], [.86, .15, .11]], 10, x, 0, -1.0, C.duro); F.sph(.11, 10, 8, x, .99, -1.0, C.duroD, 0, 1.05, 1.1); F.sph(.1, 8, 6, x + s * .2, .84, -1.0, C.team, 1, .6, 1); F.limb([x, .4, -.95], [x, .12, -.6], .09, .07, 8, C.duroD); });
+  F.rbox(.7, .5, .36, .06, 2, 0, .42, -.72, C.podD); F.box(.56, .22, .04, 0, .56, -.52, C.glass, 0, 0, -.3, 0, .5);   // console with a lit screen
+  F.rbox(.6, .36, .4, .05, 2, -1.5, .2, -1.3, C.crate); F.rbox(.5, .3, .4, .05, 2, -1.45, .52, -1.3, C.olive);     // reloads
   return F.build();
 }
 
@@ -414,22 +417,24 @@ const A = { wing: '#23252c', wingL: '#363941', wingD: '#15161a', canopy: '#7fd0f
 // canopy, engines and fins are our design; the bomb bay belongs to the thunderWing only
 function ripwingBody(F, lead = false) {
   const trim = lead ? C.giltL : C.team, trimTm = lead ? 0 : 1;
-  F.rbox(1.6, 1.3, 9, .3, 3, 0, 0, 0, A.wing);                          // fuselage
-  F.rbox(1.0, .8, 3.6, .25, 2, 0, -.1, 5.6, A.wingD, 0, 0, .05);        // nose
-  F.sph(.6, 12, 8, 0, .7, 1.6, A.canopy, 0, .7, 1.8, .4);               // bubble canopy, lit faintly
-  F.both(s => F.cyl(.06, .06, 1.6, 8, s * .35, -.25, 7.6, C.cannon, 0, PI / 2)); // chainguns
-  // the wings: swept bat outlines with three finger points and concave scallops along the trailing edge
-  const WING = [[.7, 2.6], [3.5, 1.4], [6.4, -.2], [7.3, -1.6], [6.0, -1.1], [5.6, -2.8], [4.3, -2.0], [3.9, -3.6], [2.6, -2.7], [2.0, -4.0], [.7, -3.0]];
-  const SPAR = [[.7, 2.2], [6.0, -.4], [6.2, -1.0], [.7, -1.2]];
+  // the body: a six-sided shard with a knife chine down each side, drawn to a needle; faceted, as if knapped from ebony
+  F.hull([[-5.4, .3, .26, .05], [-3.6, .85, .6, .05], [-.5, 1.0, .72, .05], [2.6, .8, .58, 0], [5.4, .42, .32, -.12], [7.6, .05, .04, -.2]], 6, 0, 0, 0, A.wing);
+  F.hull([[.5, .08, .06, .62], [1.4, .42, .3, .74], [2.7, .4, .28, .68], [4.0, .1, .06, .46]], 10, 0, 0, 0, A.canopy, 0, .4);       // canopy, faintly lit
+  F.hull([[-3.4, .2, .1, .72], [-.8, .3, .16, .78], [.6, .12, .06, .7]], 4, 0, 0, 0, lead ? C.giltL : A.wingL);                    // dorsal spine (gilt on the Gold's)
+  F.both(s => F.hull([[-1.2, .3, .3, -.2], [1.4, .36, .34, -.2], [2.4, .16, .14, -.22]], 6, s * 1.05, 0, 0, A.wingD));              // intakes under the wing roots
+  F.both(s => F.cyl(.05, .05, 1.8, 8, s * .3, -.34, 6.6, C.cannon, 0, PI / 2));                                                    // chainguns in the nose
+  // the wings: swept bat outlines with finger points and scallops along the trailing edge, a finger-bone to each point
+  const WING = [[.8, 2.4], [3.5, 1.3], [6.4, -.3], [7.4, -1.7], [6.0, -1.15], [5.6, -2.9], [4.3, -2.05], [3.9, -3.7], [2.6, -2.75], [2.0, -4.1], [.8, -3.0]];
   F.both(s => {
-    F.plate(WING, .16, .02, A.wing, 0, 0, s);                                                   // the membrane
-    F.plate(SPAR, .3, .2, A.wingL, 0, 0, s);                                                    // the spar, raised
-    F.plate([[6.0, -.5], [7.3, -1.6], [6.4, -1.3]], .2, .12, trim, trimTm, 0, s);              // wingtip (team / gilt)
-    F.cyl(.42, .5, 2.6, 12, s * 1.1, -.25, -3.4, A.wingD, 0, PI / 2); F.cyl(.36, .36, .3, 12, s * 1.1, -.25, -4.85, C.glow, 0, PI / 2, 0, 0, false, .9); // engines, lit
-    F.cyl(.1, .1, 1.8, 8, s * 2.2, -.3, .4, A.wingD, 0, PI / 2); F.cyl(.1, .1, 1.8, 8, s * 3.4, -.25, -.1, A.wingD, 0, PI / 2); // missiles under the wing
+    F.plate(WING, .12, .06, A.wing, 0, 0, s);                                                                                     // the membrane
+    F.plate([[.8, 2.4], [3.5, 1.3], [6.4, -.3], [7.4, -1.7], [6.9, -1.5], [6.0, -.5], [3.4, .9], [.8, 1.9]], .2, .12, A.wingL, 0, 0, s); // leading edge, raised
+    for (const [tx, tz] of [[5.6, -2.9], [3.9, -3.7], [2.0, -4.1]]) F.bar([s * 1.0, .1, .9], [s * tx, .07, tz], .1, .1, A.wingL);   // finger bones
+    F.plate([[6.2, -.7], [7.4, -1.7], [6.5, -1.4]], .22, .14, trim, trimTm, 0, s);                                                 // wingtip (team / gilt)
+    F.hull([[-5.9, .4, .4, -.18], [-5.0, .52, .5, -.18], [-2.8, .5, .46, -.18], [-1.6, .3, .26, -.18]], 12, s * .95, 0, 0, A.wingD); F.cyl(.34, .34, .25, 12, s * .95, -.18, -5.95, C.glow, 0, PI / 2, 0, 0, false, .9); // engines, lit
+    F.hull([[-.6, .09, .09, -.3], [.9, .1, .1, -.3], [1.5, .02, .02, -.3]], 8, s * 2.4, 0, .3, C.hullL); F.hull([[-.6, .09, .09, -.28], [.9, .1, .1, -.28], [1.5, .02, .02, -.28]], 8, s * 3.6, 0, -.3, C.hullL); // missiles under the wing
+    F.hull([[-5.2, .05, .2, .75], [-4.2, .06, .75, 1.15], [-3.0, .04, .22, .62]], 4, s * .62, 0, 0, trim, trimTm);                    // twin swept tail fins (team / gilt)
   });
-  F.both(s => F.box(.1, 1.3, 1.6, s * .55, .9, -3.6, trim, trimTm, 0, 0, -s * .3)); // twin canted tail fins (team / gilt)
-  if (lead) { F.box(1.4, .08, 2.2, 0, .75, -1.6, C.giltL); F.sph(.35, 10, 8, 0, .3, 7.3, C.giltL, 0, 1, 1.6); }     // the Gold's upgraded ripWing: gilt spine and nose cap
+  if (lead) F.hull([[5.6, .34, .26, -.13], [6.6, .2, .15, -.17], [7.65, .05, .04, -.2]], 6, 0, .01, 0, C.giltL);                       // the Gold's ripWing: a gilt nose
   return F;
 }
 const ripwing = () => ripwingBody(new Fig()).build();
@@ -439,94 +444,95 @@ const ripwingLead = () => ripwingBody(new Fig(), true).build();
 // deep bomb bay, four engines
 function thunderwing() {
   const F = new Fig();
-  F.sph(2.4, 16, 12, 0, 0, 0, A.wing, 0, .6, 1.4);                       // abdomen
-  F.sph(1.6, 14, 10, 0, .2, 3.6, A.wingD, 0, .7, 1.0);                   // cephalothorax
-  F.sph(.5, 10, 8, 0, .9, 4.6, A.canopy, 0, .6, 1.2, .4);                // canopy
-  // eight legs: tapered plates radiating from the body, each bent down at a knee
-  for (let i = 0; i < 4; i++) { const a = -.55 + i * .5, z0 = 2.6 - i * 1.5, L = 8 + (i === 1 || i === 2 ? 1.5 : 0), ca = Math.cos(a), sa = Math.sin(a);
-    const kx = 1.4 + L * .55 * ca, kz = z0 + L * .55 * sa, tx = 1.4 + L * ca, tz = z0 + L * sa;
-    F.both(s => { F.plate([[1.2, z0 + .7], [kx, kz + .35], [kx, kz - .35], [1.2, z0 - .7]], .5, .1, A.wing, 0, 0, s);
-      F.plate([[kx - .1, kz + .34], [tx, tz + .12], [tx + .2 * ca, tz + .2 * sa], [tx, tz - .12], [kx - .1, kz - .34]], .3, -1.2, A.wingD, 0, 0, s);
-      F.sph(.45, 10, 8, s * kx, -.3, kz, A.wingL, 0, 1, 1); });
-  }
-  F.rbox(2.6, 1.0, 5, .3, 2, 0, -1.5, -.4, A.wingL);                     // bomb bay
-  F.both(s => F.box(1.2, .5, 4.4, s * .7, -2.05, -.4, A.wingD, 0, 0, s * .4)); // its doors, ajar
-  F.both(s => { for (const dz of [-1.6, 1.0]) { F.cyl(.5, .6, 2.4, 12, s * 2.2, .3, dz - 2.6, A.wingD, 0, PI / 2); F.cyl(.42, .42, .3, 12, s * 2.2, .3, dz - 3.95, C.glow, 0, PI / 2, 0, 0, false, .9); } }); // four engines
-  F.box(1.2, .08, 3.0, 0, 1.5, -.4, C.team, 1);                           // dorsal stripe (team)
+  // a spider: a swollen abdomen (the bomb bay) behind a small armoured head, eight arched leg-spars, four engines astern
+  F.hull([[-6.4, .5, .4, .1], [-5, 2.0, 1.3, .15], [-2, 2.7, 1.7, .1], [.6, 2.1, 1.35, 0], [2.0, 1.1, .8, 0]], 14, 0, 0, 0, A.wing);          // abdomen
+  F.hull([[1.6, .9, .7, .1], [3.0, 1.55, 1.0, .2], [4.6, 1.25, .85, .1], [5.9, .4, .3, -.15]], 12, 0, 0, 0, A.wingD);                         // head
+  F.hull([[3.4, .5, .22, 1.05], [4.3, .62, .3, .95], [5.2, .3, .14, .6]], 10, 0, 0, 0, A.canopy, 0, .4);                                      // canopy
+  F.both(s => { F.sph(.2, 8, 6, s * .75, .5, 5.2, A.canopy, 0, 1, 1, .6); F.cyl(.06, .06, 1.6, 8, s * .45, -.4, 6.2, C.cannon, 0, PI / 2); }); // sensor eyes, nose guns
+  for (let i = 0; i < 4; i++) { const a = .75 - i * .5, z0 = 2.4 - i * 1.5, Ln = i === 1 || i === 2 ? 9.5 : 8, ca = Math.cos(a), sa = Math.sin(a);   // legs fan from fore to aft
+    F.both(s => { const hip = [s * 1.5, .3, z0], knee = [s * (1.5 + Ln * .5 * ca), 1.5, z0 + Ln * .5 * sa], tip = [s * (1.5 + Ln * ca), -1.6, z0 + Ln * sa];
+      F.limb(hip, knee, .38, .26, 8, A.wingL); F.sph(.34, 8, 6, knee[0], knee[1], knee[2], A.wingD); F.limb(knee, tip, .24, .05, 8, A.wing);
+      if (i === 1) F.sph(.22, 8, 6, knee[0], knee[1] + .3, knee[2], C.team, 1, .6, 1.4); }); }                                               // a team marker on the second pair
+  F.hull([[-4.6, 1.2, .5, -1.5], [-1.5, 1.5, .62, -1.65], [1.2, 1.0, .42, -1.35]], 8, 0, 0, 0, A.wingL);                                      // the bomb bay under the belly
+  F.both(s => F.box(1.1, .1, 4.2, s * .8, -2.2, -1.6, A.wingD, 0, 0, 0, s * .5));                                                            // its doors, ajar
+  F.both(s => { for (const [dx, dy] of [[1.0, .55], [2.1, -.1]]) { F.hull([[-7.4, .42, .42, dy], [-6.4, .56, .54, dy], [-4.2, .52, .5, dy], [-3.2, .3, .28, dy]], 12, s * dx, 0, 0, A.wingD); F.cyl(.38, .38, .25, 12, s * dx, dy, -7.45, C.glow, 0, PI / 2, 0, 0, false, .9); } }); // four engines
+  F.hull([[-4.6, .22, .08, 1.82], [-1.5, .34, .1, 1.86], [1.0, .16, .06, 1.42]], 4, 0, 0, 0, C.team, 1);                                      // dorsal stripe (team)
   return F.build();
 }
 
 // Wasp (~12 m): a lighter, needle-nosed fighter with forward-swept wings — the Rim's look
 function wasp() {
   const F = new Fig();
-  F.rbox(1.2, 1.1, 7, .3, 3, 0, 0, 0, A.wingL);
-  F.cyl(.08, .55, 4.2, 10, 0, 0, 5.4, A.wingD, 0, PI / 2);               // needle nose
-  F.sph(.5, 12, 8, 0, .6, 1.4, A.canopy, 0, .7, 1.6, .4);
-  F.both(s => { F.plate([[.6, -1.2], [.6, .6], [5.8, 2.6], [6.4, 2.2], [5.6, .4]], .14, .05, A.wingL, 0, 0, s); F.plate([[5.0, 1.6], [5.8, 2.6], [6.4, 2.2], [5.8, 1.2]], .18, .1, C.team, 1, 0, s); }); // forward-swept wings, team tips
-  F.both(s => { F.box(.1, 1.0, 1.4, s * .5, .8, -3.0, A.wingL, 0, 0, -s * .5); F.cyl(.4, .45, 2.2, 12, s * .8, -.2, -3.2, A.wingD, 0, PI / 2); F.cyl(.34, .34, .3, 12, s * .8, -.2, -4.45, C.glow, 0, PI / 2, 0, 0, false, .9); });
-  F.both(s => F.cyl(.05, .05, 1.4, 8, s * .3, -.3, 4.4, C.cannon, 0, PI / 2));
-  F.cyl(.06, .06, 1.2, 8, 0, -.7, -3.4, C.team, 1, PI / 2);               // tail boom stripe
+  // a needle: a round slim fuselage, forward-swept wings, a V tail, twin engines tight to the body — the Rim's look
+  F.hull([[-4.4, .28, .28, 0], [-2.8, .6, .55, 0], [1.0, .56, .5, 0], [4.2, .3, .27, -.05], [8.2, .02, .02, -.12]], 12, 0, 0, 0, A.wingL);
+  F.hull([[.4, .08, .05, .5], [1.3, .36, .26, .6], [2.5, .34, .24, .55], [3.6, .08, .05, .36]], 10, 0, 0, 0, A.canopy, 0, .4);
+  F.both(s => { F.plate([[.5, -1.4], [.5, .5], [5.8, 2.7], [6.5, 2.3], [5.4, .3]], .1, .04, A.wingL, 0, 0, s); F.plate([[.5, .1], [.5, .5], [5.8, 2.7], [6.0, 2.45]], .16, .08, A.wing, 0, 0, s); F.plate([[5.0, 1.7], [5.8, 2.7], [6.5, 2.3], [5.9, 1.3]], .16, .09, C.team, 1, 0, s); }); // forward-swept wings, team tips
+  F.both(s => { F.hull([[-4.9, .34, .34, -.15], [-4.0, .44, .42, -.15], [-2.0, .42, .4, -.15], [-1.0, .22, .2, -.15]], 12, s * .78, 0, 0, A.wingD); F.cyl(.3, .3, .25, 12, s * .78, -.15, -4.95, C.glow, 0, PI / 2, 0, 0, false, .9);
+    F.hull([[-4.2, .04, .16, .6], [-3.4, .05, .6, .95], [-2.4, .03, .16, .5]], 4, s * .5, 0, 0, C.team, 1); F.cyl(.04, .04, 1.5, 8, s * .26, -.3, 4.6, C.cannon, 0, PI / 2); });
+  F.hull([[-5.6, .03, .03, -.4], [-4.2, .1, .1, -.42], [-3.0, .06, .06, -.4]], 6, 0, 0, 0, C.team, 1);                                        // the sting (team)
   return F.build();
 }
 
 // Drachenjäger (40 m, Solar Republic): headless boxy humanoid, cockpit hunched low between the shoulders, six arms
 // with particle cannons at the elbows and ion cleavers in the lower hands, a spiked backpack; heavy digitigrade legs
 function drachen() {
-  const F = new Fig();
-  F.both(s => {
-    F.rbox(5, 2.4, 9, .6, 3, s * 4, 1.2, .8, A.mechD);                                        // feet
-    F.limb([s * 4, 2, 1], [s * 4.2, 9, -2.5], 2.0, 1.7, 14, A.mech); F.sph(2.3, 14, 10, s * 4.2, 9.2, -2.5, A.mechD); // shin, knee back
-    F.limb([s * 4.2, 9.4, -2.5], [s * 3.4, 17.5, 1.0], 1.9, 2.3, 14, A.mech);                  // thigh forward
-    F.rbox(3.6, 3.2, 1.2, .4, 2, s * 4.4, 13.5, 1.6, A.mechL, 0, 0, .3);                      // knee plate
-  });
-  F.rbox(9, 4, 6, .8, 3, 0, 19, 0, A.mechD);                               // pelvis
-  F.rbox(11, 9, 8, 1.2, 3, 0, 25.5, 0, A.mech);                            // torso
-  F.rbox(16, 4, 9, 1.0, 3, 0, 31, -.5, A.mechL);                           // shoulder yoke, headless
-  F.both(s => F.rbox(5, 2.5, 6, .6, 3, s * 7.5, 33, -.5, C.team, 1, 0, 0, -s * .2)); // shoulder plates (team)
-  F.rbox(5, 2.6, 4, .6, 3, 0, 31.5, 3.2, A.mechD); F.box(3.6, .9, .4, 0, 31.8, 5.2, C.lens, 0, 0, 0, 0, 1.0); // the cockpit hunched low, visor lit
-  F.rbox(8, 7, 3.5, .8, 3, 0, 27, -5.2, A.mechD);                          // backpack
-  for (let i = 0; i < 6; i++) F.cyl(0, .5, 4.5 + (i % 3) * 1.2, 8, -3 + (i % 3) * 3, 31 + (i % 3) * 1.2, -5.2 - (i > 2 ? 1.3 : 0), A.mechL, 0, -.3 * (i > 2 ? 1.4 : 1)); // the spikes
-  // six arms: upper, middle and lower pair; particle cannons at every elbow, ion cleavers in the lowest hands
-  F.both(s => {
-    const arms = [[33, 1.5, -1.2], [29, 2.0, 0.2], [25, 1.4, 1.4]];
-    arms.forEach(([y, dz, tilt], i) => {
-      const sx = s * 8.5 - s * i * .4, ex = s * (12.5 - i * .6), ey = y - 6, ez = dz - 3, hx = s * (12 - i * .6), hy = y - 13, hz = dz + 4;
-      F.sph(1.5, 12, 8, sx, y, dz, A.mechD);                                                    // shoulder
-      F.limb([sx, y, dz], [ex, ey, ez], 1.3, 1.1, 12, A.mech);                                  // upper arm
-      F.sph(1.5, 12, 8, ex, ey, ez, A.mechD);                                                   // elbow
-      F.cyl(.5, .6, 3.6, 10, ex + s * 1.4, ey + .4, ez + 1.4, C.cannon, 0, PI / 2 - .5);        // particle cannon off the elbow
-      F.cyl(.42, .42, .3, 10, ex + s * 1.4, ey + 1.2, ez + 3.0, A.beam, 0, PI / 2 - .5, 0, 0, false, 1.0);
-      F.limb([ex, ey, ez], [hx, hy, hz], 1.1, 1.0, 12, A.mechL);                                // forearm
-      F.rbox(2.2, 2.0, 2.4, .4, 2, hx, hy, hz, A.mechD);                                        // hand
-      if (i === 2) { F.rbox(.5, 9, 3.2, .2, 2, hx, hy - 5, hz + 1.2, A.mechD, 0, .15); F.box(.12, 9.2, .5, hx, hy - 5, hz + 2.85, A.cleaver, 0, .15, 0, 0, 1.0); } // ion cleaver, edge lit
-    });
-  });
+  const F = new Fig(), M = A.mech, MD = A.mechD, ML = A.mechL;
+  // legs: heavy, digitigrade stance; ball joints at hip, knee and ankle; armour over thigh and shin; splayed three-toed feet
+  F.both(s => { const hip = [s * 4.4, 18.5, 0], knee = [s * 5.2, 10.5, 2.2], ank = [s * 5.4, 2.6, -.6];
+    F.sph(2.7, 12, 8, hip[0], hip[1], hip[2], MD); F.limb(hip, knee, 2.4, 1.9, 12, M); F.sph(2.2, 12, 8, knee[0], knee[1], knee[2], MD); F.limb(knee, ank, 1.9, 1.5, 12, M); F.sph(1.8, 10, 8, ank[0], ank[1], ank[2], MD);
+    F.loft([[11.5, 2.9, 2.2, 0, 1.2], [15, 3.3, 2.6, 0, .9], [18.5, 2.6, 2.1, 0, .5]], 8, hip[0] + s * .3, 0, .9, ML);                       // thigh armour
+    F.loft([[3.5, 2.0, 1.6, 0, .9], [7, 2.5, 2.0, 0, 1.6], [10.5, 2.1, 1.7, 0, 2.6]], 8, ank[0], 0, 0, ML);                                  // shin armour
+    F.sph(2.3, 10, 6, knee[0], knee[1] + .3, knee[2] + 1.4, C.team, 1, .9, .6);                                                              // knee cop (team)
+    F.hull([[-3.4, 1.7, .9, 1.0], [-.5, 2.5, 1.5, 1.5], [3.2, 2.2, 1.0, 1.0], [5.0, 1.4, .5, .5]], 8, ank[0], 0, 0, MD);                     // foot
+    for (const t of [-1, 0, 1]) F.hull([[3.6, .7, .5, .55], [5.6, .55, .35, .4], [6.8, .15, .1, .15]], 6, ank[0] + t * 1.3, 0, 0, M); });    // toes
+  // pelvis and torso: eight-sided, chamfered — boxy, as the books have it, but forged, not stacked
+  F.loft([[16.6, 3.6, 2.6], [18.8, 5.6, 3.4], [21, 4.4, 2.9]], 8, 0, 0, 0, MD);
+  F.loft([[20.4, 4.4, 3.0], [23.5, 6.6, 4.3, 0, .3], [28.5, 9.0, 5.2, 0, .6], [31.2, 8.6, 4.8, 0, .4], [32.8, 6.2, 3.6, 0, 0]], 8, 0, 0, 0, M);
+  F.rbox(9.5, 4.2, 1.2, .5, 3, 0, 26.6, 5.2, ML, 0, 0, .12); F.both(s => F.rbox(2.2, 3.0, .5, .2, 2, s * 3.2, 23.2, 4.3, MD, 0, 0, .2));      // glacis plate, abdominal plates
+  F.box(7.0, .5, .3, 0, 25.0, 5.75, C.team, 1, 0, .12);                                                                                     // chest stripe (team)
+  F.rbox(4.6, 2.2, 2.4, .5, 3, 0, 30.2, 4.9, MD); F.box(3.4, .7, .3, 0, 30.4, 6.15, C.lens, 0, 0, 0, 0, 1.0);                                 // the cockpit hunched low between the shoulders, visor lit
+  F.both(s => { F.cyl(.9, .9, .5, 10, s * 5.4, 28.0, 5.6, C.vent, 0, PI / 2); F.cyl(.55, .55, .2, 10, s * 5.4, 28.0, 5.9, C.lens, 0, PI / 2, 0, 0, false, .7); }); // chest emitters
+  // six arms: three a side off a shoulder block; particle cannons at the elbows; the lower pair carry the ion cleavers
+  F.both(s => { F.rbox(4.2, 8.5, 5.4, .8, 3, s * 10.2, 27.2, 0, MD); F.sph(4.0, 14, 8, s * 10.6, 31.6, 0, C.team, 1, .5, 1.05); F.sph(4.2, 14, 8, s * 10.6, 31.0, 0, ML, 0, .22, 1.08); // shoulder block, pauldron (team), rim
+    const arms = [[30.0, 15.5, 21.5, 6, 18.5, 14.5, 11.5], [27.0, 15.0, 18.0, 3.5, 16.5, 10.5, 9.5], [24.2, 13.5, 14.5, 1, 14.5, 6.5, 6.5]];   // [shoulder y, elbow x y z, hand x y z]
+    arms.forEach(([sy, ex, ey, ez, hx, hy, hz], i) => { const sh = [s * 11.8, sy, 0], el = [s * ex, ey, ez], hd = [s * hx, hy, hz];
+      F.sph(1.5, 10, 6, sh[0], sh[1], sh[2], M); F.limb(sh, el, 1.3, 1.05, 10, M); F.sph(1.35, 10, 8, el[0], el[1], el[2], MD); F.limb(el, hd, 1.05, .85, 10, ML);
+      F.cyl(.6, .75, 3.6, 10, el[0] + s * 1.0, el[1] + .4, el[2] + 1.4, C.cannon, 0, PI / 2); F.cyl(.42, .42, .3, 10, el[0] + s * 1.0, el[1] + .4, el[2] + 3.3, A.beam, 0, PI / 2, 0, 0, false, 1.0); // particle cannon on the elbow, lit
+      F.rbox(1.7, 1.7, 1.9, .4, 2, hd[0], hd[1], hd[2], MD);                                                                                // the fist
+      if (i === 2) { F.bar([hd[0], hd[1], hd[2] + .6], [hd[0], hd[1] - 1.5, hd[2] + 12.5], .34, 2.4, A.cleaver); F.bar([hd[0], hd[1] - 1.25, hd[2] + .9], [hd[0], hd[1] - 2.75, hd[2] + 12.6], .12, .3, A.beam, 0, 1.0); F.bar([hd[0], hd[1] + .9, hd[2] - 1.6], [hd[0], hd[1], hd[2] + .8], .5, .7, MD); } }); }); // ion cleaver: blade, lit edge, grip
+  // the spiked backpack
+  F.loft([[21.5, 4.6, 2.4, 0, -6.2], [26, 5.6, 3.0, 0, -6.8], [31.5, 4.8, 2.5, 0, -6.4]], 8, 0, 0, 0, MD);
+  for (let i = 0; i < 7; i++) { const x = (i - 3) * 1.5, h = 6.5 - Math.abs(i - 3) * 1.1; F.cyl(0, .5, h, 6, x, 32.4 + h / 2, -6.6 - Math.abs(i - 3) * .15, ML, 0, -.22); }
+  F.both(s => { F.cyl(.9, 1.1, 3, 10, s * 2.4, 22.0, -8.6, C.vent, 0, .5); F.cyl(.7, .7, .3, 10, s * 2.4, 20.75, -9.3, C.exhaust, 0, .5, 0, 0, false, .8); });   // exhausts, lit
   return F.build();
 }
 
 // Titan (60 m, Society Remnant): four legs, three arms, three main cannons (one the gravity gun), a disc cockpit
 function titan() {
-  const F = new Fig();
-  const legs = [[7, 6], [-7, 6], [8, -6], [-8, -6]];
-  for (const [lx, lz] of legs) { const sx = Math.sign(lx), sz = Math.sign(lz);
-    F.rbox(5, 2.5, 6, .6, 3, lx * 1.9, 1.25, lz * 2.2, A.remnD);                                                   // foot
-    F.limb([lx * 1.9, 2, lz * 2.2], [lx * 2.1, 14, lz * 1.9], 1.9, 1.6, 14, A.remn); F.sph(2.2, 14, 10, lx * 2.1, 14.2, lz * 1.9, A.remnD); // shin, knee out
-    F.limb([lx * 2.1, 14.4, lz * 1.9], [lx, 24, lz], 1.8, 2.2, 14, A.remn);                                       // thigh in to the hips
-    F.rbox(3.4, 3, 1.4, .4, 2, lx * 2.3, 9, lz * 2.3 + sz * .6, A.remnL, 0, 0, sz * .3, 0);                        // shin plate
-  }
-  F.rbox(20, 6, 16, 1.5, 3, 0, 26, 0, A.remnD);                            // hip ring
-  F.rbox(14, 12, 12, 1.5, 3, 0, 35, 0, A.remn);                            // torso
-  F.rbox(24, 5, 11, 1.2, 3, 0, 42, 0, A.remnL);                            // shoulder yoke
-  F.both(s => F.rbox(7, 3, 8, .8, 3, s * 10, 44.5, 0, C.team, 1, 0, 0, -s * .2)); // shoulder plates (team)
-  F.cyl(7.5, 6, 2.4, 24, 0, 46.5, 1.5, A.remnD); F.cyl(7.6, 7.6, .6, 24, 0, 47.4, 1.5, C.lens, 0, 0, 0, 0, true, .8); F.sph(5.4, 20, 10, 0, 47.6, 1.5, A.remn, 0, .35, 1); // the disc cockpit: lit rim, low dome
-  F.cyl(2.2, 2.2, 1.4, 16, 0, 49.1, 1.5, A.remnL);
-  // three arms: two at the shoulders with main cannons, the third from the chest with the gravity gun
-  F.both(s => { F.sph(2.4, 12, 8, s * 12, 42, 0, A.remnD); F.limb([s * 12, 42, 0], [s * 15, 34, -2], 2.0, 1.7, 14, A.remn); F.sph(2.2, 12, 8, s * 15, 34, -2, A.remnD);
-    F.limb([s * 15, 34, -2], [s * 14, 30, 7], 1.8, 2.0, 14, A.remnL); F.cyl(.9, 1.1, 14, 14, s * 14, 29, 14, C.cannon, 0, PI / 2); F.cyl(1.3, 1.3, 1.2, 14, s * 14, 29, 20.5, A.remnD, 0, PI / 2); }); // main cannons
-  F.sph(2.6, 12, 8, 0, 36, 6, A.remnD); F.limb([0, 36, 6], [0, 31, 12], 2.2, 2.0, 14, A.remn); F.sph(2.4, 12, 8, 0, 31, 12, A.remnD);
-  F.cyl(2.4, 1.6, 10, 18, 0, 31, 18, A.remnL, 0, PI / 2); F.cyl(3.2, 2.4, 2.4, 18, 0, 31, 23.5, A.remnD, 0, PI / 2); F.cyl(2.0, 2.0, .6, 18, 0, 31, 24.8, A.beam, 0, PI / 2, 0, 0, false, 1.0); // the gravity gun, muzzle lit
-  for (let i = 0; i < 4; i++) F.cyl(3.4, 3.4, .5, 18, 0, 31, 14 + i * 2.6, A.remnD, 0, PI / 2, 0, 0, true);     // its coil rings
-  const g = F.build(); g.scale(1.2, 1.2, 1.2); g.computeBoundingBox(); g.computeBoundingSphere(); return g;   // 60 m to the cockpit
+  const F = new Fig(), M = A.remn, MD = A.remnD, ML = A.remnL, G = C.gilt;
+  // four legs, each arched high off the hull and planted wide; a ball at every joint, a broad pad for a foot
+  for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) { const hip = [sx * 7.5, 33, sz * 6], knee = [sx * 17, 41, sz * 14], ank = [sx * 21, 4, sz * 18];
+    F.sph(3.4, 12, 8, hip[0], hip[1], hip[2], MD); F.limb(hip, knee, 2.9, 2.3, 12, M); F.sph(3.0, 12, 8, knee[0], knee[1], knee[2], MD); F.limb(knee, ank, 2.4, 1.6, 12, M);
+    F.loft([[12, 2.3, 2.3], [22, 3.2, 3.2], [33, 2.9, 2.9]], 8, knee[0] + sx * 2.6, 0, knee[2] + sz * 2.6, ML);                              // greave
+    F.sph(2.2, 10, 8, ank[0], ank[1], ank[2], MD); F.loft([[0, 5.2, 5.2], [1.6, 5.6, 5.6], [3.4, 3.2, 3.2]], 12, ank[0], 0, ank[2], MD);     // ankle, foot pad
+    F.sph(3.2, 10, 6, knee[0], knee[1] + 1, knee[2], C.team, 1, .6, 1); }                                                                    // knee cap (team)
+  // the hull: a smooth barrel, a skirt of armour below, a gorget above
+  F.loft([[27, 6, 5.5], [31, 10.5, 9], [38, 12, 10], [44, 10.5, 9], [48, 6.5, 6]], 16, 0, 0, 0, M);
+  F.loft([[26, 4, 4], [28.5, 8.5, 7.5], [30, 9.5, 8.2]], 8, 0, 0, 0, MD); F.cyl(11.2, 11.6, 1.2, 16, 0, 41.5, 0, G, 0, 0, 0, 0, true);           // skirt, a gilt band (open)
+  F.rbox(9, 7, 1.6, .6, 3, 0, 37, 9.6, ML, 0, 0, .08); F.box(6, .8, .4, 0, 39.2, 10.5, C.team, 1, 0, .08);                                      // breastplate, team bar
+  // the disc cockpit, alien and lit at the rim, on a short neck
+  F.cyl(3, 4, 3, 12, 0, 49.5, 0, MD); F.loft([[50.5, 3.5, 3.5], [52.2, 10, 10], [53.4, 11, 11], [54.8, 7, 7], [56, 2.2, 2.2]], 20, 0, 0, 0, ML);
+  F.cyl(11.15, 11.15, .5, 20, 0, 53.3, 0, C.lens, 0, 0, 0, 0, true, 1.0); F.sph(2.2, 12, 8, 0, 55.6, 0, A.canopy, 0, .5, 1, .5);                 // lit rim, sensor dome
+  // three arms: a cannon arm on each shoulder, and the gravity gun slung beneath on the third
+  F.both(s => { const sh = [s * 12.5, 43, 0], el = [s * 18, 37, 7], hd = [s * 17, 34, 16];
+    F.sph(4.2, 14, 8, sh[0], sh[1] + 1.4, sh[2], C.team, 1, .6, 1.05); F.sph(3.2, 12, 8, sh[0], sh[1], sh[2], MD); F.limb(sh, el, 2.4, 2.0, 12, M); F.sph(2.4, 12, 8, el[0], el[1], el[2], MD); F.limb(el, hd, 2.0, 1.8, 12, ML);
+    F.cyl(1.5, 1.8, 16, 14, hd[0], hd[1], hd[2] + 7, C.cannon, 0, PI / 2); F.cyl(2.2, 2.2, 3, 14, hd[0], hd[1], hd[2] + .5, MD, 0, PI / 2); F.cyl(1.9, 1.6, 1.6, 14, hd[0], hd[1], hd[2] + 15.4, MD, 0, PI / 2); }); // main cannon: breech, barrel, muzzle
+  { const sh = [0, 29, 6], el = [0, 25, 13], hd = [0, 27, 20]; F.sph(2.6, 12, 8, sh[0], sh[1], sh[2], MD); F.limb(sh, el, 2.0, 1.7, 12, M); F.sph(2.0, 12, 8, el[0], el[1], el[2], MD); F.limb(el, hd, 1.7, 1.6, 12, ML);
+    F.cyl(2.6, 3.0, 5, 14, 0, 27, 22.5, MD, 0, PI / 2); F.cyl(1.2, 1.2, 14, 12, 0, 27, 31, C.cannon, 0, PI / 2);                               // the gravity gun: a fat breech, a core,
+    for (let i = 0; i < 5; i++) F.cyl(2.3 - i * .12, 2.3 - i * .12, .7, 14, 0, 27, 26 + i * 2.4, i % 2 ? G : ML, 0, PI / 2, 0, 0, true);       // coil rings along it,
+    F.sph(1.7, 12, 8, 0, 27, 38.4, A.beam, 0, 1, 1, 1.0); }                                                                                 // and the lit lens
+  F.both(s => { F.cyl(1.2, 1.5, 4, 10, s * 5, 40, -10, C.vent, 0, -.5); F.cyl(.9, .9, .3, 10, s * 5, 41.8, -11, C.exhaust, 0, -.5, 0, 0, false, .8); });   // exhaust stacks
+  return F.build();
 }
 
 // HoverTank (~12 m): a low hover hull on a dark skirt, grav emitters beneath, a turret with a long gun
@@ -775,7 +781,7 @@ export const CORPSE_KINDS = ['corpse', 'corpse_obs', 'corpse_gold', 'corpse_shel
 export const corpseOf = kind => kind === 'obs' ? 'corpse_obs' : kind === 'gold' || kind === 'lead' ? 'corpse_gold' : kind === 'shell' ? 'corpse_shell' : 'corpse';
 export const storkGeo = () => figureGeo('stork');
 export const triCount = kind => figureGeo(kind).userData.tris;
-export const BUDGET = { inf: 4500, rail: 4500, obs: 5000, gold: 5000, lead: 5500, shell: 6000, pod: 6000, aa: 6000, corpse: 500, corpse_obs: 700, corpse_gold: 700, corpse_shell: 800, stork: 15000, rip: 4000, riplead: 4500, thunder: 8000, wasp: 4000, drachen: 20000, titan: 24000, hover: 6000, spider: 8000, bike: 3000, drop: 2000, standard: 2000 };
+export const BUDGET = { inf: 5000, rail: 5000, obs: 5000, gold: 5000, lead: 5500, shell: 6000, pod: 6000, aa: 6000, corpse: 500, corpse_obs: 700, corpse_gold: 700, corpse_shell: 800, stork: 15000, rip: 4000, riplead: 4500, thunder: 8000, wasp: 4000, drachen: 20000, titan: 24000, hover: 6000, spider: 8000, bike: 3000, drop: 2000, standard: 2000 };
 // kinds that exist as models but have no unit type in ground.js yet (section B of the unit list)
 export const PLANNED = ['rip', 'riplead', 'thunder', 'wasp', 'drachen', 'titan', 'hover', 'spider', 'bike'];
 
