@@ -379,7 +379,7 @@ export function drawDying(meshes, cnt, t, corpse) {
   for (let j = DY.length - 1; j >= 0; j--) {
     const d = DY[j], k = (t - d.t0) / FALL, im = meshes[d.kind], R = RIG[d.kind];
     if (k >= 1 || k < 0 || !im || cnt[d.kind] >= im.instanceMatrix.count) {
-      const fw = 1.1 * d.scale * (R.leg / .92); corpse([d.x + Math.sin(d.yaw) * fw, d.y, d.z + Math.cos(d.yaw) * fw, d.yaw], d.team); DY.splice(j, 1); continue; }
+      const fw = 1.1 * d.scale * (R.leg / .92); corpse([d.x + Math.sin(d.yaw) * fw, d.y, d.z + Math.cos(d.yaw) * fw, d.yaw], d.team, d.kind); DY.splice(j, 1); continue; } // (kind: so each body leaves its own corpse model)
     const D = im.userData.anim, i = cnt[d.kind]++, q = Q; q.fill(0);
     const hit = Math.sin(PI * clamp(k / .16, 0, 1)) * (1 - clamp(k / .16, 0, 1) * .3), crumple = ease(clamp((k - .08) / .3, 0, 1)), top = clamp((k - .25) / .75, 0, 1), fall = top * top * (PI / 2), straight = ease(clamp(top * 1.3, 0, 1));
     const sd = d.h < .5 ? -1 : 1, F = -.55 * crumple * (1 - straight), K = 1.2 * crumple * (1 - straight);

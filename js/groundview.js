@@ -8,7 +8,7 @@ import { G, MAP, NH, CH, UT, heightAt, footprint, radiusOf, fighting, live } fro
 import { FACTIONS, NEUTRAL_C } from './data.js';
 import { S } from './state.js';
 import { sfx, initAudio, music } from './audio.js';
-import { figureGeo, figureMaterial, corpseGeo, storkGeo, lodGeo, KINDS, MUZZLE, cityGeo, staticMaterial, cityMaterial } from './groundmodels.js';
+import { figureGeo, figureMaterial, corpseGeo, storkGeo, lodGeo, KINDS, MUZZLE, cityGeo, staticMaterial, cityMaterial, CORPSE_KINDS, corpseOf } from './groundmodels.js';
 import { animMesh, animFigure, animEnd, animReset, dyingAdd, drawDying, settle } from './groundanim.js'; // the figures' motion (animator chat)
 import * as GFX from './groundfx.js'; // textures and effects: the terrain surface, water, sky dome
 import * as PX from './groundpunch.js'; // the fighting: tracer ribbons, muzzle flashes, fireballs, smoke, shake
@@ -187,8 +187,9 @@ function buildScene() {
   // setColorAt seeds the instanceColor the figure material reads
   const mkI = (g, k, n, shadow) => { const im = new THREE.InstancedMesh(g, figureMaterial(k), n); im.count = 0; im.castShadow = shadow; im.frustumCulled = false; im.instanceMatrix.setUsage(THREE.DynamicDrawUsage); im.setColorAt(0, WHITE); sc.add(im); return im; };
   V.inst = {}; V.lo = {}; animReset(); for (const k in geo) { V.inst[k] = mkI(geo[k], k, Math.max(1, cap[k] + 16), true); animMesh(V.inst[k], k); V.lo[k] = mkI(lodGeo(k), k, Math.max(1, cap[k] + 16), false); } // near figures are posed on the GPU (groundanim.js)
-  V.corpse = mkI(corpseGeo(), 'corpse', CORPSES, false); V.corpseLo = mkI(lodGeo('corpse'), 'corpse', CORPSES, false);
-  V.corpL = new Float32Array(CORPSES * 5); V.corpN = 0; V.corpDirty = true; V.corpCam = null; V.corpT = 0;
+  // the fallen: one mesh pair per kind of body (model builder's: CORPSE_KINDS / corpseOf in groundmodels.js); Grays share the first
+  V.corpses = {}; for (const ck of CORPSE_KINDS) V.corpses[ck] = [mkI(figureGeo(ck), 'corpse', ck === 'corpse' ? CORPSES : CORPSES >> 2, false), mkI(lodGeo(ck), 'corpse', ck === 'corpse' ? CORPSES : CORPSES >> 2, false)];
+  V.corpL = new Float32Array(CORPSES * 6); V.corpN = 0; V.corpDirty = true; V.corpCam = null; V.corpT = 0;
   // shots, flashes, fire and smoke, drop-pod trails: groundpunch's batches; then the bloom over the whole frame
   PX.init(sc); buildPost();
   V.stork = new THREE.InstancedMesh(storkGeo(), figureMaterial('stork'), 96); V.stork.count = 0; V.stork.setColorAt(0, WHITE); V.stork.frustumCulled = false; V.stork.castShadow = true; sc.add(V.stork);
@@ -254,10 +255,10 @@ function drawUnits(dt) {
       imk.setMatrixAt(C0[kk], tmpM); imk.setColorAt(C0[kk], base); if (!far) animFigure(imk, C0[kk], wx, wy, wz, yaw, u, kk, n, h1, VS, t, fv); C0[kk]++; figs.push([wx, wy, wz, yaw, lf]);
     }
     // the fallen stay where they fell
-    if (last.length > figs.length) for (let n = figs.length; n < last.length; n++) if (far || !dyingAdd(last[n], u.team, kd, base.clone(), VS, t)) addCorpse(last[n], u.team); // near, they fall first
+    if (last.length > figs.length) for (let n = figs.length; n < last.length; n++) if (far || !dyingAdd(last[n], u.team, kd, base.clone(), VS, t)) addCorpse(last[n], u.team, false, kd); // near, they fall first
     if (u.gone && !figs.length) V.lastFig.delete(u.id); else V.lastFig.set(u.id, figs);
   }
-  drawDying(V.inst, cnt, t, (f, team) => addCorpse(f, team, true)); animEnd(V.inst);
+  drawDying(V.inst, cnt, t, (f, team, kind) => addCorpse(f, team, true, kind)); animEnd(V.inst);
   for (const [M0, C1] of [[V.inst, cnt], [V.lo, cntL]]) for (const k in M0) { M0[k].count = C1[k]; M0[k].instanceMatrix.needsUpdate = true; if (M0[k].instanceColor) M0[k].instanceColor.needsUpdate = true; }
   drawCorpses(dt);
 }
@@ -322,15 +323,16 @@ function drawCorpses(dt) {
   const cp = V.camera.position, moved = !V.corpCam || hyp(cp.x - V.corpCam.x, cp.y - V.corpCam.y, cp.z - V.corpCam.z) > 40;
   if ((V.corpT -= dt) > 0 && !moved) return; if (!V.corpDirty && !moved) return;
   V.corpT = .5; V.corpDirty = false; V.corpCam = cp.clone();
-  const L = V.corpL, n = Math.min(CORPSES, V.corpN); let a = 0, b = 0;
-  for (let i = 0; i < n; i++) { const o = i * 5, x = L[o], y = L[o + 1], z = L[o + 2], far = hyp(x - cp.x, y - cp.y, z - cp.z) > LOD_D, im = far ? V.corpseLo : V.corpse, j = far ? b++ : a++;
+  const L = V.corpL, n = Math.min(CORPSES, V.corpN), cnt = {}; for (const ck in V.corpses) cnt[ck] = [0, 0];
+  for (let i = 0; i < n; i++) { const o = i * 6, x = L[o], y = L[o + 1], z = L[o + 2], ck = CORPSE_KINDS[L[o + 5]] || 'corpse', far = hyp(x - cp.x, y - cp.y, z - cp.z) > LOD_D ? 1 : 0, im = V.corpses[ck][far];
+    if (cnt[ck][far] >= im.instanceMatrix.count) continue; const j = cnt[ck][far]++;
     tmpV.set(x, y, z); tmpQ.setFromAxisAngle(UP, L[o + 3]); tmpS.set(VS, VS, VS); tmpM.compose(tmpV, tmpQ, tmpS); im.setMatrixAt(j, tmpM);
     tmpC.set((L[o + 4] ? V.colD : V.colA).main).multiplyScalar(.7); im.setColorAt(j, tmpC); }
-  for (const [im, c] of [[V.corpse, a], [V.corpseLo, b]]) { im.count = c; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; }
+  for (const ck in V.corpses) V.corpses[ck].forEach((im, far) => { im.count = cnt[ck][far]; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; });
 }
-function addCorpse(f, team, exact = false) { // exact: where the fall animation laid the figure down
-  const o = (V.corpN % CORPSES) * 5, j = exact ? 0 : 1; V.corpN++; V.corpDirty = true;
-  V.corpL[o] = f[0] + (Math.random() - .5) * j; V.corpL[o + 1] = f[1] + .15; V.corpL[o + 2] = f[2] + (Math.random() - .5) * j; V.corpL[o + 3] = f[3] + (Math.random() - .5) * 2 * j; V.corpL[o + 4] = team;
+function addCorpse(f, team, exact = false, kind = 'inf') { // exact: where the fall animation laid the figure down; kind: whose body it is
+  const o = (V.corpN % CORPSES) * 6, j = exact ? 0 : 1; V.corpN++; V.corpDirty = true;
+  V.corpL[o] = f[0] + (Math.random() - .5) * j; V.corpL[o + 1] = f[1] + .15; V.corpL[o + 2] = f[2] + (Math.random() - .5) * j; V.corpL[o + 3] = f[3] + (Math.random() - .5) * 2 * j; V.corpL[o + 4] = team; V.corpL[o + 5] = Math.max(0, CORPSE_KINDS.indexOf(corpseOf(kind)));
 }
 
 // what each weapon looks like in flight: colour, speed (m/s), streak length (m)

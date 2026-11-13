@@ -126,25 +126,35 @@ class Fig {
 // shoulders to a narrow waist over a pelvis, a neck, a rounded skull. Armour goes on over it in each kind's builder.
 function human(F, J, D, P) {
   const { thigh, knee, shin, ankle, upper, elbow, fore, hand } = D, s = D.seg || 10;
+  // joint caps: a ball centred exactly on every pivot, a little wider than the limb ends that meet there, so when the rig
+  // bends a knee to 100° or whips a forearm the flat ends of the two limbs stay inside the ball and no gap opens. The
+  // limb ends are tapered to .88 of the ball so their rims never poke out. (A ball centred on the pivot looks the same
+  // whichever bone it rides.)
+  const KB = knee * 1.15, EB = elbow * 1.15, HB = thigh * 1.06, AB = ankle * 1.2, SB = upper * 1.28;
   for (const side of ['R', 'L']) {
     const hip = J['hip' + side], kn = J['knee' + side], an = J['ank' + side], sh = J['sh' + side], el = J['el' + side], hd = J['hand' + side];
-    // leg: thigh (quad bulge high), knee ball, shin with a calf, ankle ball
-    F.limb(hip, kn, thigh, knee * .95, s, P.thigh); F.sph(thigh * 1.08, 8, 6, hip[0], hip[1] - (hip[1] - kn[1]) * .22, hip[2] + (kn[2] - hip[2]) * .22, P.thigh, 0, 1.3, 1);
-    F.sph(knee, 8, 6, kn[0], kn[1], kn[2], P.knee);
-    F.limb(kn, an, shin, ankle, s, P.shin); F.sph(shin * 1.12, 8, 6, kn[0], kn[1] - (kn[1] - an[1]) * .3, kn[2] - (kn[2] - an[2]) * .3 - shin * .25, P.shin, 0, 1.5, 1);
-    // arm: deltoid at the shoulder, upper arm, elbow ball, forearm (thicker near the elbow), hand
+    // leg: hip ball, thigh (quad bulge high), knee ball, shin with a calf, ankle ball
+    F.sph(HB, 8, 6, hip[0], hip[1], hip[2], P.thigh);
+    F.limb(hip, kn, thigh, KB * .88, s, P.thigh); F.sph(thigh * 1.08, 8, 6, hip[0], hip[1] - (hip[1] - kn[1]) * .22, hip[2] + (kn[2] - hip[2]) * .22, P.thigh, 0, 1.3, 1);
+    F.sph(KB, 8, 6, kn[0], kn[1], kn[2], P.knee);
+    F.limb(kn, an, KB * .88, AB * .88, s, P.shin); F.sph(shin * 1.12, 8, 6, kn[0], kn[1] - (kn[1] - an[1]) * .3, kn[2] - (kn[2] - an[2]) * .3 - shin * .25, P.shin, 0, 1.5, 1);
+    F.sph(AB, 8, 6, an[0], an[1], an[2], P.shin);
+    // arm: deltoid ball on the shoulder pivot, upper arm, elbow ball, forearm (thicker near the elbow), hand
     if (sh && el && hd) {
-      F.sph(upper * 1.25, 8, 6, sh[0], sh[1], sh[2], P.upper);
-      F.limb(sh, el, upper, elbow * .9, s, P.upper); F.sph(elbow, 8, 6, el[0], el[1], el[2], P.elbow);
-      F.limb(el, hd, fore * 1.05, fore * .8, s, P.fore);
+      F.sph(SB, 8, 6, sh[0], sh[1], sh[2], P.upper);
+      F.limb(sh, el, upper, EB * .88, s, P.upper); F.sph(EB, 8, 6, el[0], el[1], el[2], P.elbow);
+      F.limb(el, hd, EB * .88, fore * .8, s, P.fore);
       if (hand) F.sph(hand, 8, 6, hd[0], hd[1], hd[2], P.hand, 0, .8, 1.3);
     }
   }
-  // pelvis and torso: one shell each, lofted through the rig's heights
+  // pelvis and torso: one shell each, lofted through the rig's heights; a flattened ball on the waist pivot and one on
+  // the neck pivot fill the gap when the spine bends or the head turns
   const w = J.waist[1], nk = J.neck[1], hipY = J.hipR[1], hw = D.hips, ww = D.waist, rw = D.ribs, cw = D.chest, sw = D.shoulders, dp = D.depth;
   F.loft([[hipY - .06, hw * .85, dp * .9], [hipY + .04, hw, dp], [w, ww * 1.02, dp * .92]], 12, 0, 0, 0, P.pelvis);
+  F.sph(ww * .98, 10, 6, 0, w, 0, P.pelvis, 0, .55, dp * .9 / ww);
   const ch = w + (nk - w) * .62, sb = nk - (nk - w) * .12;
   F.loft([[w - .005, ww, dp * .9], [w + (ch - w) * .5, rw, dp * .98, 0, .01], [ch, cw, dp * 1.05, 0, .02], [sb, sw, dp * .95, 0, .01], [nk - .01, sw * .72, dp * .7, 0, .0]], 12, 0, 0, 0, P.chest);
+  F.sph(D.neck * 1.35, 8, 6, 0, nk, 0, P.neck);
   F.cyl(D.neck, D.neck * 1.1, (J.head - nk) * .7, 10, 0, nk + (J.head - nk) * .3, 0, P.neck);
   F.sph(D.head, 14, 10, 0, J.head, 0, P.head, 0, 1.12, 1.02);
   return F;
@@ -326,14 +336,43 @@ function sarissa() {
 }
 
 // ---------------------------------------------------------------- the fallen (≤ 300 tris)
-function corpse() {
-  const F = new Fig();
-  F.box(.42, .2, .6, 0, .1, 0, C.duroD);                          // torso, face down
-  F.sph(.11, 8, 6, 0, .09, .42, '#2a2c30');                      // helmet
-  F.box(.17, .08, .24, .25, .06, .05, C.team, 1);                 // one pauldron showing the colour
-  F.limb([.12, .07, -.25], [.12, .07, -.95], .07, .06, 6, C.duroD); F.limb([-.14, .07, -.2], [-.3, .07, -.78], .07, .06, 6, C.duroD); // legs
-  F.limb([-.3, .05, .1], [-.6, .05, .35], .05, .04, 6, C.duroD);  // an arm flung out
-  F.box(.28, .16, .4, 0, .25, -.05, C.pack);                      // the pack on top
+// the fallen (origin at the hips, lying face down along +Z, head forward, feet at -leg): one for each kind of body
+// L: leg length, hip half-width, limb radii, torso half-widths, head radius. Low-poly: thousands lie on a field at once.
+function fallenBody(F, L, P) {
+  const { leg, hip, thigh, shin, upper, fore, waist, chest, head, hh } = L, y = hh;           // hh: how thick the body lies (its half height)
+  F.both(s => { const sp = s * (hip + .06), kz = -leg * .5, fz = -leg * .95; F.limb([s * hip, y, 0], [sp, y * .9, kz], thigh, thigh * .85, 6, P.thigh); F.sph(thigh * .95, 6, 4, sp, y * .9, kz, P.thigh); F.limb([sp, y * .9, kz], [sp * 1.3, y * .8, fz], thigh * .85, shin * .8, 6, P.shin); F.box(shin * 2.2, shin * 1.6, shin * 3, sp * 1.3, y * .75, fz - shin, P.boot); }); // legs, one knee a little bent
+  F.hull([[-.08, hip * 1.1, y * .9, y * .9], [.18, waist, y, y], [.5, chest, y * 1.05, y * 1.05], [.72, chest * .9, y, y]], 8, 0, 0, 0, P.chest);            // the torso, face down
+  F.sph(head, 7, 5, 0, head * .9, .72 + head * 1.1, P.head, 0, 1, 1.1);                                                                                           // the head, turned
+  F.limb([chest * .9, y, .62], [chest * 2.6, head * .6, .92], upper, fore * .9, 5, P.arm); F.limb([-chest * .9, y, .6], [-chest * 1.9, head * .5, .1], upper, fore * .9, 5, P.arm); // arms flung out and back
+  return F;
+}
+function corpse() {   // a Gray
+  const F = fallenBody(new Fig(), { leg: .95, hip: .13, thigh: .085, shin: .066, upper: .055, fore: .05, waist: .15, chest: .21, head: .11, hh: .12 }, { thigh: C.duro, shin: C.duro, boot: C.boot, chest: C.duro, head: C.duroD, arm: C.duro });
+  F.sph(.1, 6, 4, .26, .18, .6, C.team, 1, .5, 1.1);                                                                   // one pauldron showing the colour
+  F.box(.3, .14, .34, 0, .26, .36, C.pack);                                                                   // the pack on top
+  F.cyl(.02, .02, .7, 6, -.5, .05, .45, C.gun, 0, PI / 2, 0, .3);                                                       // the dropped scorcher
+  return F.build();
+}
+function corpseObs() {   // an Obsidian: a long body, fur mantle up, the axe beside the hand
+  const F = fallenBody(new Fig(), { leg: 1.3, hip: .19, thigh: .145, shin: .115, upper: .14, fore: .12, waist: .27, chest: .39, head: .17, hh: .22 }, { thigh: C.obs, shin: C.obs, boot: C.obsD, chest: C.obsL, head: C.obs, arm: C.skin });
+  F.hull([[.5, .46, .14, .36], [.8, .5, .12, .34]], 8, 0, 0, 0, C.fur);                                                 // fur mantle
+  F.sph(.2, 8, 5, .5, .3, .62, C.team, 1, .5, 1.1); F.cyl(0, .04, .26, 5, .62, .34, .62, C.bone, 0, 0, -.5);              // pauldron (team) and tusk
+  F.limb([.9, .08, 1.6], [1.1, .08, -.6], .03, .03, 6, C.haft); F.rbox(.08, .3, .5, .02, 2, 1.05, .16, 1.3, C.obsD, 0, 0, 0, PI / 2); // the pulseAxe, fallen beside
+  return F.build();
+}
+function corpseGold() {   // a Gold: the cape spread flat over the body, the razor gone slack
+  const F = fallenBody(new Fig(), { leg: 1.0, hip: .12, thigh: .08, shin: .062, upper: .055, fore: .05, waist: .14, chest: .21, head: .11, hh: .12 }, { thigh: C.gilt, shin: C.gilt, boot: C.giltD, chest: C.gilt, head: C.gilt, arm: C.gilt });
+  F.plate([[-.3, .9], [.32, .9], [.4, -.2], [.1, -.6], [-.35, -.3]], .03, .27, C.team, 1);                                   // the cape, spread on the ground
+  F.sph(.1, 8, 5, .25, .19, .6, C.giltL, 0, .5, 1.1); F.rbox(.08, .1, .22, .02, 2, 0, .16, .95, C.giltL);                 // a pauldron rim, the lion-mane crown
+  F.bar([.6, .04, 1.0], [1.3, .04, 1.6], .03, .03, C.razor, 0, .3);                                                      // the razor, dim
+  return F.build();
+}
+function corpseShell() {   // a StarShell: the suit down on its face, pack and thrusters uppermost
+  const F = fallenBody(new Fig(), { leg: 1.8, hip: .3, thigh: .2, shin: .18, upper: .16, fore: .18, waist: .36, chest: .55, head: .21, hh: .32 }, { thigh: C.shellL, shin: C.shell, boot: C.shellD, chest: C.shellL, head: C.shellD, arm: C.shell });
+  F.hull([[.1, .4, .18, .6], [.6, .44, .2, .64], [1.0, .38, .16, .6]], 8, 0, 0, 0, C.shellD);                              // the pack on top
+  F.both(s => F.cyl(.11, .13, .5, 8, s * .25, .62, .3, C.vent, 0, PI / 2));                                                // thrusters, dark
+  F.both(s => F.sph(.34, 8, 5, s * .64, .5, .95, C.team, 1, .5, 1.1));                                                     // pauldrons (team)
+  F.cyl(.13, .13, 1.0, 8, 1.3, .14, 1.5, C.cannon, 0, PI / 2, 0, .4);                                                     // the pulseCannon arm, out
   return F.build();
 }
 
@@ -726,14 +765,17 @@ export function cityMaterial(world) {
 }
 
 // ---------------------------------------------------------------- public
-const BUILD = { inf: legionnaire, rail: railman, obs: obsidian, gold: peerless, lead: legate, shell: starshell, pod: gravpod, aa: sarissa, corpse, stork,
+const BUILD = { inf: legionnaire, rail: railman, obs: obsidian, gold: peerless, lead: legate, shell: starshell, pod: gravpod, aa: sarissa, corpse, corpse_obs: corpseObs, corpse_gold: corpseGold, corpse_shell: corpseShell, stork,
   rip: ripwing, riplead: ripwingLead, thunder: thunderwing, wasp, drachen, titan, hover: hovertank, spider: spidertank, bike: gravbike, drop: entryPod, standard };
 const CACHE = {};
 export function figureGeo(kind) { return CACHE[kind] || (CACHE[kind] = BUILD[kind]()); }
 export const corpseGeo = () => figureGeo('corpse');
+// which fallen model each kind leaves: the Grays' for anything without its own (pods and batteries are wrecks for another day)
+export const CORPSE_KINDS = ['corpse', 'corpse_obs', 'corpse_gold', 'corpse_shell'];
+export const corpseOf = kind => kind === 'obs' ? 'corpse_obs' : kind === 'gold' || kind === 'lead' ? 'corpse_gold' : kind === 'shell' ? 'corpse_shell' : 'corpse';
 export const storkGeo = () => figureGeo('stork');
 export const triCount = kind => figureGeo(kind).userData.tris;
-export const BUDGET = { inf: 4500, rail: 4500, obs: 5000, gold: 5000, lead: 5500, shell: 6000, pod: 6000, aa: 6000, corpse: 300, stork: 15000, rip: 4000, riplead: 4500, thunder: 8000, wasp: 4000, drachen: 20000, titan: 24000, hover: 6000, spider: 8000, bike: 3000, drop: 2000, standard: 2000 };
+export const BUDGET = { inf: 4500, rail: 4500, obs: 5000, gold: 5000, lead: 5500, shell: 6000, pod: 6000, aa: 6000, corpse: 500, corpse_obs: 700, corpse_gold: 700, corpse_shell: 800, stork: 15000, rip: 4000, riplead: 4500, thunder: 8000, wasp: 4000, drachen: 20000, titan: 24000, hover: 6000, spider: 8000, bike: 3000, drop: 2000, standard: 2000 };
 // kinds that exist as models but have no unit type in ground.js yet (section B of the unit list)
 export const PLANNED = ['rip', 'riplead', 'thunder', 'wasp', 'drachen', 'titan', 'hover', 'spider', 'bike'];
 
