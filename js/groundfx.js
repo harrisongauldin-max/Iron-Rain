@@ -14,6 +14,15 @@ const T = uniform(0); // the clock, for water and cloud drift
 const sunDirU = uniform(new THREE.Vector3(.3, .8, .5)), coverU = uniform(0), wetU = uniform(0); // wetU: rain on the ground (darker, glossier)
 // per-world ground character, set by the dome: x craters, y dunes, z ice cracks, w sulphur (0..1 each)
 const charU = uniform(new THREE.Vector4(0, 0, 0, 0));
+const flashU = uniform(0); // lightning: the whole sky and ground brighten for a few frames
+// the trodden ground: a map of when each 15 m cell was last walked or driven over; the terrain shader fades it over three minutes
+const TROD_N = 512, trodArr = new Uint16Array(TROD_N * TROD_N), trodTex = new THREE.DataTexture(trodArr, TROD_N, TROD_N, THREE.RedFormat, THREE.HalfFloatType);
+trodTex.magFilter = trodTex.minFilter = THREE.LinearFilter; trodTex.needsUpdate = true; let trodDirty = false;
+const trodT = texture(trodTex);
+function trample(x, y, r, heavy) { const sc = TROD_N / MAP, cx = x * sc, cy = y * sc, rr = Math.max(.6, r * sc), t = THREE.DataUtils.toHalfFloat(T.value + (heavy ? 1000 : 0)); // heavy: StarShells and the like cut deeper; encoded as +1000 s
+  for (let j = Math.max(0, Math.floor(cy - rr)); j <= Math.min(TROD_N - 1, Math.ceil(cy + rr)); j++) for (let i = Math.max(0, Math.floor(cx - rr)); i <= Math.min(TROD_N - 1, Math.ceil(cx + rr)); i++) { if ((i - cx) ** 2 + (j - cy) ** 2 > rr * rr) continue; trodArr[j * TROD_N + i] = t; }
+  trodDirty = true; }
+const trodden = p => { const v = trodT.sample(p.xz.div(MAP)).r, heavy = step(900, v), t0 = v.sub(heavy.mul(1000)), age = T.sub(t0); return vec2(clamp(one.sub(age.div(180)), 0, 1).mul(step(0, age)).mul(step(.5, v)), heavy); };
 const CHAR = { phobos: [1, 0, 0, 0], deimos: [1, 0, 0, 0], luna: [.35, 0, 0, 0], mercury: [.5, .4, 0, 0], mars: [.25, .6, 0, 0], venus: [0, 0, 0, 0], earth: [0, 0, 0, 0], titan: [0, .5, 0, 0],
   europa: [0, 0, 1, 0], ganymede: [.3, 0, .8, 0], callisto: [.6, 0, .4, 0], triton: [.1, 0, .8, 0], rhea: [.5, 0, .5, 0], io: [.2, 0, 0, 1], _ice: [.2, 0, .7, 0] }; // the Sun and the cloud cover, shared by the dome and the ground (the dome sets them)
 let dome = null;
@@ -115,9 +124,14 @@ export function terrainMaterial(M, B) {
     // shell scorches: blackened ground with an ash-pale rim, fading over a minute
     const sk = scorchMask(p).toVar(); c.assign(mix(c, mix(c.mul(.22), vec3(.1, .09, .08), .6), sk.mul(.9)));
     c.mulAssign(one.add(smoothstep(.02, .12, sk).mul(one.sub(smoothstep(.12, .3, sk))).mul(.35)));
+    // trodden ground: where formations have walked the grass is flattened and the soil shows; where they have driven it is cut up and dark; snow goes grey
+    { const tr = trodden(p), k = tr.x.mul(one.sub(mk.y)).mul(near), deep = tr.y;
+      c.assign(mix(c, mix(c.mul(vec3(.72, .64, .55)), c.mul(vec3(.5, .44, .4)), deep), k.mul(float(.8).add(deep.mul(.2)))));
+      c.mulAssign(one.add(mx_noise_float(vec3(p.x.mul(.5), p.z.mul(.5), 3)).mul(.1).mul(k).mul(deep))); } // ruts
     // the clouds' shadows crossing the ground
     c.mulAssign(one.sub(cloudShadow(p).mul(.42)));
     c.mulAssign(one.sub(wetU.mul(.28).mul(one.sub(mk.x.mul(.5))))); // rain darkens the ground, bare soil and pavement most
+    c.addAssign(vec3(.7, .75, .9).mul(flashU).mul(.5)); // lightning on the ground
     return c;
   })();
   m.colorNode = frag;
@@ -227,6 +241,7 @@ export function skyDome(sc, B, world, sunLight) {
       const cv = cloudCover(n).mul(smoothstep(.04, .26, y)).toVar();
       const lit = horV.mul(.9).add(sunV.mul(.2)), dark = mix(horV, zenV, .5).mul(.55), cc = mix(dark, lit, smoothstep(.1, .9, n.add(ca.mul(.15))));
       c.assign(mix(c, cc, cv.mul(.85))); }
+    c.addAssign(vec3(.75, .8, 1).mul(flashU).mul(smoothstep(-.1, .3, y).mul(.8).add(.2))); // lightning lights the whole sky, the clouds most
     return c;
   })();
   dome = new THREE.Mesh(geo, m); dome.renderOrder = -10; dome.frustumCulled = false; sc.add(dome);
@@ -264,7 +279,9 @@ function dustTick(dt, camera) {
   const cx = camera.position.x, cz = camera.position.z, step = G.paused ? 0 : dt * (G.speed || 1);
   if (step > 0) {
     const seaH = G.map.seaH ?? -1;
-    for (const u of G.units) { if (u.gone || u.men <= 0 || u.T.fly) continue; const sp = Math.hypot(u.vx, u.vy); if (sp < .6) continue; if (Math.hypot(u.x - cx, u.y - cz) > 2600) continue;
+    for (const u of G.units) { if (u.gone || u.men <= 0 || u.T.fly) continue; const sp = Math.hypot(u.vx, u.vy); if (sp < .6) continue;
+      if (Math.random() < step * 3) trample(u.x, u.y, Math.max(5, Math.min(40, Math.sqrt(u.men) * 1.2)) * .8, u.T.hp >= 5); // the ground remembers them, near the camera or not
+      if (Math.hypot(u.x - cx, u.y - cz) > 2600) continue; if (S.gx && S.gx.dust === false) continue;
       const rate = Math.min(1, u.men / 300) * (2 + sp * .6) * step; if (Math.random() > rate) continue;
       const r = Math.max(6, Math.min(40, Math.sqrt(u.men) * 1.2)), a = Math.random() * 6.28, d = Math.sqrt(Math.random()) * r, px = u.x + Math.cos(a) * d, py = u.y + Math.sin(a) * d, hh = heightAt(px, py);
       if (seaH >= 0 && hh < seaH - .3) { puff(px, seaH + .3, py, -u.vx * .4 + (Math.random() - .5) * 2, .3, -u.vy * .4 + (Math.random() - .5) * 2, 1.5 + Math.random() * 2, .8 + Math.random() * .6, [.92, .95, .97], .5); continue; } // wading: foam in the wake
@@ -308,6 +325,7 @@ function wxBatch(W) {
 }
 function weatherInit(sc, world, B) {
   wx = null; if (wxMesh) { wxMesh.parent && wxMesh.parent.remove(wxMesh); wxMesh = null; }
+  if (S.gx && S.gx.weather === false) return; // graphics menu: weather off
   const key = WEATHER[world] ? world : B === BIOME._ice ? '_ice' : null, Wt = _FORCE ? [_FORCE, 1] : key && WEATHER[key]; if (!Wt || Math.random() > Wt[1]) return;
   const W = WX[Wt[0]]; wx = { kind: Wt[0], k: .55 + Math.random() * .45, W, wind: Math.random() * 6.28 };
   wxMesh = wxBatch(W); sc.add(wxMesh); wxP = new Float32Array(W.n * 4); for (let i = 0; i < W.n; i++) { wxP[i * 4] = Math.random(); wxP[i * 4 + 1] = Math.random(); wxP[i * 4 + 2] = Math.random(); wxP[i * 4 + 3] = .5 + Math.random(); }
@@ -368,7 +386,7 @@ function stripBatch(N, frag, blend) {
 }
 const SHAFT_N = 14, SHIM_N = 160; let shims = [];
 function shaftsTick(camera) {
-  const on = S.quality === 'ultra' && dome && dome.parent && coverU.value > 0; if (!on) { if (shaftMesh) shaftMesh.visible = false; return; }
+  const on = (S.quality === 'ultra' || (S.gx && S.gx.cine)) && dome && dome.parent && coverU.value > 0; if (!on) { if (shaftMesh) shaftMesh.visible = false; return; }
   if (!shaftMesh) { shaftMesh = stripBatch(SHAFT_N, vS => Fn(() => { const u = uv(), a = pow(sin(u.y.mul(Math.PI)), 1.5).mul(pow(one.sub(abs(u.x.sub(.5)).mul(2)), 1.8)); return vec4(vec3(1, .95, .85).mul(a.mul(vS.w)), 1); }), THREE.AdditiveBlending); dome.parent.add(shaftMesh); }
   shaftMesh.visible = true; const g = shaftMesh.geometry, P = g.attributes.iP.array, Sz = g.attributes.iS.array;
   camera.getWorldDirection(shaftV); const sd = sunDirU.value, into = Math.max(0, shaftV.dot(sd)); // looking toward the Sun
@@ -393,8 +411,33 @@ function shimmerTick(dt, step) {
   for (const q of shims) { const k = q.life / q.max; P[n * 3] = q.x; P[n * 3 + 1] = q.y; P[n * 3 + 2] = q.z; Sz[n * 4] = q.sz; Sz[n * 4 + 1] = q.sz * 1.6; Sz[n * 4 + 2] = q.sd; Sz[n * 4 + 3] = .08 * Math.min(1, k * 3) * Math.min(1, (1 - k) * 4 + .2); n++; }
   g.instanceCount = n; for (const kk of ['iP', 'iS']) { const a = g.attributes[kk]; a.clearUpdateRanges(); a.addUpdateRange(0, n * a.itemSize); a.needsUpdate = true; }
 }
+// ---------------------------------------------------------------- lightning
+// In rain, every so often a bolt: a jagged chain of bright strips from the cloud base to the ground somewhere ahead of the
+// camera, two flickers, and the whole sky and ground flashing with it (flashU). The sound is audio's; this is the light.
+let boltMesh = null, bolt = null, nextBolt = 0;
+function lightningTick(dt, camera) {
+  if (!wx || wx.kind !== 'rain' || (S.gx && S.gx.weather === false)) { flashU.value = 0; if (boltMesh) boltMesh.visible = false; return; }
+  if (!boltMesh && dome && dome.parent) { boltMesh = stripBatch(24, vS => Fn(() => { const u = uv(), a = pow(one.sub(abs(u.x.sub(.5)).mul(2)), 3); return vec4(vec3(.9, .93, 1).mul(a.mul(vS.w)), 1); }), THREE.AdditiveBlending); dome.parent.add(boltMesh); }
+  const t = T.value; if (!bolt && t > nextBolt) { // strike somewhere 400–1400 m off, in the view's half
+    camera.getWorldDirection(shaftV); const a = Math.atan2(shaftV.z, shaftV.x) + (Math.random() - .5) * 2, d = 400 + Math.random() * 1000, x = camera.position.x + Math.cos(a) * d, z = camera.position.z + Math.sin(a) * d, gy = heightAt(x, z), top = 2600 + camera.position.y * 0;
+    const pts = []; let px = x + (Math.random() - .5) * 400, pz = z + (Math.random() - .5) * 400; const n = 14; for (let i = 0; i <= n; i++) { const f = i / n, y = top - (top - gy) * f; pts.push([px + (Math.random() - .5) * 90 * (1 - f * .5), y, pz + (Math.random() - .5) * 90 * (1 - f * .5)]); if (i === n) { pts[n][0] = x; pts[n][2] = z; } }
+    bolt = { pts, t0: t, life: .45, k: .8 + Math.random() * .6 }; nextBolt = t + 6 + Math.random() * 18 / wx.k; }
+  if (!bolt) { flashU.value = 0; if (boltMesh) boltMesh.visible = false; return; }
+  const age = t - bolt.t0, vis = age < .08 || (age > .14 && age < .2) || (age > .26 && age < .3), fl = vis ? 1 : 0; // two or three flickers
+  flashU.value = fl * bolt.k * (age < .08 ? .35 : .18) + (age < .45 ? Math.max(0, .12 - age * .3) : 0);
+  if (age > bolt.life) { bolt = null; flashU.value = 0; }
+  if (!boltMesh) return; boltMesh.visible = fl > 0; if (!boltMesh.visible) return;
+  const g = boltMesh.geometry, P = g.attributes.iP.array, Sz = g.attributes.iS.array; let n = 0; camera.getWorldDirection(shaftV);
+  for (let i = 0; i < bolt.pts.length - 1; i++) { const A = bolt.pts[i], B2 = bolt.pts[i + 1], mx = (A[0] + B2[0]) / 2, my = (A[1] + B2[1]) / 2, mz = (A[2] + B2[2]) / 2;
+    shaftS.set(B2[0] - A[0], B2[1] - A[1], B2[2] - A[2]); const len = shaftS.length(); // the strip's screen angle: project both ends
+    const pa = new THREE.Vector3(A[0], A[1], A[2]).project(camera), pb = new THREE.Vector3(B2[0], B2[1], B2[2]).project(camera), ang = Math.atan2((pb.y - pa.y) * camera.aspect, pb.x - pa.x) - Math.PI / 2;
+    P[n * 3] = mx; P[n * 3 + 1] = my; P[n * 3 + 2] = mz; Sz[n * 4] = 6 + i * .4; Sz[n * 4 + 1] = len * 1.05; Sz[n * 4 + 2] = ang; Sz[n * 4 + 3] = bolt.k * (age < .08 ? 1 : .6); n++; }
+  g.instanceCount = n; for (const kk of ['iP', 'iS']) { const a = g.attributes[kk]; a.clearUpdateRanges(); a.addUpdateRange(0, n * a.itemSize); a.needsUpdate = true; }
+}
 // per frame: the clock, the dome follows the camera, dust and scorches, weather, the tracers' light
-export function tick(dt, camera) { T.value += dt; if (dome) dome.position.copy(camera.position); const step = G.paused ? 0 : dt * (G.speed || 1); dustTick(dt, camera); weatherTick(dt, camera); lightsTick(dt, step); shaftsTick(camera); shimmerTick(dt, step); }
-export function dispose() { dome = null; puffMesh = null; puffs = null; wxMesh = null; wx = null; litMesh = null; lights = []; shaftMesh = null; shimMesh = null; shims = []; wetU.value = 0; }
+export function tick(dt, camera) { T.value += dt; if (dome) dome.position.copy(camera.position); const step = G.paused ? 0 : dt * (G.speed || 1); dustTick(dt, camera); weatherTick(dt, camera); lightsTick(dt, step); shaftsTick(camera); shimmerTick(dt, step); lightningTick(dt, camera);
+  if (trodDirty) { trodTex.needsUpdate = true; trodDirty = false; } }
+export function dispose() { dome = null; puffMesh = null; puffs = null; wxMesh = null; wx = null; litMesh = null; lights = []; shaftMesh = null; shimMesh = null; shims = []; boltMesh = null; bolt = null; wetU.value = 0; flashU.value = 0; trodArr.fill(0); trodTex.needsUpdate = true; }
 export const _dbg = () => ({ scorch: scorchA.array.map(v => v.toArray()), live: puffs ? puffs.filter(p => p.life > 0).length : -1, n: puffMesh ? puffMesh.geometry.instanceCount : -1, T: T.value, mesh: !!puffMesh, dome: !!dome, units: G.units ? G.units.filter(u => !u.gone && Math.hypot(u.vx, u.vy) > .6).length : -1 });
 export const _forceWeather = kind => { _FORCE = kind; }; let _FORCE = null;
+export const _probe = { trample, bolt: () => { nextBolt = 0; } };
