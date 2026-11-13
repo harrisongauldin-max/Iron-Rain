@@ -261,7 +261,7 @@ const planetMat = (atmo, o = {}) => {
   const U = { map: texU(), night: texU(), m0: uniform(new THREE.Vector4(0, 0, 0, 1e-6)), m1: uniform(new THREE.Vector4(0, 0, 0, 1e-6)), m2: uniform(new THREE.Vector4(0, 0, 0, 1e-6)), m3: uniform(new THREE.Vector4(0, 0, 0, 1e-6)),
     aurCol: uniform(new THREE.Color(...(AUR || [0, 0, 0]))), hasNight: uniform(0), hmap: texU(), hasH: uniform(0), clouds: texU(), hasClouds: uniform(0), cloudOff: uniform(0),
     texel: uniform(new THREE.Vector2(1 / 512, 1 / 256)), bumpK: uniform(BUMP), gas: uniform(GAS ? 1 : 0), hasAtmo: uniform(AIR),
-    sunPos: uniform(new THREE.Vector3()), atmo: uniform(new THREE.Color().setRGB(...atmo.map(v => v / 255), THREE.SRGBColorSpace)),
+    sunPos: uniform(new THREE.Vector3()), atmo: uniform(new THREE.Color().setRGB(...atmo.map(v => v / 255), THREE.SRGBColorSpace)), ecl: uniform(0), eclCol: uniform(new THREE.Color(.22, .22, .25)),
     C: uniform(new THREE.Vector3()), pr: uniform(1), ringN: uniform(new THREE.Vector3(0, 1, 0)), ringR: uniform(new THREE.Vector2(1.35, 2.3)), ringK: uniform(1), ringMap: texU() };
   const vN = worldN();
   const vT = varying(Fn(() => { const n = normalGeometry, t = vec3(n.z, 0, n.x.mul(-1)); return normalize(modelWorldMatrix.mul(vec4(select(length(t).greaterThan(1e-4), t, vec3(0, 0, 1)), 0)).xyz); })());
@@ -341,6 +341,7 @@ const planetMat = (atmo, o = {}) => {
       const au = band.mul(pow(clamp(cur.add(.35), 0, 1.4), 2.2)).mul(one.sub(day)).toVar();
       col.addAssign(U.aurCol.mul(au.mul(GAS ? .22 : .42).add(band.mul(GAS ? .02 : .05))).mul(one.sub(day)));
     }
+    col.assign(mix(col, col.mul(U.eclCol), U.ecl)); // in its parent's shadow: dark, or copper-red through a parent's air
     return vec4(col, 1);
   })();
   const m = mkMat(frag); m.uniforms = U; return m;
@@ -427,10 +428,10 @@ const dustMat = (r0, r1, col) => {
   const m = mkMat(frag, { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }); m.uniforms = U; return m;
 };
 const bgMat = () => {
-  const U = { neb: texU(), nk: uniform(1), s0: texU(), s1: texU(), s2: texU(), res: uniform(new THREE.Vector2(1, 1)), o01: uniform(new THREE.Vector4()), o2n: uniform(new THREE.Vector4()) };
+  const U = { neb: texU(), nk: uniform(1), nz: uniform(1), s0: texU(), s1: texU(), s2: texU(), res: uniform(new THREE.Vector2(1, 1)), o01: uniform(new THREE.Vector4()), o2n: uniform(new THREE.Vector4()) };
   const frag = Fn(() => {
     const p = vec2(uv().x, one.sub(uv().y)).mul(U.res).toVar();
-    const c = U.neb.at(p.sub(U.o2n.zw).div(1.4 * 1024)).rgb.mul(U.nk).toVar(); // nk: the Milky Way's strength, from the graphics menu
+    const c = U.neb.at(p.sub(U.res.mul(.5)).div(U.nz).add(U.res.mul(.5)).sub(U.o2n.zw).div(1.4 * 1024)).rgb.mul(U.nk).toVar(); // nk: the Milky Way's strength, from the graphics menu; nz: it swells a little as the view closes in
     const a0 = U.s0.at(p.sub(U.o01.xy).div(1024)), a1 = U.s1.at(p.sub(U.o01.zw).div(1024)), a2 = U.s2.at(p.sub(U.o2n.xy).div(1024));
     // the nearest stars scintillate a little: a slow noise per 5-px cell, so each star has its own rhythm
     const st = p.sub(U.o2n.xy), tw = float(.88).add(n3(vec3(floor(st.div(5)), SH.time.mul(1.3))).mul(.14)), tw1 = float(.95).add(n3(vec3(floor(p.sub(U.o01.zw).div(4)).add(7), SH.time.mul(.9))).mul(.06));
@@ -782,6 +783,16 @@ const STORMS = { // the giants' named storms, on their painted positions (planet
   saturn: [[...UV(-38, 110), 7 / 360, 4 / 180, .09]],
   earthClouds: [[...UV(38, -45), 14 / 360, 11 / 180, .06], [...UV(-42, 95), 13 / 360, 10 / 180, -.055], [...UV(18, 140), 8 / 360, 7 / 180, -.09], [...UV(50, 160), 12 / 360, 9 / 180, .05]], // extratropical cyclones and a typhoon
 };
+// rotation periods in days (negative = retrograde); moons are tidally locked and keep one face to their parent
+const ROT_DAYS = { mercury: 58.6, venus: -243, earth: 1, mars: 1.03, jupiter: .41, saturn: .44, uranus: -.72, neptune: .67, pluto: -6.4, ceres: .38, vesta: .22, pallas: .32 };
+// the campaign's clock read off Earth's place in its orbit (one lap a year, 52 turns), plus the wall clock turning the
+// worlds slowly between turns: a world's face in the map is where that many days of spin would leave it
+function spinPhase(b, L, i) { const E = L && L.pos.earth, sp = L && L.pos.sun; const weeks = E ? ((Math.atan2(E.y - sp.y, E.x - sp.x) + TAU) % TAU) / TAU * 52 : 0;
+  const P = ROT_DAYS[b.id] || (b.gas ? .45 : 1.2 + (i % 5) * .6), days = weeks * 7, wall = performance.now() / 1000 / (Math.abs(P) * 160); // a wall-clock day of spin every 160 s times the period
+  return (days / P + wall * Math.sign(P)) * TAU; }
+// a moon in its parent's shadow: how deep (0..1), by how close it sits to the Sun-parent line on the far side
+function eclipseK(mx, my, px, py, pr, sunP) { let lx = px - sunP.x, ly = py - sunP.z; const l = hyp(lx, ly) || 1; lx /= l; ly /= l; const dx = mx - px, dy = my - py, t = dx * lx + dy * ly; if (t <= 0) return 0;
+  const perp = Math.abs(dx * ly - dy * lx), um = pr * (1 - t / (l * 1.1)); return clamp((pr * 1.15 - perp) / (pr * 1.15 - Math.max(um, pr * .5) + 1e-6), 0, 1) * (perp < pr * 1.15 ? 1 : 0); }
 // auroral ovals: Earth's green, the giants' violet-blue (seen by Hubble in ultraviolet; here given a little visible colour)
 const AURORA = { earth: [.3, 1, .55], jupiter: [.55, .45, 1], saturn: [.5, .6, 1] };
 // fill a world's moon-shadow slots: moons on the sunward side, close enough to the Sun's line to fall on the disc
@@ -1062,6 +1073,7 @@ function sceneFrame() {
     glintFor(v, x, y, b.r * z, z, onScr(b.x, b.y, 40));
     if (!vis) continue;
     v.g.position.set(x, 0, y); v.g.scale.setScalar(b.r); v.g.rotation.set(v.tilt, 0, 0); v.mesh.rotation.y = v.face + S.time * v.spin;
+    const EU = v.mesh.material.uniforms; if (EU.ecl) { const pb = b.kind === 'moon' ? BODIES[b.parent] : null; if (pb) { EU.ecl.value = eclipseK(b.x, b.y, pb.x, pb.y, pb.r, { x: sunP.x + O.x, z: sunP.z + O.y }); if (EU.ecl.value > 0) EU.eclCol.value.setRGB(...(pb.pal && pb.pal.atmo && !pb.gas ? [.45, .14, .08] : [.2, .2, .24])); } else EU.ecl.value = 0; }
     if (v.clouds) { v.clouds.rotation.y = v.face + 1.3 + S.time * (v.spin + v.cspin); v.clouds.material.uniforms.sunPos.value.copy(sunP); v.mesh.material.uniforms.cloudOff.value = -(1.3 + S.time * v.cspin) / TAU; }
     if (v.extra) v.extra.rotation.y = v.face + S.time * v.spin;
     if (v.traffic) v.traffic.update(S.time);
@@ -1227,7 +1239,7 @@ function renderOrrery(L) {
   camera.aspect = S.W / S.H; camera.near = d * .04; camera.far = d * 40; camera.position.set(0, d * SE, d * CE); camera.lookAt(0, 0, 0); camera.updateProjectionMatrix(); camera.updateMatrixWorld();
   const u = bgMesh.material.uniforms; u.res.value.set(S.W, S.H); SH.res.value.set(S.W, S.H); SH.time.value = performance.now() / 1000;
   u.o01.value.set((-c.x * .002 * z * 50) % 1024, (-c.y * .002 * z * 50) % 1024, (-c.x * .005 * z * 50) % 1024, (-c.y * .005 * z * 50) % 1024);
-  u.o2n.value.set((-c.x * .01 * z * 50) % 1024, (-c.y * .01 * z * 50) % 1024, (-c.x * .04 * z) % 4096, (-c.y * .04 * z) % 4096);
+  u.o2n.value.set((-c.x * .01 * z * 50) % 1024, (-c.y * .01 * z * 50) % 1024, (-c.x * .065 * z) % 4096, (-c.y * .065 * z) % 4096); u.nz.value = 1 + .1 * clamp(Math.log10(z * 1e4) / 2, -1, 1); // the nebula sits between the far stars and the near, and breathes with the zoom
   if ((S.bodyVer || 0) !== bodyVerSeen) buildBodies();
   const sp = L.pos.sun, sunP = new THREE.Vector3(sp.x - O.x, 0, sp.y - O.y); scene.userData.sun.position.copy(sunP);
   for (const v of bodyVis) {
@@ -1237,8 +1249,10 @@ function renderOrrery(L) {
     if (v.corona) { v.corona.position.set(x, 0, y); const cs = Math.max(P.r * 11, 520 / z); v.corona.scale.set(cs, cs, 1); v.corona.material.opacity = .55 * clamp((P.r * z - 1.5) / 8, .35, 1); }
     glintFor(v, x, y, P.r * z, z, onScr(P.x, P.y, 40));
     if (!vis) continue;
-    v.g.position.set(x, 0, y); v.g.scale.setScalar(P.r); v.g.rotation.set(v.tilt, 0, 0); v.mesh.rotation.y = v.face + performance.now() / 1000 * v.spin * 3;
-    if (v.clouds) { v.clouds.rotation.y = v.face + 1.3 + performance.now() / 1000 * (v.spin + v.cspin) * 3; v.clouds.material.uniforms.sunPos.value.copy(sunP); v.mesh.material.uniforms.cloudOff.value = -(1.3 + performance.now() / 1000 * v.cspin * 3) / TAU; }
+    const b = v.b, par = P.parent ? L.pos[P.parent] : null, rot = par ? Math.atan2(par.x - P.x, par.y - P.y) + .35 : spinPhase(b, L, bodyVis.indexOf(v)); // a moon keeps one face to its parent
+    v.g.position.set(x, 0, y); v.g.scale.setScalar(P.r); v.g.rotation.set(v.tilt, 0, 0); v.mesh.rotation.y = v.face + rot;
+    if (v.clouds) { v.clouds.rotation.y = v.face + 1.3 + rot + performance.now() / 1000 * v.cspin * 3; v.clouds.material.uniforms.sunPos.value.copy(sunP); v.mesh.material.uniforms.cloudOff.value = -(1.3 + performance.now() / 1000 * v.cspin * 3) / TAU; }
+    const EU = v.mesh.material.uniforms; if (EU.ecl) { if (par) { const k = eclipseK(P.x, P.y, par.x, par.y, par.r, { x: sp.x, z: sp.y }), pv = bodyVis.find(q => q.b.id === P.parent); EU.ecl.value = k; if (k > 0) EU.eclCol.value.setRGB(...(pv && pv.b.pal && pv.b.pal.atmo && !pv.b.gas ? [.45, .14, .08] : [.2, .2, .24])); } else EU.ecl.value = 0; }
     if (v.extra) v.extra.rotation.y = v.face;
     const U = v.mesh.material.uniforms; if (U.sunPos) U.sunPos.value.copy(sunP); if (U.C) { U.C.value.set(x, 0, y); U.pr.value = P.r; }
     if (v.atmo) { const R = P.r * v.atmoK; v.atmo.position.set(x, 0, y); v.atmo.scale.setScalar(R); const A = v.atmo.material.uniforms; A.C.value.set(x, 0, y); A.r.value = P.r; A.R.value = R; A.sunPos.value.copy(sunP); }
@@ -1866,6 +1880,15 @@ export function fleetGlow(ctx, x, y, tx, ty, col, k = 1) { // a torch: a hot dot
   const gr = ctx.createLinearGradient(x, y, x + ux * len, y + uy * len); gr.addColorStop(0, `rgba(255,230,190,${.75 * k})`); gr.addColorStop(.3, `rgba(255,170,90,${.35 * k})`); gr.addColorStop(1, 'rgba(255,120,60,0)');
   ctx.strokeStyle = gr; ctx.lineWidth = 3.2; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + ux * len, y + uy * len); ctx.stroke();
   const rg = ctx.createRadialGradient(x, y, 0, x, y, 7); rg.addColorStop(0, `rgba(255,245,225,${.9 * k})`); rg.addColorStop(.35, `rgba(255,200,140,${.4 * k})`); rg.addColorStop(1, 'rgba(255,160,90,0)'); ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(x, y, 7, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+export function clashFx(ctx, cx, cy, rr) { // hostile fleets sharing an orbit: a ring of brief flashes and streaks round the world, where the fighting is
+  const now = performance.now() / 1000; ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 6; i++) { const t = now * 2.2 + i * .53, ph = t % 1, sd = Math.floor(t) * 7.31 + i * 2.7, h = Math.abs(Math.sin(sd * 12.9898) * 43758.5453) % 1, h2 = Math.abs(Math.sin(sd * 78.233) * 12345.6789) % 1;
+    const a = h * TAU, rad = rr + 7 + h2 * 9, px = cx + Math.cos(a) * rad, py = cy + Math.sin(a) * rad, al = (1 - ph) * (1 - ph) * (ph < .06 ? ph / .06 : 1), r = 1.5 + 4 * (1 - ph);
+    const g = ctx.createRadialGradient(px, py, 0, px, py, r); g.addColorStop(0, `rgba(255,255,245,${.9 * al})`); g.addColorStop(.4, `rgba(255,210,150,${.4 * al})`); g.addColorStop(1, 'rgba(255,160,90,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, py, r, 0, TAU); ctx.fill();
+    if (h2 > .55) { ctx.strokeStyle = `rgba(200,230,255,${.45 * al})`; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + Math.cos(a + 1.2) * 6, py + Math.sin(a + 1.2) * 6); ctx.stroke(); } } // a tracer
+  ctx.globalCompositeOperation = 'source-over'; ctx.strokeStyle = 'rgba(190,180,170,.22)'; ctx.lineWidth = 1; ctx.setLineDash([1, 4]); ctx.beginPath(); ctx.arc(cx, cy, rr + 12, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
   ctx.restore();
 }
 export function siegeFx(ctx, cx, cy, rr, sil = null) { // bombardment seen from space: brief flashes along the world's limb and dark side, each fading out, and a faint ring of debris
