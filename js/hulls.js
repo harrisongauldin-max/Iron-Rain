@@ -118,7 +118,8 @@ function bow(K, st, x, y, w, h, R) { // the prow: a crescent blade (Society line
 }
 function engines(K, x, y, list, r, L) { // bells with a glowing throat and a trim ring
   if (K.tags && K.tags.has('t')) { r *= 1.22; L *= 1.35; } // a torch drive: bigger bells
-  for (const [yy, zz] of list) { K.add(SLOT.dark, bell(x, y + yy, zz, r, L)); K.add(SLOT.glow, disc(x - L * .9, y + yy, zz, r * .74)); K.add(SLOT.trim, ringG(x - L, y + yy, zz, r * .98, r * .07)); K.bells.push(zz); }
+  for (const [yy, zz] of list) { K.add(SLOT.dark, bell(x, y + yy, zz, r, L)); K.add(SLOT.armour, cylX(x - L * .16, x + L * .3, y + yy, zz, r * .84, 14)); K.add(SLOT.armour, ringG(x - L * .5, y + yy, zz, r * .9, r * .05)); // the bell, its mount collar, a stiffening hoop
+    K.add(SLOT.glow, disc(x - L * .9, y + yy, zz, r * .74)); K.add(SLOT.trim, ringG(x - L, y + yy, zz, r * .98, r * .07)); K.bells.push(zz); }
 }
 // broadside gun decks that sit on the hull's flank: a deck rail, and houses of rail guns pointing outboard
 function gunDecks(K, body, x0, x1, y, n, barrels, scale = 1, reach = 1) {
@@ -132,8 +133,8 @@ function gunDecks(K, body, x0, x1, y, n, barrels, scale = 1, reach = 1) {
   for (const side of [-1, 1]) {
     for (let i = 0; i < n; i++) {
       const x = x0 + (i + .5) * L, s = at(body, x), z = side * (s.w * .97), d = .05 * scale, hh = .055 * scale;
-      K.add(SLOT.armour, box(x, y, z + side * d * .5, L * .8, hh, d));                        // the gun house, built onto the flank
-      K.add(SLOT.hull, box(x, y + hh * .5, z + side * d * .4, L * .86, .008 * scale, d * .9));  // its cap
+      K.add(SLOT.armour, loft([{ x: x - L * .45, w: d * .38, h: hh * .3, b: .4 }, { x: x - L * .3, w: d * .66, h: hh * .52, b: .4 }, { x: x + L * .3, w: d * .66, h: hh * .52, b: .4 }, { x: x + L * .45, w: d * .38, h: hh * .3, b: .4 }], x - L, x + L).translate(0, y, z + side * d * .34)); // the gun house: a faired casemate on the flank
+      K.add(SLOT.hull, box(x, y + hh * .5, z + side * d * .3, L * .5, .006 * scale, d * .7));    // its cap
       const rows = Math.max(1, Math.round(barrels / 2));
       for (let r = 0; r < rows; r++) for (let c = 0; c < 2; c++) {                              // rail guns, run out to the side
         const bx = x + (c - .5) * L * .4, by = y + (r - (rows - 1) / 2) * hh * .42, z0 = z + side * d, z1 = z0 + side * .065 * scale * reach;
@@ -150,11 +151,14 @@ function stripe(K, body, x0, x1, side, y, slot = SLOT.trim) { // a painted line 
   const n = 10; for (let i = 0; i < n; i++) { const xa = x0 + (x1 - x0) * i / n, xb = x0 + (x1 - x0) * (i + 1) / n, s = at(body, (xa + xb) / 2); K.add(slot, box((xa + xb) / 2, s.y + y * s.h, side * (s.w * (1 - .3 * Math.abs(y)) + .003), xb - xa + .002, .01, .004)); }
 }
 function navLights(K, xs, zs, y) { K.add(SLOT.red, box(xs, y, -zs, .012, .012, .012)); K.add(SLOT.green, box(xs, y, zs, .012, .012, .012)); }
-function bridge(K, x, y, w, h, tiers = 2) {
-  let yy = y;
-  for (let i = 0; i < tiers; i++) { const s = 1 - i * .28; K.add(i ? SLOT.armour : SLOT.hull, box(x - i * .02, yy + h * s / 2, 0, w * s, h * s, w * .55 * s)); yy += h * s; }
-  K.add(SLOT.glow, box(x + w * .5 * (1 - (tiers - 1) * .28) + .002, yy - h * .3, 0, .004, h * .14, w * .38)); // the bridge's lit windows
-  K.add(SLOT.dark, cylX(x - .02, x + .02, yy + .03, 0, .004)); K.add(SLOT.dark, box(x - .02, yy + .02, 0, .004, .04, .004)); // mast
+function bridge(K, x, y, w, h, tiers = 2) { // a raked citadel: each tier a faired deckhouse (long sloped face forward, a short one aft), wing arms and a mast on the top one
+  let yy = y, cx = x, L = w, hw = w * .275, hh = h / 2;
+  for (let i = 0; i < tiers; i++) { const s = 1 - i * .28; L = w * s; hw = w * .275 * s; hh = h * s / 2; cx = x - i * .02;
+    K.add(i ? SLOT.armour : SLOT.hull, loft([{ x: cx - L * .5, w: hw * .78, h: hh * .72, y: yy + hh * .72 - .004 }, { x: cx - L * .32, w: hw, h: hh, y: yy + hh - .004 }, { x: cx + L * .2, w: hw, h: hh, y: yy + hh - .004 }, { x: cx + L * .5, w: hw * .7, h: hh * .5, y: yy + hh * .5 - .004 }], cx - L, cx + L));
+    yy += h * s; }
+  K.add(SLOT.glow, box(cx + L * .36, yy - hh * .95, 0, L * .3, hh * .22, hw * 1.72)); // the bridge's lit windows, a band wrapped round its raked face
+  K.add(SLOT.armour, box(cx - L * .1, yy - hh * .6, 0, L * .16, .005, hw * 3.1)); for (const sd of [-1, 1]) K.add(SLOT.dark, box(cx - L * .1, yy - hh * .6, sd * hw * 1.6, L * .2, .012, .008)); // wing arms with sensor pods
+  K.add(SLOT.dark, cylX(x - .02, x + .02, yy + .03, 0, .004)); K.add(SLOT.dark, box(x - .02, yy + .015, 0, .004, .04, .004)); // mast
   return yy;
 }
 // ---------------------------------------------------------------- the classes
@@ -201,7 +205,8 @@ const BUILD = {
     gunDecks(K, body, -.9, .75, .01, 20, 2, .42, .5);                        // 20 houses of 2 a side, small against the hull: 80 guns
     for (const side of [-1, 1]) { const sx = at(body, .55); K.add(SLOT.dark, box(.55, -.04, side * sx.w * .99, .16, .04, .01)); K.add(SLOT.dark, box(-.3, -.05, side * at(body, -.3).w * .99, .16, .04, .01)); } // hangar mouths, two a side
     for (let i = 0; i < 12; i++) { const x = -.95 + i * .17, sx = at(body, x); K.add(SLOT.armour, box(x, sx.h + .003, 0, .01, .006, sx.w * 1.1)); } // armour ribs across the deck
-    for (let i = 0; i < 7; i++) K.add(SLOT.dark, box(-.9 + i * .26, .2, 0, .012, .018, .012));                                                  // deck masts and sensor pylons
+    K.loft(SLOT.armour, [{ x: -.7, w: .03 * s, h: .016, y: .205, b: .4 }, { x: .3, w: .04 * s, h: .02, y: .212, b: .4 }, { x: .82, w: .03 * s, h: .02, y: .19, b: .4 }, { x: 1.0, w: .02, h: .018, y: .13, b: .4 }], x0, x1, false); // the lance's housing: a spine down the deck to the bow
+    for (const side of [-1, 1]) for (let i = 0; i < 6; i++) { const x = -.6 + i * .24; K.add(SLOT.gun, loft([{ x: x - .028, w: .008, h: .005, y: .197 }, { x: x - .01, w: .015, h: .011, y: .2 }, { x: x + .014, w: .015, h: .011, y: .2 }, { x: x + .03, w: .007, h: .005, y: .197 }], x - 1, x + 1).translate(0, 0, side * .095 * s)); K.add(SLOT.dark, cylX(x + .01, x + .05, .204, side * .095 * s, .0028, 5)); } // point-defence blisters flanking it
     const top = bridge(K, -.82, .19, .11, .055, 3);
     K.add(SLOT.dark, cylX(.95, 1.42, .02, 0, .026)); K.add(SLOT.glow, disc(1.43, .02, 0, .02)); // the spinal lance
     engines(K, x0, 0, [[.04, .17 * s], [.04, -.17 * s], [.04, 0], [-.05, .09 * s], [-.05, -.09 * s]], .065, .15);
