@@ -1462,3 +1462,53 @@ body.battle #log:not(.open) .lg.vc .vbody > span{display:block;white-space:nowra
 #pip{transition:right .35s ease,bottom .35s ease,width .35s ease,height .35s ease}
 #pip.take{right:calc(50% - 34vw);bottom:18vh;width:68vw;height:38.25vw;max-height:62vh;z-index:12;box-shadow:0 0 0 1px rgba(0,0,0,.8),0 20px 80px rgba(0,0,0,.85)}
 #pip.take .pcap{font-size:15px;padding:24px 18px 10px}
+
+/* ================================================================ parley, rivals and commanders' faces (Nov 2026) */
+svg.face{display:block;border-radius:3px}
+svg.face.dead{filter:grayscale(1) brightness(.75)}
+.cport.face{overflow:hidden;padding:0;align-items:flex-start;background:#0b0d12}
+.cport.face svg{width:40px;height:50px;margin-top:-2px}
+.cport.face i{position:absolute;left:0;right:0;bottom:0;text-align:center;font-size:8px;line-height:11px;background:linear-gradient(transparent,rgba(0,0,0,.85));color:#f1d68a}
+.rivtag{display:inline-block;margin-left:6px;padding:0 5px;font-style:normal;font-size:10px;letter-spacing:.04em;color:#ffb0a8;border:1px solid rgba(255,138,122,.45);border-radius:2px;background:rgba(255,106,90,.08);vertical-align:1px}
+.bvs .bvf{display:inline-block;vertical-align:middle;margin-right:5px}
+.bvs .bvf svg{display:inline-block;border:1px solid rgba(255,255,255,.12)}
+#smodal.parley{width:min(760px,94vw)}
+.parley .psides{display:flex;align-items:center;gap:14px;margin:10px 0 8px}
+.parley .pside{flex:1;display:flex;gap:12px;align-items:center;padding:8px 10px;border-left:3px solid var(--fc);background:linear-gradient(90deg,rgba(255,255,255,.04),transparent)}
+.parley .pside:last-child{flex-direction:row-reverse;text-align:right;border-left:0;border-right:3px solid var(--fc);background:linear-gradient(270deg,rgba(255,255,255,.04),transparent)}
+.parley .pside svg{flex:none;border:1px solid rgba(255,255,255,.14)}
+.parley .pside b{display:block;font-family:var(--serif);font-size:15px;color:var(--fc);letter-spacing:.03em}
+.parley .pside i{display:block;font-style:normal;font-size:11px;opacity:.75;margin-top:2px}
+.parley .pside .kicker{display:block;margin-bottom:2px}
+.parley .pnoface{width:72px;height:90px;display:flex;align-items:center;justify-content:center;background:#0b0d12;border:1px solid rgba(255,255,255,.1)}
+.parley .pvs{font-size:20px;opacity:.5}
+.parley .pbopl{font-size:11px;opacity:.8;margin:4px 0 10px;text-align:center}
+.parley .ptalk{display:flex;flex-direction:column;gap:6px;margin:6px 0 10px;max-height:220px;overflow:auto}
+.parley .pline{display:flex;gap:10px;padding:6px 10px;border-left:2px solid var(--fc);background:rgba(255,255,255,.03);font-size:13px;line-height:1.4}
+.parley .pline.us{flex-direction:row-reverse;text-align:right;border-left:0;border-right:2px solid var(--fc)}
+.parley .pline b{flex:none;color:var(--fc);font-weight:600;max-width:42%}
+.parley .pline span{font-style:italic;opacity:.92}
+.parley .pduel{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;font-size:12px;padding:6px 8px;margin:0 0 8px;border:1px solid var(--line);background:rgba(0,0,0,.25)}
+.parley .pduel>span:first-child{letter-spacing:.12em;text-transform:uppercase;font-size:10px;opacity:.6;margin-right:4px}
+.parley .pduel i{font-style:normal;font-family:var(--serif);color:#f1d68a}
+.parley .pduel em{font-style:normal;opacity:.5}
+.parley .pduel>span:last-child{flex-basis:100%;text-align:center;opacity:.8}
+.parley .mbtns{flex-wrap:wrap}
+.parley .mbtns .btn.off{opacity:.38;pointer-events:none}
+.bparl{margin:8px 0;padding:6px 10px;border-left:2px solid #e8c87e;background:rgba(232,200,126,.06);display:flex;flex-direction:column;gap:2px;font-size:12px}
+.bparl .kicker{margin-bottom:2px}
+.rivline{display:flex;gap:10px;align-items:center;margin:8px 0;padding:6px 10px;border:1px solid rgba(255,138,122,.35);background:rgba(255,106,90,.06)}
+.rivline b{display:block;color:#ffb0a8;font-family:var(--serif)}
+.rivline span{font-size:12px;opacity:.9}
+.rivline em{font-style:normal;color:#f1d68a}
+.rgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:10px;margin-top:10px}
+.rcard{display:flex;gap:12px;padding:10px;border:1px solid var(--line);border-top:2px solid var(--fc);background:rgba(255,255,255,.025)}
+.rcard.gone{opacity:.6}
+.rcard svg{flex:none}
+.rcard .rbody{display:flex;flex-direction:column;gap:2px;min-width:0;font-size:12px}
+.rcard .rbody>b{font-family:var(--serif);font-size:15px;color:var(--fc)}
+.rcard .rep{color:#ffb0a8;font-style:italic}
+.rcard .rrec{color:#f1d68a}
+.rcard .rlog{display:flex;flex-direction:column;margin-top:4px;opacity:.7;font-size:11px}
+.rcard .rlog span{cursor:pointer}
+.rcard .rlog span:hover{opacity:1;text-decoration:underline}

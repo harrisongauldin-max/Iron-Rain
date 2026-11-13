@@ -82,7 +82,7 @@ export function fightBattle(cf) {
     if (B.base0) for (const c of OPS.OP.convoy) if (OPS.OP.kind === 'relief') B.base0.push([c, c.x, c.y, c.a]);
     // the battle opens paused, so the player can read the field and give orders before the first shot
     // an AI fleet that was intercepted makes for the far side of the line; an AI interceptor goes for it
-    TC.setup(); MO.setup(bw); if (!space && defTeam === 1 && (MO.M.doc === 'patient' || MO.M.doc === 'cunning')) placePickets(mobile(1), 1); /* a careful commander throws out pickets */ EA.reset({ world: space && defTeam === 1 ? '@exit' : bw, defending: !space && defTeam === 1, allyAtt: defTeam === 1, diff: C.difficulty ?? 1 }); keysOnce();
+    TC.setup(); MO.setup(bw); if (cf.parley) { const pi = cf.att === me ? 0 : 1, P = cf.parley, L = P.why || [null, null]; MO.parley([P.mor[pi], P.mor[1 - pi]], [L[pi], L[1 - pi]]); } /* what the parley left each side */ if (!space && defTeam === 1 && (MO.M.doc === 'patient' || MO.M.doc === 'cunning')) placePickets(mobile(1), 1); /* a careful commander throws out pickets */ EA.reset({ world: space && defTeam === 1 ? '@exit' : bw, defending: !space && defTeam === 1, allyAtt: defTeam === 1, diff: C.difficulty ?? 1 }); keysOnce();
     S.fireLong = [false, null]; /* we hold to effective range until told otherwise; the enemy's doctrine decides for it */
     S.stepCap = 16; S.mode = 'battle'; S.aiHook = battleAI; S.gameState = 'play'; S.paused = true; S.speed = 1; S.aiNukeT = 30; B.deploy = true;
     document.body.classList.add('battle', 'paused');

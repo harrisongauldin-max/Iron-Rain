@@ -31,7 +31,7 @@ const nm = s => s.title || s.def.name;
 
 export function setup(world) {
   const lead = (S.cmdrs || []).filter(c => c.team === 1 && c.state === 'aboard').sort((a, b) => (b.rank || 0) - (a.rank || 0))[0] || null;
-  Object.assign(M, { mor: [100, 100], shockV: [0, 0], ev: [], world, lead, doc: lead ? doctrineOf(lead.name) : 'steady', peak: [str(0), str(1)], rout: [null, null], warned: false, esc: [0, 0], broke: [0, 0], next: 0, batch: [[], []], prizes: 0 });
+  Object.assign(M, { mor: [100, 100], shockV: [0, 0], base: [0, 0], ev: [], world, lead, doc: lead ? doctrineOf(lead.name) : 'steady', peak: [str(0), str(1)], rout: [null, null], warned: false, esc: [0, 0], broke: [0, 0], next: 0, batch: [[], []], prizes: 0 });
 }
 export const doc = () => DOC[M.doc] || DOC.steady;
 // fleet morale, 0 to 100, for each side: what is left of the fleet, how the fight stands, and the shocks of the
@@ -39,13 +39,15 @@ export const doc = () => DOC[M.doc] || DOC.steady;
 // point a fleet breaks: for the enemy, the point is its commander's; ours breaks at 30.
 export const breakAt = t => t === 1 ? Math.round(doc().rout * 100) : 30;
 S.shock = (t, v, w) => shock(t, v, w);
+// what the parley before the battle left each side (parley.js): a lasting shift, unlike a shock, which fades
+export function parley(base, why) { M.base = base.slice(); for (const t of [0, 1]) if (base[t] && why[t]) M.ev.unshift({ t: 0, team: t, v: -base[t], why: why[t] }); }
 export function shock(team, v, why) {
   if (team > 1 || !M.peak) return; M.shockV[team] = Math.max(-15, Math.min(45, M.shockV[team] + v));
   if (why) { M.ev.unshift({ t: S.time, team, v, why }); M.ev.length = Math.min(M.ev.length, 8); }
 }
 function moraleOf(t) {
   const a = str(t), e = str(1 - t), pk = M.peak[t] || 1, adv = Math.max(-1, Math.min(1, (a - e) / (Math.max(a, e) || 1)));
-  return Math.max(0, Math.min(100, 100 * a / pk + 12 * adv - M.shockV[t]));
+  return Math.max(0, Math.min(100, 100 * a / pk + 12 * adv - M.shockV[t] + ((M.base && M.base[t]) || 0)));
 }
 
 // a commander with Iron Discipline holds the crews around her

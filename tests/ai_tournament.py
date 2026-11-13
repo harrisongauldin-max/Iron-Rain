@@ -33,7 +33,13 @@ async def main():
         for _ in range(20):
             await pg.wait_for_timeout(1500)
             if await pg.query_selector('#smodal [data-m=fight]'): break
-        await pg.evaluate("()=>document.querySelector('#smodal [data-m=fight]').click()"); await pg.wait_for_timeout(6000)
+        # the parley card comes first when the fleets meet (its Open fire also says fight): through it to the battle screen
+        for _ in range(3):
+            parley = await pg.evaluate("()=>document.getElementById('smodal').className.includes('parley')")
+            await pg.evaluate("()=>document.querySelector('#smodal [data-m=fight]').click()")
+            if not parley: break
+            await pg.wait_for_timeout(2500)
+        await pg.wait_for_timeout(6000)
         await pg.evaluate("()=>{const e=document.querySelector('[data-ba=begin]'); e&&e.click()}"); await pg.wait_for_timeout(300)
         r = await pg.evaluate("""async([SC])=>{
           const S=window.__IR.S, sim=await import('./js/sim.js'), bt=await import('./js/battle.js'), EA=await import('./js/enemyai.js'), MO=await import('./js/morale.js'), T=await import('./js/tactics.js');

@@ -29,6 +29,9 @@ import { OPTS, saveOpts } from './ui.js';
 import { toggleGfx, gfxOpen } from './gfxmenu.js';
 import { DEFS } from './data.js';
 import * as SV from './save.js';
+import * as PA from './parley.js';
+import * as RV from './rivals.js';
+import { faceSVG } from './faces.js';
 
 const $ = id => document.getElementById(id);
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -309,7 +312,7 @@ function buildStratDOM() {
     else if (k === 't') techUI();
     else if (k === 'y') classUI();
     else if (k === 'c') courtUI();
-    else if (k === 'f') factionUI(); else if (k === 'h') ledgerUI(); else if (k === 'p') diploUI(); else if (k === 'l') toggleList(); else if (k === 'r') toggleFeed();
+    else if (k === 'f') factionUI(); else if (k === 'h') ledgerUI(); else if (k === 'v') rivalsUI(); else if (k === 'p') diploUI(); else if (k === 'l') toggleList(); else if (k === 'r') toggleFeed();
     else if (k === 'q' && V.sel && V.sel.w) { e.preventDefault(); popRecruit(); }
   });
   addEventListener('keyup', e => { V.keys[e.key.length === 1 ? e.key.toLowerCase() : e.key] = false; });
@@ -471,7 +474,7 @@ const NEEDW = { idle: ['fleet idle', 'fleets idle'], slots: ['world can build', 
   rain: ['Iron Rain ready', 'Iron Rains ready'], threat: ['enemy inbound', 'enemies inbound'] };
 const SCREENS = [['faction', '⚜', 'Faction', 'F', 'Your power: the throne, taxes, regions and victory'], ['diplo', '☍', 'Diplomacy', 'P', 'War, peace and alliances with the other powers'], ['tech', '⚗', 'Research', 'T', 'Technology and traditions'],
   ['court', '♛', 'Court', 'C', 'The Houses, laws and your agents'], ['classes', '⚒', 'Ship classes', 'Y', 'Design how your hulls are fitted out'], ['list', '☰', 'Fleets & worlds', 'L', 'Every fleet, world and commander you hold'],
-  ['ledger', '⌇', 'Ledger', 'H', 'The war in numbers, and the Chronicle'], ['feed', '✉', 'Dispatches', 'R', 'Every report, not just this week\'s']];
+  ['ledger', '⌇', 'Ledger', 'H', 'The war in numbers, and the Chronicle'], ['rivals', '☠', 'Rivals', 'V', 'Enemy commanders who have beaten us or got away'], ['feed', '✉', 'Dispatches', 'R', 'Every report, not just this week\'s']];
 function drawRail() {
   const pend = { tech: TE.pendingChoice(C.player).length > 0, court: !!(C.motion && C.motion[C.player]) || AG.agentsOf(C.player).some(a => a.state === 'idle') };
   $('srail').innerHTML = `<div class="rh">Screens</div>` + SCREENS.map(([a, ic, l, k, t]) => `<button class="rbtn ${pend[a] ? 'pend' : ''} ${(a === 'list' && V.list) || (a === 'feed' && V.feedOpen) ? 'on' : ''}" data-a="${a}" data-tip="${tipA(`<div class='th'>${l}</div><div class='tdim'>${t}</div><div class='tgold'>Hotkey ${k}</div>`)}"><i>${ic}</i><span>${l}</span><kbd>${k}</kbd></button>`).join('');
@@ -561,7 +564,7 @@ function cmdrCard(c, f, opts = {}) {
   const hn = CM.houseName(c), loy = Math.round(c.loyalty == null ? 70 : c.loyalty), R0 = C.rulers && C.rulers[c.owner], role = R0 ? (R0.id === c.id ? 'Ruler' : R0.regent === c.id ? 'Regent' : R0.heir === c.id ? 'Heir' : null) : null;
   const lt = partsTip(`Loyalty ${loy}%`, CM.loyParts(c), Math.round(CM.loyTarget(c)) + '%', 'Loyalty moves an eighth of the way toward this each week. Under 30%, a senior officer refuses forced burns; under 25%, a commander may go over to the enemy with the fleet.');
   const hl = c.owner === 'neu' ? '' : `<div class="chouse"><span>${hn ? esc(hn) : 'No great House'}</span><em class="${loy < 30 ? 'bad' : loy < 50 ? 'warn' : 'ok'}" data-tip="${tipA(lt)}">Loyalty ${loy}%</em>${role ? `<i class="croy">${role}</i>` : ''}${c.turnTo && c.turnTo === C.player ? '<i class="croy bm">Ours</i>' : ''}</div>`;
-  return `<div class="ccard ${opts.cls || ''}" ${opts.pick ? `data-pickc="${c.id}"` : ''} style="--fc:${colS(f)}"><div class="cport">${initials(c.name)}<i>${'★'.repeat(c.rank + 1)}</i></div><div class="cbody"><b>${esc(c.name)}</b><span>${CM.RANK[c.rank]} · ${esc(c.colour)}${c.ageKnown ? ' · age ' + c.age : ''}${c.wounded ? ` · <em class="bad">wounded ${c.wounded} wk</em>` : ''}</span>${hl}<div class="ctal">${tal}</div><div class="cxp" data-tip="${tipA(`${c.xp} experience${nx !== Infinity ? ' · ' + nx + ' for ' + CM.RANK[c.rank + 1] : ''} · ${c.battles} battles, ${c.wins} won`)}"><i style="width:${Math.round(Math.min(1, xp) * 100)}%"></i></div></div></div>`;
+  return `<div class="ccard ${opts.cls || ''}" ${opts.pick ? `data-pickc="${c.id}"` : ''} style="--fc:${colS(f)}"><div class="cport face">${faceSVG(c, { size: 40, dead: c.state === 'dead' })}<i>${'★'.repeat(c.rank + 1)}</i></div><div class="cbody"><b>${esc(c.name)}</b>${RV.rivalRec(c) ? `<em class="rivtag" data-tip="${tipA(`<div class='th'>A rival</div><div class='tdim'>${esc(RV.rivalRec(c).epithet)}: ${RV.recordLine(RV.rivalRec(c))}.</div>`)}">${esc(RV.rivalRec(c).epithet)}</em>` : ''}<span>${CM.RANK[c.rank]} · ${esc(c.colour)}${c.ageKnown ? ' · age ' + c.age : ''}${c.wounded ? ` · <em class="bad">wounded ${c.wounded} wk</em>` : ''}</span>${hl}<div class="ctal">${tal}</div><div class="cxp" data-tip="${tipA(`${c.xp} experience${nx !== Infinity ? ' · ' + nx + ' for ' + CM.RANK[c.rank + 1] : ''} · ${c.battles} battles, ${c.wins} won`)}"><i style="width:${Math.round(Math.min(1, xp) * 100)}%"></i></div></div></div>`;
 }
 function fleetPanel(fl) {
   const me = C.player, mine = fl.owner === me, tr = fl.transit;
@@ -826,6 +829,7 @@ function onClick(e) {
   if (d.a === 'menu') return menuUI();
   if (d.a === 'faction') return factionUI();
   if (d.a === 'ledger') return ledgerUI();
+  if (d.a === 'rivals') return rivalsUI();
   if (d.lg) { V.lgtab = d.lg; return ledgerUI(); }
   if (d.lm) { V.lgm = d.lm; return ledgerUI(); }
   if (d.lf) { V.lgf = d.lf; return ledgerUI(); }
@@ -1331,8 +1335,12 @@ async function endTurnUI() {
       const A0 = sideSum(cf, cf.att), D0 = sideSum(cf, cf.def);
       const myMobile = K.cfFleets(cf, me).some(f => f.ships.length);
       { const p = cf.space ? IN.locPos(cf.space.loc, LP) : LAY.pos[cf.world]; S.cam.x = p.x; S.cam.y = p.y; } S.cam.z = clamp(S.H * .035 / bodyOf(cf.world).r, Math.min(S.cam.z, 1e-3), .25);
-      let v = !myMobile ? 'auto' : (await sureWin(cf)) ? 'auto' : await battlePrompt(cf, A0, D0);
-      let res;
+      // talk before you shoot: when our ships meet theirs, the parley comes first (parley.js)
+      let v = null, res = null;
+      if (myMobile && PA.canParley(cf, me)) { const pr = await parleyUI(cf); res = pr.res || null; v = pr.v || null; }
+      if (res) { await battleResult(cf, res, snap, W0); await pendingUI(); if (C.over) break; continue; }
+      if (v === 'prompt') v = await battlePrompt(cf, A0, D0);
+      else if (!v) v = !myMobile ? 'auto' : (await sureWin(cf)) ? 'auto' : await battlePrompt(cf, A0, D0);
       if (v === 'withdraw') { res = { attWin: cf.att !== me, world: cf.world, att: cf.att, def: cf.def, atts: cf.atts, defs: cf.defs, withdrew: true, space: cf.space }; K.afterBattle(res); }
       else if (v === 'fight') res = await fightBattle(cf);
       else res = K.autoResolve(cf);
@@ -1407,6 +1415,71 @@ function sureWin(cf) {
     el.addEventListener('mouseleave', () => { el.classList.remove('held'); go(); }); go();
   });
 }
+// ---------------------------------------------------------------- the parley
+// when our ships meet theirs: they hail, we answer. Demand their surrender, offer terms, call out their champion,
+// or open fire. Each try is made once; a refusal is said aloud and the card stays open
+const pct = p => Math.round(p * 100) + '%';
+async function parleyUI(cf) {
+  const me = C.player, sp = cf.space; let ctx = PA.context(cf, me);
+  const foe = ctx.foe, hail = ctx.hail, used = {}, said = [];
+  const voiceC = () => (ctx.foeChamp && ctx.foeChamp.cmdr) || ctx.foeLead;
+  said.push({ o: foe, t: PA.say(foe, hail, hail === 'challenge' ? voiceC() : ctx.foeLead, cf.world) });
+  const who = o => o === me ? 'We' : (ctx.foeLead ? RV.rivalName(ctx.foeLead) : o === 'neu' ? 'The rebels' : K.BLOC_NAME[o]);
+  const ownChallenge = () => { if (hail === 'challenge' && !used.challenge) { used.challenge = true; PA.refuse(cf, me); said.push({ o: me, t: 'We do not answer their challenge. Every deck hears that we would not.' }); } };
+  const side = (c, o, lbl) => `<div class="pside" style="--fc:${colS(o)}">${c ? faceSVG(c, { size: 72 }) : `<div class="pnoface">${SHIELD(o, 46)}</div>`}<div><span class="kicker">${lbl}</span><b>${c ? esc(RV.rivalName(c)) : o === 'neu' ? 'Rebel captains' : esc(K.BLOC_NAME[o])}</b><i>${c ? `${CM.RANK[c.rank]} · ${esc(K.BLOC_NAME[o])}${RV.rivalRec(c) ? ` · <em class="rivtag">${esc(RV.recordLine(RV.rivalRec(c)))}</em>` : ''}` : 'No Gold in command'}</i></div></div>`;
+  for (;;) {
+    const q = ctx.q, strong = q >= .5, champs = ctx.myChamp && ctx.foeChamp;
+    const theirTerms = hail === 'terms' && strong;
+    const bar = `<div class="bop"><span style="width:${Math.round(q * 100)}%;background:${colS(me)}"></span><span style="width:${Math.round((1 - q) * 100)}%;background:${colS(foe)}"></span><em style="left:${Math.round(q * 100)}%"></em></div><div class="pbopl">If it comes to a fight: <b>${pct(q)}</b> to win on auto-resolve</div>`;
+    const chLine = champs ? `<div class="pduel"><span>Champions</span>${faceSVG(ctx.myChamp.cmdr || { name: ctx.myChamp.name, owner: me, colour: 'Gold', rank: 2, id: 'a' + ctx.myChamp.agent.id, talents: ['peerless'] }, { size: 30 })}<b>${esc(ctx.myChamp.name)}</b><i>${ctx.myChamp.rating}</i><em>vs</em><i>${ctx.foeChamp.rating}</i><b>${esc(ctx.foeChamp.name)}</b>${faceSVG(ctx.foeChamp.cmdr || { name: ctx.foeChamp.name, owner: foe, colour: 'Gold', rank: 2, id: 'a' + ctx.foeChamp.agent.id, talents: ['peerless'] }, { size: 30 })}<span>We win the duel ${pct(ctx.duelP)}</span></div>` : '';
+    const html = `<div class="kicker">${date(C.turn)} · ${sp ? 'Deep space off ' + nm(cf.world) : nm(cf.world)}</div><h2>The fleets hail each other</h2>
+      <div class="psides">${side(ctx.myLead, me, 'Our commander')}<div class="pvs">⇌</div>${side(ctx.foeLead, foe, cf.att === me ? 'Defending' : 'Attacking')}</div>${bar}
+      <div class="ptalk">${said.map(x => `<div class="pline ${x.o === me ? 'us' : 'them'}" style="--fc:${colS(x.o)}"><b>${esc(who(x.o))}</b><span>${esc(x.t)}</span></div>`).join('')}</div>${chLine}
+      ${cf.parley && cf.parley.lines.length ? `<div class="bparl">${cf.parley.lines.map(l => `<span>${esc(l)}</span>`).join('')}</div>` : ''}`;
+    const B = [];
+    B.push([used.demand ? 'x' : 'demand', `Demand their surrender · ${pct(ctx.pSurrender)}`, used.demand || ctx.pSurrender <= 0 ? 'off' : '', ctx.pSurrender > 0 ? 'If they strike their colours, every ship of theirs comes over as a prize and their commanders are taken. If they refuse, their defiance stiffens them a little.' : 'They will not yield: the battle is not lost enough for them, or their commander is not the kind.']);
+    B.push([used.terms ? 'x' : 'terms', theirTerms ? 'Accept their terms: let them go' : strong ? `Offer terms: let them go · ${pct(ctx.pTerms)}` : `Ask leave to withdraw · ${pct(ctx.pTerms)}`, used.terms || (!theirTerms && ctx.pTerms <= 0) ? 'off' : '', strong ? 'They leave the field unharmed and we hold it. No ships lost on either side, and no weariness.' : 'We leave the field unharmed: no damage on the way out, unlike a withdrawal under fire.']);
+    B.push([used.challenge || !champs ? 'x' : 'challenge', hail === 'challenge' ? `Accept the challenge · we win ${pct(ctx.duelP)}` : `Challenge their champion · they accept ${pct(ctx.pChallenge)}`, used.challenge || !champs ? 'off' : '', champs ? `Single combat before the lines close. The winner's side fights with ×${PA.DUEL_MUL} strength and +${PA.DUEL_MOR} morale, the loser's with the reverse, and the beaten champion may die, be wounded or yield. A challenge refused shames the side that refused (×${PA.SHAME_MUL}, −${PA.SHAME_MOR} morale).` : 'No champion: a side needs a commander or a Peerless champion with its fleets.']);
+    if (hail === 'demand' && !used.strike) B.push(['strike', 'Strike our colours', 'bad', 'Give up the fight: every ship of ours in this battle goes over to them, and our commanders are taken.']);
+    B.push(['auto', 'Auto-resolve', '', `Fight it out on auto-resolve: ${pct(q)} to win.`]);
+    B.push(['fight', 'Open fire ▸', 'go', 'No more words: to the battle screen.']);
+    const v = await modal(html, B, { cls: 'event parley', esc: 'fight', enter: 'fight' });
+    if (v === 'x') continue;
+    const roll = Math.random();
+    if (v === 'fight' || v === 'auto') { ownChallenge(); return { v: v === 'fight' ? 'prompt' : 'auto' }; }
+    if (v === 'strike') { const ok = await modal(`<h2>Strike our colours?</h2><p>Every ship of ours in this battle goes over to ${esc(K.BLOC_NAME[foe])}, and our commanders here are taken prisoner.</p>`, [['no', 'No: back to the parley'], ['yes', 'Strike our colours', 'bad']], { esc: 'no' }); if (ok === 'yes') return { res: PA.surrender(cf, foe, me) }; continue; }
+    if (v === 'demand') { used.demand = true; ownChallenge(); said.push({ o: me, t: 'Strike your colours. Your crews will be spared.' });
+      if (roll < ctx.pSurrender) { said.push({ o: foe, t: 'They strike their colours.' }); return { res: PA.surrender(cf, me, foe) }; }
+      said.push({ o: foe, t: PA.say(foe, 'no', ctx.foeLead, cf.world) }); PA.defied(cf, foe); (cf.parley.lines).push(`${who(foe)} refused to strike.`); }
+    else if (v === 'terms') { used.terms = true; ownChallenge();
+      if (strong) { said.push({ o: me, t: theirTerms ? 'Go, then. Leave the field.' : 'Leave the field and nobody dies here today.' }); if (theirTerms || roll < ctx.pTerms) return { res: PA.terms(cf, foe) }; }
+      else { said.push({ o: me, t: 'Let us withdraw. Nobody need die here today.' }); if (roll < ctx.pTerms) return { res: PA.terms(cf, me) }; }
+      said.push({ o: foe, t: PA.say(foe, 'no', ctx.foeLead, cf.world) }); }
+    else if (v === 'challenge') { used.challenge = true;
+      if (hail !== 'challenge') { said.push({ o: me, t: `${ctx.myChamp.name} will meet your best, before the guns speak.` });
+        if (roll >= ctx.pChallenge) { PA.refuse(cf, foe); said.push({ o: foe, t: 'They will not send a champion.' }); cf.parley.lines.push(`${who(foe)} refused our challenge: their crews saw it.`); ctx = Object.assign(PA.context(cf, me), { hail }); continue; } }
+      const d = PA.duel(ctx), W = d.winner, L = d.loser;
+      const fateT = { killed: `${L.name} is cut down.`, wounded: `${L.name} is carried off wounded.`, yielded: `${L.name} yields, and is taken.`, beaten: `${L.name} is beaten.` }[d.fate];
+      said.push({ o: d.weWin ? me : foe, t: `${W.name} wins the duel. ${fateT}` });
+      cf.parley.lines.push(`${W.name} beat ${L.name} in single combat: ${d.weWin ? 'our' : 'their'} crews go in with their blood up.`);
+      sfx && sfx(d.weWin ? 'clang' : 'deny'); }
+    // what has been said changes the odds and their answers: work them out again, keeping their opening words
+    ctx = Object.assign(PA.context(cf, me), { hail });
+    if (!K.cfFleets(cf, foe).some(f => f.ships.length)) return { v: 'auto' };
+  }
+}
+// ---------------------------------------------------------------- rivals
+function rivalsUI() {
+  const me = C.player, L = RV.rivalsOf(me).map(R => ({ R, c: C.cmdrs.find(x => x.id === R.id) })).filter(x => x.c).sort((a, b) => (a.c.state === 'dead') - (b.c.state === 'dead') || (b.R.wins * 2 + b.R.esc) - (a.R.wins * 2 + a.R.esc));
+  const where = c => { if (c.state === 'dead') return '<em class="bad">Dead</em>'; if (c.state === 'captured') return c.captor === me ? '<em class="good">Our prisoner</em>' : `Prisoner of ${esc(K.BLOC_NAME[c.captor] || 'raiders')}`; if (c.wounded) return `Wounded · ${c.wounded} wk`;
+    const fl = c.fleet != null && C.fleets.find(x => x.id === c.fleet); if (!fl) return 'Ashore, awaiting a command';
+    return vis(fl) === 2 ? `Commands the <b>${esc(fl.name)}</b>, ${fl.ships.length} ships${fl.at ? ' at ' + nm(fl.at) : fl.transit ? ' bound for ' + nm(fl.transit.to) : ''}` : 'Commands a fleet: where, we do not know'; };
+  const card = ({ R, c }) => `<div class="rcard ${c.state === 'dead' ? 'gone' : ''}" style="--fc:${colS(c.owner)}">${faceSVG(c, { size: 64, dead: c.state === 'dead' })}<div class="rbody"><b>${esc(c.name)}</b><span class="rep">${esc(R.epithet)}</span><span>${CM.RANK[c.rank]} · ${esc(K.BLOC_NAME[c.owner])}</span><span class="rrec">${esc(RV.recordLine(R))}</span><span>${where(c)}</span>
+    ${R.learned.length ? `<div class="ctal">${R.learned.map(t => `<span class="tal" data-tip="${tipA(`<div class='th'>${CM.TALENT[t].name}</div><div class='tdim'>${CM.TALENT[t].desc} · learned fighting us</div>`)}">${CM.TALENT[t].name}</span>`).join('')}</div>` : ''}
+    <div class="rlog">${R.log.slice(-4).reverse().map(e => `<span data-go="${e.w}">${date(e.t).replace('Week ', 'Wk ')}: ${e.k === 'beat' ? 'beat us at' : 'got away at'} ${nm(e.w)}</span>`).join('')}</div></div></div>`;
+  modal(`<div class="kicker">${date(C.turn)}</div><h2>Rivals</h2><p class="dim">Enemy commanders who have beaten us, or whom we beat and who got away. Each takes a name from the fight and learns from it; their masters give them fleets again and send them after us. Killing or taking one goes in the Chronicle.</p>
+    ${L.length ? `<div class="rgrid">${L.map(card).join('')}</div>` : '<div class="ihint">No rivals yet. Win your battles cleanly and keep it that way.</div>'}`, [['ok', 'Close', 'go']], { esc: 'ok', enter: 'ok', cls: 'event wide' });
+}
 // what only a battle fought on the map can win here, and what it risks: the line under the forecast
 function fightWins(cf, fc, att, myLost) {
   const me = C.player, foeO = att ? cf.def : cf.att, foes = K.cfFleets(cf, foeO).flatMap(f => f.ships), mine = K.cfFleets(cf, me).flatMap(f => f.ships);
@@ -1437,10 +1510,11 @@ function battlePrompt(cf, A0, D0) {
   const range = v => v < .5 ? 'none' : `~${Math.max(1, Math.round(v))}`;
   // the world, and who leads each side, before the numbers
   const pic = sp ? null : portrait(cf.world), lead = o => { const f = K.cfFleets(cf, o).concat(C.fleets.filter(x => x.owner === o && x.transit && x.transit.to === cf.world && x.transit.left === 1)).map(x => CM.cmdrOf(x)).find(Boolean); return lead0(f, o); };
-  const lead0 = (c, o) => c ? `<b style="color:${colS(o)}">${esc(c.name)}</b>` : `<b style="color:${colS(o)}">${o === 'neu' ? 'The garrison' : K.BLOC_NAME[o]}</b>`;
+  const lead0 = (c, o) => c ? `<span class="bvf">${faceSVG(c, { size: 26 })}</span><b style="color:${colS(o)}">${esc(RV.rivalName(c))}</b>` : `<b style="color:${colS(o)}">${o === 'neu' ? 'The garrison' : K.BLOC_NAME[o]}</b>`;
   return modal(`<div class="bhead">${pic ? `<img class="bport" src="${pic}" alt="">` : ''}<div><div class="kicker">${date(C.turn)} · ${sp ? SPACE_T[sp.terrain] : WDEF[cf.world].region || ''}</div><h2>${sp ? 'Battle in deep space off ' + nm(cf.world) : 'Battle of ' + nm(cf.world)}</h2><div class="bvs">${lead(cf.att)}<i>${sp ? (sp.kind === 'ambush' ? 'ambushes' : 'intercepts') : cf.att === me ? 'attacks' : 'comes against'}</i>${lead(cf.def)}${cf.withWorld ? `<i>and the world's guns</i>` : ''}</div>${sp ? `<div class="tdim">${SPACE_D[sp.terrain]}${sp.kind === 'ambush' ? ' Out of the dark: the ambushers strike first (+25% on auto-resolve).' : ''}</div>` : ''}</div></div>
     <div class="bop" data-tip="${tipA('Balance of power: fleets, crews and condition, with the world\'s platforms on the defender\'s side')}"><span style="width:${Math.round(share * 100)}%;background:${meC}"></span><span style="width:${Math.round((1 - share) * 100)}%;background:${foeC}"></span><em style="left:${Math.round(share * 100)}%"></em></div>
     <div class="bopl"><b>${fmt(myS)}</b><span class="${lc}" data-tip="${tipA('From 300 dry runs of this battle on auto-resolve. Red figures on the cards are each ship\'s chance of being lost.')}">Auto-resolve: ${label} · ${Math.round(myWin * 100)}% to win · we lose ${range(myLost)}, they lose ${range(foeLost)}</span><b>${fmt(foeS)}</b></div>${incLine(incA, cf.att)}${incLine(incD, cf.def)}
+    ${cf.parley && cf.parley.lines.length ? `<div class="bparl"><div class="kicker">At the parley</div>${cf.parley.lines.map(l => `<span>${esc(l)}</span>`).join('')}</div>` : ''}
     ${fightWins(cf, fc, att, myLost)}
     <div class="bsides">${sideCards(cf, cf.att, false, att, fc)}${sideCards(cf, cf.def, cf.withWorld, !att, fc)}</div>
     <label class="bskip" data-tip="${tipA('Battles the forecast calls certain (97% or better, with no ship of ours expected lost) are auto-resolved after a short notice with a Fight it anyway button.')}"><input type="checkbox" data-skipsure ${OPTS.skipTrivial !== false ? 'checked' : ''}> Auto-resolve sure wins without asking</label>`,
@@ -1453,13 +1527,15 @@ function battleResult(cf, res, snap, W0) {
   const lost = i => snap[i].filter(e => fate(e) !== 'ok').length, tot = i => snap[i].length;
   const myLoss = lost(meSide) / Math.max(1, tot(meSide)), foeLoss = lost(1 - meSide) / Math.max(1, tot(1 - meSide));
   const won = (res.attWin && cf.att === me) || (!res.attWin && cf.def === me);
-  const grade = res.held && won ? 'The orbit holds' : cf.space && res.through ? (won ? 'Through the line' : 'They broke through') : cf.space && res.timeout ? (won ? 'Lost in the dark' : 'They slipped away') : res.withdrew ? (cf.space ? (cf.att === me ? 'Broken off' : 'Through the gauntlet') : cf.att === me ? 'Withdrawal' : 'Orbit abandoned') : won && res.rout ? (myLoss < .2 ? 'Rout' : 'The enemy breaks') : won ? (K.GRADES[res.grade] ? K.GRADES[res.grade].name : myLoss < .15 && foeLoss > .5 ? 'Decisive victory' : myLoss > .5 ? 'Pyrrhic victory' : myLoss < foeLoss * .6 ? 'Clear victory' : 'Close victory') : (foeLoss > .5 ? 'Close defeat' : myLoss > .6 ? 'Crushing defeat' : 'Defeat');
+  const grade = res.surrendered ? (won ? 'They strike their colours' : 'We strike our colours') : res.terms ? (won ? 'They leave the field' : 'We leave unharmed') : res.held && won ? 'The orbit holds' : cf.space && res.through ? (won ? 'Through the line' : 'They broke through') : cf.space && res.timeout ? (won ? 'Lost in the dark' : 'They slipped away') : res.withdrew ? (cf.space ? (cf.att === me ? 'Broken off' : 'Through the gauntlet') : cf.att === me ? 'Withdrawal' : 'Orbit abandoned') : won && res.rout ? (myLoss < .2 ? 'Rout' : 'The enemy breaks') : won ? (K.GRADES[res.grade] ? K.GRADES[res.grade].name : myLoss < .15 && foeLoss > .5 ? 'Decisive victory' : myLoss > .5 ? 'Pyrrhic victory' : myLoss < foeLoss * .6 ? 'Clear victory' : 'Close victory') : (foeLoss > .5 ? 'Close defeat' : myLoss > .6 ? 'Crushing defeat' : 'Defeat');
   const col = i => { const o = i === 0 ? cf.att : cf.def; return `<div class="bside" style="--fc:${colS(o)}"><div class="bsh">${SHIELD(o, 30)}<div><b>${K.BLOC_NAME[o]}</b><span>Lost ${lost(i)} of ${tot(i)} ships</span></div></div><div class="bcards">${snap[i].map(e => { const fa = fate(e); return shipCard(e.s, e.o, { dead: fa === 'dead', prize: fa === 'prize' }); }).join('')}</div>${i === 1 && cf.withWorld && (W0.gun !== w.gun || W0.shield !== w.shield) ? `<div class="bdef"><span class="bad">⊕ ${W0.gun - w.gun} gun platforms destroyed</span><span class="bad">◈ ${W0.shield - w.shield} shield platforms destroyed</span></div>` : ''}</div>`; };
   const after = cf.quest ? `<div class="${res.quest === 'won' ? 'good' : 'bad'} big">${esc(QS.QUESTS[cf.quest].title)}: ${res.quest === 'won' ? 'done' : 'it fails'}.</div>` : cf.space ? '' : res.taken && cf.assault ? `<div class="good big">The legions hold two landing zones of three: ${nm(cf.world)} is taken.</div>` : cf.assault && !res.taken ? `<div class="bad big">The assault on ${nm(cf.world)} fails: the garrison holds. The siege goes on.</div>` : res.taken ? `<div class="${res.attWin === (cf.att === me) ? 'good' : 'bad'} big">${res.rain ? `The Iron Rain fell: ${nm(cf.world)} is taken.` : `The orbital authority was boarded: ${nm(cf.world)} is taken.`}</div>` : w.siege && !res.withdrew ? `<p class="dim">${nm(cf.world)} is under siege by ${K.BLOC_NAME[w.siege.by]}.${w.siege.by === me ? ' Hold orbit a week, then drop the Iron Rain.' : ''}</p>` : '';
   // the grade of the victory, and what it was worth
   const GD = res.grade && K.GRADES[res.grade], sp0 = res.spoils || {}, foeN = K.BLOC_NAME[won ? (cf.att === me ? cf.def : cf.att) : (cf.att === me ? cf.att : cf.def)];
   const gradeLine = GD ? `<div class="vgrade g-${res.grade} ${won ? 'ours' : 'theirs'}"><b>${won ? 'Grade: ' : 'Theirs: '}${GD.name}</b><span>${esc(GD.text)}</span><span class="vgx">${[sp0.inf ? `${won ? '+' : 'They gain '}${sp0.inf} influence` : '', sp0.weary ? `${won ? foeN : 'Our'} war-weariness +${sp0.weary}` : '', sp0.xp ? `${won ? 'Our' : 'Their'} commanders +${sp0.xp} xp` : '', `the court ${GD.react >= 1.5 ? 'rejoices' : GD.react >= 1 ? 'approves' : 'counts the cost'}`].filter(Boolean).join(' · ')}</span>${!res.tactical && won && res.grade === 'victory' ? `<span class="vgcap">Auto-resolve never rises above Victory. Decisive victories and Annihilations are won by taking command.</span>` : ''}</div>` : '';
-  return modal(`<div class="kicker">${cf.space ? 'Battle in deep space off ' : 'Battle of '}${nm(cf.world)} · ${date(C.turn)}</div><h2 class="${won ? 'good' : 'bad'}">${grade}</h2>${gradeLine}${after}${res.aar ? aarHTML(res.aar, meSide) : ''}<div class="bsides">${col(0)}${col(1)}</div>`, [['ok', 'Continue', 'go']], { enter: 'ok', esc: 'ok', cls: 'battle wide' });
+  const rivL = (res.rivals || []).map(e => { const c = C.cmdrs.find(x => x.id === e.id), R = c && RV.rivalRec(c); if (!R) return ''; return `<div class="rivline">${faceSVG(c, { size: 34 })}<div><b>${esc(c.name)}, ${esc(R.epithet)}</b><span>${e.kind === 'beat' ? (e.first ? 'Beat us here. A new rival.' : 'Has beaten us again.') : (e.first ? 'Got away from us here. A new rival.' : 'Got away again.')} ${esc(RV.recordLine(R))}.${e.learned ? ` Learned from it: <em>${esc(CM.TALENT[e.learned].name)}</em>.` : ''}</span></div></div>`; }).join('');
+  const parl = cf.parley && cf.parley.lines.length && !res.surrendered && !res.terms ? `<div class="bparl"><div class="kicker">At the parley</div>${cf.parley.lines.map(l => `<span>${esc(l)}</span>`).join('')}</div>` : '';
+  return modal(`<div class="kicker">${cf.space ? 'Battle in deep space off ' : 'Battle of '}${nm(cf.world)} · ${date(C.turn)}</div><h2 class="${won ? 'good' : 'bad'}">${grade}</h2>${gradeLine}${parl}${rivL}${after}${res.aar ? aarHTML(res.aar, meSide) : ''}<div class="bsides">${col(0)}${col(1)}</div>`, [['ok', 'Continue', 'go']], { enter: 'ok', esc: 'ok', cls: 'battle wide' });
 }
 // the after-action report of a battle fought on the tactical map
 function aarHTML(A, meSide) {
@@ -1517,7 +1593,7 @@ function lineChart(key, W = 900, H = 230, label = true) {
     for (const L of lbl) { const left = L.x < pad.l + 70; g += `<text x="${(left ? L.x + 18 : L.x).toFixed(1)}" y="${Math.max(11, L.y).toFixed(1)}" class="lg-lbl" fill="${colS(L.f)}" text-anchor="${left ? 'start' : 'end'}">${fmt(L.v)}</text>`; } }
   return `<svg class="lgchart" viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet">${g}</svg>`;
 }
-const CHK = { battle: ['⚔', 'Battles'], world: ['◉', 'Worlds'], capital: ['◉', 'Worlds'], fall: ['✕', 'Worlds'], death: ['✝', 'Rulers and heroes'], capture: ['⛓', 'Rulers and heroes'], freed: ['⛓', 'Rulers and heroes'], succession: ['♛', 'Rulers and heroes'], defect: ['↯', 'Rulers and heroes'], war: ['⚔', 'Diplomacy'], peace: ['☮', 'Diplomacy'], treaty: ['✍', 'Diplomacy'], alliance: ['✦', 'Diplomacy'], capit: ['⚑', 'Diplomacy'], law: ['§', 'Courts'], betray: ['↯', 'Courts'], crisis: ['⚠', 'Crises'], start: ['◆', 'All'] };
+const CHK = { battle: ['⚔', 'Battles'], world: ['◉', 'Worlds'], capital: ['◉', 'Worlds'], fall: ['✕', 'Worlds'], death: ['✝', 'Rulers and heroes'], rival: ['☠', 'Rulers and heroes'], duel: ['⚔', 'Rulers and heroes'], capture: ['⛓', 'Rulers and heroes'], freed: ['⛓', 'Rulers and heroes'], succession: ['♛', 'Rulers and heroes'], defect: ['↯', 'Rulers and heroes'], war: ['⚔', 'Diplomacy'], peace: ['☮', 'Diplomacy'], treaty: ['✍', 'Diplomacy'], alliance: ['✦', 'Diplomacy'], capit: ['⚑', 'Diplomacy'], law: ['§', 'Courts'], betray: ['↯', 'Courts'], crisis: ['⚠', 'Crises'], start: ['◆', 'All'] };
 function chronList(L, max = 200) {
   return `<div class="chron">${L.slice(-max).reverse().map(e => `<div class="chr ${e.k}" ${e.at ? `data-go="${e.at}"` : ''} style="--fc:${e.f ? colS(e.f) : '#9aa0a6'}"><span class="cw">${date(e.t).replace('Week ', 'W').replace(' PCE', '')}</span><i>${(CHK[e.k] || ['·'])[0]}</i><span class="ct">${esc(e.text)}</span></div>`).join('') || '<div class="ihint">Nothing yet.</div>'}</div>`;
 }

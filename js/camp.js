@@ -15,6 +15,7 @@ import * as CQ from './conquest.js';
 import * as SR from './starts.js';
 import * as QS from './quests.js';
 import * as TRN from './terrain.js';
+import * as RV from './rivals.js';
 export const onCapture = (w, by, base) => EC.onCapture(w, by, base);
 // a world has changed hands by force: its conqueror decides what to do with it (conquest.js)
 export const worldTaken = (w, by, old, how) => CQ.onTaken(w, by, old, how);
@@ -522,7 +523,7 @@ const sidesOf = (cf, clone) => { const w = C.worlds[cf.world], amb = cf.space &&
   return [cf.att, cf.def].map((o, i) => { const fls = cfFleets(cf, o), side = sideOf(cf, o) || [o], tot = fls.reduce((a, f) => a + fleetStr(f), 0) || 1, own = new Map(), ships = [];
     for (const f of fls) for (const s0 of f.ships) { const s = clone ? Object.assign({}, s0) : s0; own.set(s, f.owner); ships.push(s); }
     const inc = cf.space ? [] : C.fleets.filter(f => side.includes(f.owner) && f.transit && !f.transit.retreat && f.transit.to === cf.world && f.transit.left === 1 && !f.engage); /* a week out: they arrive while the battle is joined */
-    return { o, os: side, own, ships, extra: (i === 1 && cf.withWorld ? defStr(w) : 0) + inc.reduce((a, f) => a + fleetStr(f) * .7, 0), reinf: inc.length, mul: fls.reduce((a, f) => a + fleetStr(f) * CM.arMul(f) * TE.arMul(f.owner), 0) / tot * (amb && i === 0 ? 1.25 : 1) * (CQ.fears(o, i === 0 ? cf.def : cf.att) ? .93 : 1), shield: i === 1 && fls.some(f => CM.has(f, 'shield')) }; }); };
+    return { o, os: side, own, ships, extra: (i === 1 && cf.withWorld ? defStr(w) : 0) + inc.reduce((a, f) => a + fleetStr(f) * .7, 0), reinf: inc.length, mul: fls.reduce((a, f) => a + fleetStr(f) * CM.arMul(f) * TE.arMul(f.owner), 0) / tot * (amb && i === 0 ? 1.25 : 1) * (CQ.fears(o, i === 0 ? cf.def : cf.att) ? .93 : 1) * ((cf.parley && cf.parley.mul[i]) || 1) /* what the parley left: a champion's win, a refused challenge */, shield: i === 1 && fls.some(f => CM.has(f, 'shield')) }; }); };
 // the forecast the pre-battle screen shows: a few hundred dry runs of the same battle
 export const canWithdraw = (world, o) => !(C.withdrawn && C.withdrawn[world + '|' + o] === C.turn - 1);
 export function forecastBattle(cf, n = 300) {
@@ -581,11 +582,12 @@ export function afterBattle(res) {
   // the cost of falling back: a fleet that breaks contact under fire loses its cripples; one that slips away
   // before the battle still takes hits on the way out, and cannot do it twice running against the same foe
   for (const f of here(loser)) {
+    if (res.terms) continue; // terms agreed at the parley: they leave unharmed
     if (res.withdrew) { for (const s of f.ships) s.hp = clamp(s.hp - .08 - rnd() * .1, .05, 1); }
     else if (!res.tactical) { const m = clamp((res.margin || 1.5) - .6, .2, 1.2) * (here(winner).some(o => CM.has(o, 'hunter')) ? 1.35 : 1); for (const s of f.ships) { if (s.hp < .35 && rnd() < .45 * m) s.hp = 0; else s.hp = clamp(s.hp - rnd() * .1 * m, .05, 1); } f.ships = f.ships.filter(s => s.hp > 0); }
   }
   if (res.space) { afterSpace(res, winner, loser); chronBattle(res, winner, loser, leads); return; }
-  if (res.withdrew) { C.withdrawn = C.withdrawn || {}; for (const o of loses) C.withdrawn[res.world + '|' + o] = C.turn; }
+  if (res.withdrew && !res.terms) { C.withdrawn = C.withdrawn || {}; for (const o of loses) C.withdrawn[res.world + '|' + o] = C.turn; }
   /* every losing power falls back to a world of its own */
   for (const f of here(loser)) { if (!f.ships.length) continue; const home = nearestOwned(f.owner, res.world); if (home) { f.at = null; const n = travel(res.world, home); f.transit = { from: res.world, to: home, left: n, total: n, retreat: true, bat: res.world + '|' + C.turn }; } else if (w.owner !== f.owner) f.ships = []; else { f.bat = res.world + '|' + C.turn; if (!bottled(f) && (f.owner === C.player || wins.includes(C.player))) note(`${f.name} is bottled up over ${bodyOf(res.world).name}: beaten, with nowhere to run, it cannot hold the orbit against the siege.`, f.owner === C.player ? 'bad' : 'gold', res.world); f.bottled = res.world; } }
   // nowhere to run: besieged in port. A fleet beaten over its last world is bottled up there: it fights on each week, but
@@ -599,7 +601,7 @@ export function afterBattle(res) {
   else if (wins.includes(me)) note(`Victory at ${nm}: our ships fight beside ${BLOC_NAME[winner]}, and ${BLOC_NAME[loser]} falls back.`, 'good', res.world);
   else if (loses.includes(me)) note(`Defeat at ${nm}: ${BLOC_NAME[loser]} is beaten, and our ships fall back with it.`, 'bad', res.world);
   else if (winner !== 'neu' && loser !== 'neu') note(`${BLOC_NAME[winner]} defeats ${BLOC_NAME[loser]} at ${nm}.`, '', res.world);
-  CM.battleFate(Object.assign({}, res, { margin: res.margin })); if (!res.withdrew) { for (const o of wins) P.react(o, 'victory', (o === winner ? 1 : .5) * GR.react); for (const o of loses) P.react(o, 'defeat', (o === loser ? 1 : .5) * GR.defeat); for (const f of C.fleets) if (loses.includes(f.owner) && f.transit && f.transit.bat === res.world + '|' + C.turn) AG.battleLost(f); gradeSpoils(res, GR, winner, loser, here(winner)); }
+  CM.battleFate(Object.assign({}, res, { margin: res.margin })); RV.afterBattle(res); if (!res.withdrew) { for (const o of wins) P.react(o, 'victory', (o === winner ? 1 : .5) * GR.react); for (const o of loses) P.react(o, 'defeat', (o === loser ? 1 : .5) * GR.defeat); for (const f of C.fleets) if (loses.includes(f.owner) && f.transit && f.transit.bat === res.world + '|' + C.turn) AG.battleLost(f); gradeSpoils(res, GR, winner, loser, here(winner)); }
   chronBattle(res, winner, loser, leads); aiTally(res, w);
   // the winner lays siege; a siege left by a power whose ships are no longer here passes to the winner
   if (hostile(winner, w.owner) && (!w.siege || (w.siege.by !== winner && !fleetsAt(res.world, w.siege.by).length))) { newSiege(w, winner); if (w.owner === me) note(`${nm} is under siege!`, 'bad', res.world); else if (winner === me) note(`${nm} is under siege. Bring troops for an Iron Rain.`, 'gold', res.world); }
@@ -620,7 +622,7 @@ function afterSpace(res, winner, loser) {
   if (res.through || res.timeout) { if (loser === me) note(res.through ? `The enemy breaks through our line ${nmS} and holds its course.` : `We lose them in the dark ${nmS}: the enemy slips away.`, 'bad', e.near); }
   else if (winner === me) note(`Victory ${nmS}: ${BLOC_NAME[loser]} ${res.withdrew ? 'breaks off' : 'is beaten'}.`, 'good', e.near);
   else if (loser === me) note(`Defeat ${nmS}.`, 'bad', e.near);
-  CM.battleFate(Object.assign({}, res, { margin: res.margin })); if (!res.withdrew) { const GR = GRADES[res.grade] || GRADES.victory; for (const o of res.wins || [winner]) P.react(o, 'victory', (o === winner ? 1 : .5) * GR.react); for (const o of res.loses || [loser]) P.react(o, 'defeat', (o === loser ? 1 : .5) * GR.defeat); gradeSpoils(res, GR, winner, loser, C.fleets.filter(f => f.batE === e.id && (res.wins || [winner]).includes(f.owner))); }
+  CM.battleFate(Object.assign({}, res, { margin: res.margin })); RV.afterBattle(res); if (!res.withdrew) { const GR = GRADES[res.grade] || GRADES.victory; for (const o of res.wins || [winner]) P.react(o, 'victory', (o === winner ? 1 : .5) * GR.react); for (const o of res.loses || [loser]) P.react(o, 'defeat', (o === loser ? 1 : .5) * GR.defeat); gradeSpoils(res, GR, winner, loser, C.fleets.filter(f => f.batE === e.id && (res.wins || [winner]).includes(f.owner))); }
 }
 // what the grade of a victory is worth beyond the court's mood: the loser's war-weariness, the winner's influence,
 // and the winning commanders' standing
@@ -957,7 +959,8 @@ function targetVal(f, fl, id, D, agg) {
   return 1 + (fl && w.siege && w.siege.by === f && troopsOf(fl) > 60 ? 4 : 0) + (id === CAPITAL[w.owner] ? 1.5 : 0) + (w.owner === C.player ? (C.turn < [8, 4, 2][C.difficulty] ? -.6 : .35 * agg) : 0) + (WORLDS.find(x => x.id === id).prod.he > 10 ? .4 : 0)
     + (g && g.w === id ? 2.5 : 0) + D.revenge * Math.max(0, -op - 30) / 40 + (w.lv.yard >= 2 ? .3 * D.ops : 0)
     + (nearDead(w.owner) ? (id === CAPITAL[w.owner] ? 3.5 : 1.5) : 0) + (w.owner === 'neu' && w.home === f ? 1.5 : 0) /* the finishing blow; our own worlds in revolt */
-    + (w.owner !== 'neu' ? farFrom(f, w.owner, id) * (D.dark >= .5 ? 1.1 : .7) : 0) + (runaway(w.owner) && w.owner !== f ? .6 : 0); /* where their fleets are not; the power that is winning */
+    + (w.owner !== 'neu' ? farFrom(f, w.owner, id) * (D.dark >= .5 ? 1.1 : .7) : 0) + (runaway(w.owner) && w.owner !== f ? .6 : 0) /* where their fleets are not; the power that is winning */
+    + (fl && w.owner === C.player && RV.isRival(CM.cmdrOf(fl)) ? 1 : 0); /* a rival of the player's goes looking for the rematch */
 }
 // the fog of war: what a power's agents make of a world's defenders is never quite right. Each power reads each world
 // with its own error, which holds for a month at a time and is smaller for a ruler who spies first (rulers.js agents):

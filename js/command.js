@@ -10,6 +10,7 @@ import * as IN from './intel.js';
 import * as P from './politics.js';
 import * as RU from './rulers.js';
 import * as ST from './story.js';
+import * as RV from './rivals.js';
 
 const rnd = Math.random, clamp = (v, a, b) => v < a ? a : v > b ? b : v, pickOne = a => a[Math.floor(rnd() * a.length)];
 export const RANK = ['Legate', 'Praetor', 'Imperator', 'ArchImperator'];
@@ -308,7 +309,8 @@ export function cmdrTick() {
   // the AI gives its commanders to its largest fleets
   for (const f of ['rep', 'soc', 'rim']) if (C.fac[f].ai) {
     const fl = C.fleets.filter(x => x.owner === f && !x.cmdr && !x.transit && x.ships.length > 3).sort((a, b) => b.ships.length - a.ships.length);
-    for (const x of fl) { const c = pool(f).sort((a, b) => b.rank - a.rank)[0]; if (!c) break; assign(c, x); }
+    // a rival of the player's comes back first, to the biggest fleet: the AI wants that rematch (AI chat)
+    for (const x of fl) { const c = pool(f).sort((a, b) => (b.rank + (RV.isRival(b) ? 1.5 : 0)) - (a.rank + (RV.isRival(a) ? 1.5 : 0)))[0]; if (!c) break; assign(c, x); RV.onAssigned(c, x); }
   }
   tidy();
 }
