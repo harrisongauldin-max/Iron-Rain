@@ -12,7 +12,8 @@ import { HAS_3D, buildHull, hullTextures, paintOf, buildStation, missileGeoOf, m
 import { mergeGeometries } from '../vendor/three/utils/BufferGeometryUtils.js';
 import { buildSlip, ganymedeDocks, venusDocks, phobosTraffic } from './yards.js';
 import { S } from './state.js';
-import { SHAPES, BODIES, ICON_SCALE, DEFS, fshape, HULL_REF, M_TO_UNITS } from './data.js';
+import { SHAPES, BODIES, ICON_SCALE, DEFS, fshape, HULL_REF, M_TO_UNITS, FACTIONS, NEUTRAL_C } from './data.js';
+import { C as CAMP, BLOCS } from './camp.js';
 import { TAU, PI, rand, clamp, hyp, hex, angDiff } from './util.js';
 import { grav } from './physics.js';
 import { disabled, mainAmmo, needsService, groupList, defaultRally, worldUnderAttack, nukesOf } from './sim.js';
@@ -625,7 +626,7 @@ export async function initRender() {
   for (const b of Object.values(B)) scene.add(b.mesh);
   buildPost();
   setBloom(S.bloom);
-  window.__BODIES = BODIES; window.__CAM = { projectTo, toWorld, footprint }; window.__R = { scene, B, orbitL, PUNCH, cometPos, COMETS, rocksG, shipsG, bodiesG, turretM, debrisM, bgMesh, get renderer() { return renderer; }, get bloom() { return bloomPass; }, get gen() { return GEN; }, get shipVis() { return shipVis; }, mountClear, clearAt };
+  window.__BODIES = BODIES; window.__CAM = { projectTo, toWorld, footprint }; window.__R = { scene, B, orbitL, PUNCH, cometPos, COMETS, get bodyVis() { return bodyVis; }, rocksG, shipsG, bodiesG, turretM, debrisM, bgMesh, get renderer() { return renderer; }, get bloom() { return bloomPass; }, get gen() { return GEN; }, get shipVis() { return shipVis; }, mountClear, clearAt };
   return renderer;
 }
 function sizeOverlay() { ov.width = Math.round(S.W * ODPR); ov.height = Math.round(S.H * ODPR); ov.style.width = S.W + 'px'; ov.style.height = S.H + 'px'; }
@@ -797,8 +798,10 @@ const ROT_DAYS = { mercury: 58.6, venus: -243, earth: 1, mars: 1.03, jupiter: .4
 // the campaign's clock read off Earth's place in its orbit (one lap a year, 52 turns), plus the wall clock turning the
 // worlds slowly between turns: a world's face in the map is where that many days of spin would leave it
 function spinPhase(b, L, i) { const E = L && L.pos.earth, sp = L && L.pos.sun; const weeks = E ? ((Math.atan2(E.y - sp.y, E.x - sp.x) + TAU) % TAU) / TAU * 52 : 0;
-  const P = ROT_DAYS[b.id] || (b.gas ? .45 : 1.2 + (i % 5) * .6), days = weeks * 7, wall = performance.now() / 1000 / (Math.abs(P) * 160); // a wall-clock day of spin every 160 s times the period
+  const P = ROT_DAYS[b.id] || (b.gas ? .45 : 1.2 + (i % 5) * .6), days = weeks * 7, wall = performance.now() / 1000 / clamp(Math.abs(P) * 160, 70, 300); // a wall-clock day of spin every 160 s times the period, but every world turns visibly: a lap in 70–300 s
   return (days / P + wall * Math.sign(P)) * TAU; }
+// a moon keeps one face to its parent, but in the map its parent does not move round the Sun between turns, so it turns slowly on the wall clock too (a lap in four minutes) so as not to look painted on
+const moonSpin = () => performance.now() / 1000 / 240 * TAU;
 // a moon in its parent's shadow: how deep (0..1), by how close it sits to the Sun-parent line on the far side
 function eclipseK(mx, my, px, py, pr, sunP) { let lx = px - sunP.x, ly = py - sunP.z; const l = hyp(lx, ly) || 1; lx /= l; ly /= l; const dx = mx - px, dy = my - py, t = dx * lx + dy * ly; if (t <= 0) return 0;
   const perp = Math.abs(dx * ly - dy * lx), um = pr * (1 - t / (l * 1.1)); return clamp((pr * 1.15 - perp) / (pr * 1.15 - Math.max(um, pr * .5) + 1e-6), 0, 1) * (perp < pr * 1.15 ? 1 : 0); }
@@ -873,6 +876,20 @@ function venusYard(O, z) {
   const on = onScr(b.x, b.y, (b.r + 1000) * z * 2) && b.r * z > .25; VD.g.visible = on; if (!on) return;
   VD.g.position.set(b.x - O.x, 0, b.y - O.y); VD.g.rotation.y = -VD.ang; VD.update(S.time);
 }
+// the same two dockyards on the campaign map, in their campaign owner's colours (the battle has no owners there, the
+// campaign has no S.ships): rebuilt when the world changes hands, hidden in battle, turning slowly as the lights work
+const YD = {}, goldMat = () => MAT.ydgold || (MAT.ydgold = new THREE.MeshStandardMaterial({ color: 0xc9a24c, metalness: .85, roughness: .3, emissive: 0x3a2a08, emissiveIntensity: .4 }));
+function ownerStyle(id) { const w = CAMP.on && CAMP.worlds && CAMP.worlds[id]; if (!w) return null; const o = w.owner, F = o !== 'neu' && FACTIONS[BLOCS[o]]; return { key: o, fac: F ? BLOCS[o] : 'none', col: F ? F.col : NEUTRAL_C }; }
+function orreryYard(id, L, z) {
+  const P = L.pos[id], st = ownerStyle(id); let Y = YD[id]; if (!P || !st) { if (Y) Y.g.visible = false; return; }
+  if (Y && (Y.key !== st.key || Y.r !== P.r || Y.ver !== bodyVerSeen)) { bodiesG.remove(Y.g); Y = YD[id] = null; }
+  if (!Y) { const M = structMatsC('yd:' + st.key, st.col, false), H = mats3('dread', st.fac, st.col, 'Y:' + st.fac + ':' + st.col.main).n;
+    const G = id === 'venus' ? venusDocks(P.r + 600, P.r, M, H, st.fac === 'none' ? 'core' : st.fac, goldMat()) : ganymedeDocks(P.r + 200, P.r, M, H, st.fac === 'none' ? 'rim' : st.fac);
+    Y = YD[id] = { ...G, key: st.key, r: P.r, ver: bodyVerSeen }; bodiesG.add(Y.g); }
+  const on = onScr(P.x, P.y, (P.r + 1000) * z * 2) && P.r * z > .25; Y.g.visible = on; if (!on) return;
+  const t = performance.now() / 1000; Y.g.position.set(P.x - O.x, 0, P.y - O.y); Y.g.rotation.y = t * .012; Y.update(t);
+}
+const yardsHide = () => { for (const Y of Object.values(YD)) if (Y) Y.g.visible = false; };
 function phobosDocks() {
   const g = new THREE.Group(), metal = new THREE.MeshStandardMaterial({ color: 0x2c2d33, metalness: .7, roughness: .4 }), lit = new THREE.MeshStandardMaterial({ color: 0xff3020, emissive: 0xff2a1a, emissiveIntensity: 2 });
   const white = new THREE.MeshStandardMaterial({ color: 0xd8d8d0, emissive: 0xd8d8d0, emissiveIntensity: .35 });
@@ -1088,7 +1105,7 @@ function sceneFrame() {
   if ((S.bodyVer || 0) !== bodyVerSeen) buildBodies();
   const sun = BODIES[0], sunP = new THREE.Vector3(sun.x - O.x, 0, sun.y - O.y);
   scene.userData.sun.position.copy(sunP);
-  ganymedeYard(O, z); venusYard(O, z);
+  ganymedeYard(O, z); venusYard(O, z); yardsHide();
   for (const v of bodyVis) {
     const b = v.b, x = b.x - O.x, y = b.y - O.y, vis = onScr(b.x, b.y, Math.max(b.r * z * 2.6, 40)) && b.r * z > .6;
     v.g.visible = vis; if (v.atmo) v.atmo.visible = vis; if (v.ring) v.ring.visible = vis;
@@ -1273,7 +1290,7 @@ function renderOrrery(L) {
     if (v.corona) { v.corona.position.set(x, 0, y); const cs = Math.max(P.r * 11, 520 / z); v.corona.scale.set(cs, cs, 1); v.corona.material.opacity = .55 * clamp((P.r * z - 1.5) / 8, .35, 1); }
     glintFor(v, x, y, P.r * z, z, onScr(P.x, P.y, 40));
     if (!vis) continue;
-    const b = v.b, par = P.parent ? L.pos[P.parent] : null, rot = par ? Math.atan2(par.x - P.x, par.y - P.y) + .35 : spinPhase(b, L, bodyVis.indexOf(v)); // a moon keeps one face to its parent
+    const b = v.b, par = P.parent ? L.pos[P.parent] : null, rot = par ? Math.atan2(par.x - P.x, par.y - P.y) + .35 + moonSpin() : spinPhase(b, L, bodyVis.indexOf(v)); // a moon keeps (roughly) one face to its parent
     v.g.position.set(x, 0, y); v.g.scale.setScalar(P.r); v.g.rotation.set(v.tilt, 0, 0); v.mesh.rotation.y = v.face + rot;
     if (v.clouds) { v.clouds.rotation.y = v.face + 1.3 + rot + performance.now() / 1000 * v.cspin * 3; v.clouds.material.uniforms.sunPos.value.copy(sunP); v.mesh.material.uniforms.cloudOff.value = -(1.3 + performance.now() / 1000 * v.cspin * 3) / TAU; }
     const EU = v.mesh.material.uniforms; if (EU.ecl) { if (par) { const k = eclipseK(P.x, P.y, par.x, par.y, par.r, { x: sp.x, z: sp.y }), pv = bodyVis.find(q => q.b.id === P.parent); EU.ecl.value = k; if (k > 0) EU.eclCol.value.setRGB(...(pv && pv.b.pal && pv.b.pal.atmo && !pv.b.gas ? [.45, .14, .08] : [.2, .2, .24])); } else EU.ecl.value = 0; }
@@ -1283,6 +1300,7 @@ function renderOrrery(L) {
     if (v.ring) ringUniforms(v, x, y, P.r, sunP);
     if (v.moons && v.moons.length) moonShadows(v, x, y, P.r, sunP, m => L.pos[m.id]);
   }
+  if (GD) GD.g.visible = false; if (VD) VD.g.visible = false; orreryYard('ganymede', L, z); orreryYard('venus', L, z);
   beltDust(sunP, z, true); comets(L, z);
   const fpz = footprint(); let reach = 0; for (const [wx, wy] of fpz) reach = Math.max(reach, hyp(wx - c.x, wy - c.y)); reach *= 1.15;
   for (const Lr of orbitL) Lr.n = 0;
@@ -1612,9 +1630,10 @@ function turretsFlat(s, z, top, R = s.r, v = null) { // stations and platforms: 
 }
 
 // ---------------------------------------------------------------- structures: stations, dockyards, outposts, platforms
-function structMats(team, dead) {
-  const k = 'st:' + team + ':' + (dead ? 1 : 0); if (MAT[k]) return MAT[k];
-  const C = S.teamc[team] || S.teamc[0], col = dead ? 0x555555 : hex(C.main);
+function structMats(team, dead) { return structMatsC('st:' + team + ':' + (dead ? 1 : 0), S.teamc[team] || S.teamc[0], dead); }
+function structMatsC(k, C, dead) {
+  if (MAT[k]) return MAT[k];
+  const col = dead ? 0x555555 : hex(C.main);
   return MAT[k] = {
     hull: new THREE.MeshStandardMaterial({ color: 0x4a4a54, metalness: .6, roughness: .45, flatShading: true }),
     armour: new THREE.MeshStandardMaterial({ color: 0x5c5c66, metalness: .5, roughness: .55, flatShading: true }),
