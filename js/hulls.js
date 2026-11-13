@@ -656,3 +656,29 @@ export const PAINT = {
   morningstar: { hull: 0x5e5f68, armour: 0x60616a, dark: 0x0e0e10, gun: 0x3a3a40, trimMix: 0, metal: .62, rough: .48 },
 };
 export const paintOf = (type, fac) => type === 'moonbreaker' && fac === 'rising' ? PAINT.morningstar : PAINT[fac] || PAINT.none;
+
+
+// ---------------------------------------------------------------- planets: a sphere with the ground on it
+// The world maps (planetgen.js) carry a height field; this raises the mesh itself by it, so mountain ranges break the limb
+// and the terminator, and small bodies stop being perfect balls: below ~300 km a moon or asteroid gets the lumpy shape of
+// a real one from a low-frequency noise seeded by its id. Height is stored as .35 + h × .45 (sea level at .35), see
+// planetgen's generate(). Sea stays at the sphere. render.js swaps this in for GEO.sphere when a map arrives.
+const _pv = new THREE.Vector3();
+function hashP(i, j, k) { let h = (i * 374761393 + j * 668265263 + k * 2147483647) | 0; h = (h ^ (h >> 13)) * 1274126177; return ((h ^ (h >> 16)) >>> 0) / 4294967296; }
+function noiseP(x, y, z) { const i = Math.floor(x), j = Math.floor(y), k = Math.floor(z), fx = x - i, fy = y - j, fz = z - k, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy), w = fz * fz * (3 - 2 * fz);
+  const c = (a, b, d) => hashP(i + a, j + b, k + d); return (c(0, 0, 0) * (1 - u) + c(1, 0, 0) * u) * (1 - v) * (1 - w) + (c(0, 1, 0) * (1 - u) + c(1, 1, 0) * u) * v * (1 - w) + (c(0, 0, 1) * (1 - u) + c(1, 0, 1) * u) * (1 - v) * w + (c(0, 1, 1) * (1 - u) + c(1, 1, 1) * u) * v * w; }
+export function planetGeo(hgt, W, H, { km = 3000, amp = .012, seg = 192, seed = 0 } = {}) {
+  const g = new THREE.SphereGeometry(1, seg, seg >> 1), P = g.attributes.position, UV = g.attributes.uv;
+  const lump = km < 300 ? Math.min(.3, (300 - km) / 300 * .3 + .04) : 0, s0 = seed * 7.13;   // how far from a ball a small body is
+  const ampK = km < 300 ? amp * 6 : amp;
+  for (let n = 0; n < P.count; n++) {
+    _pv.set(P.getX(n), P.getY(n), P.getZ(n)); let r = 1;
+    if (hgt) { const u = UV.getX(n), v = UV.getY(n), x = ((u % 1) + 1) % 1 * W, y = Math.min(Math.max(v, 0), 1) * (H - 1), i0 = Math.floor(x) % W, i1 = (i0 + 1) % W, j0 = Math.min(H - 1, Math.floor(y)), j1 = Math.min(H - 1, j0 + 1), fx = x - Math.floor(x), fy = y - j0;
+      const h = (hgt[j0 * W + i0] * (1 - fx) + hgt[j0 * W + i1] * fx) * (1 - fy) + (hgt[j1 * W + i0] * (1 - fx) + hgt[j1 * W + i1] * fx) * fy;
+      r += Math.max(0, h / 255 - .35) / .45 * ampK; }   // the sea stays at the sphere, the land rises
+    if (lump) { const q = _pv.clone().multiplyScalar(1.6).addScalar(s0); r += (noiseP(q.x, q.y, q.z) - .5) * lump * 1.6 + (noiseP(q.x * 2.7 + 9, q.y * 2.7, q.z * 2.7) - .5) * lump * .5; }
+    P.setXYZ(n, _pv.x * r, _pv.y * r, _pv.z * r);
+  }
+  if (lump) { let m = 0; for (let n = 0; n < P.count; n++) m += Math.hypot(P.getX(n), P.getY(n), P.getZ(n)); m = P.count / m; for (let n = 0; n < P.count; n++) P.setXYZ(n, P.getX(n) * m, P.getY(n) * m, P.getZ(n) * m); } // a lumpy body keeps its mean radius
+  P.needsUpdate = true; g.computeVertexNormals(); return g;
+}

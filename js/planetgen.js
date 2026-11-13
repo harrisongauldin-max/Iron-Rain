@@ -70,6 +70,9 @@ function blur(m, W, H, r) { // separable box blur, twice, wrapping in x
   }
   return m;
 }
+// the mask read through a warp (model builder, 2026-11-13): the coast wanders by up to amp degrees on two scales, so
+// the polygon's straight edges become bays and headlands; the drawn outline still decides where the land is
+const sampleW = (m, W, H, lat, lon, x, y, z, amp = 4) => { const wa = fbm(x, y, z, 3, 3, 311) * amp + fbm(x, y, z, 3, 12, 312) * amp * .35, wb = fbm(x, y, z, 3, 3, 313) * amp + fbm(x, y, z, 3, 12, 314) * amp * .35; return sample(m, W, H, Math.max(-89.9, Math.min(89.9, lat + wa)), lon + wb / Math.max(.2, Math.cos(lat * D))); };
 const sample = (m, W, H, lat, lon) => { const x = Math.floor((lon + 180) / 360 * W), y = Math.floor((90 - lat) / 180 * H); return m[Math.min(H - 1, Math.max(0, y)) * W + ((x % W) + W) % W]; };
 
 // ---------------------------------------------------------------- Earth: the real continents, coarse, with noisy coasts
@@ -105,10 +108,10 @@ W_.sun = { px(o, lat, lon, x, y, z) {
   mixTo(o, C['5a1e06'], spots * .85);
 } };
 W_.mercury = { // terraformed hard: coral seas, alpine north, the Waste of Ladon, southern jungles, the seams left by the work
-  pre(W, H) { const m = blur(polyMask(W, H, [HELIOS, BOREALIS]), W, H, Math.max(3, W >> 7)); return { m }; },
+  pre(W, H) { const m = blur(polyMask(W, H, [HELIOS, BOREALIS]), W, H, Math.max(6, W >> 6)); return { m }; },
   night: 1, clouds: { cover: .44, scale: 3.2, warp: 1.2, col: C.ffffff },
   px(o, lat, lon, x, y, z, i, j, { m, W, H }) {
-    const n = fbm(x, y, z, 6, 2.2), land0 = sample(m, W, H, lat, lon) + n * .32 + fbm(x, y, z, 4, 10, 46) * .08 + fbm(x, y, z, 3, 34, 47) * .04;
+    const n = fbm(x, y, z, 6, 2.2), land0 = sampleW(m, W, H, lat, lon, x, y, z, 3.5) + n * .32 + fbm(x, y, z, 4, 10, 46) * .08 + fbm(x, y, z, 3, 34, 47) * .04;
     const polar = lat > 73 + fbm(x, y, z, 4, 5, 3) * 6, isl = ridged(x, y, z, 4, 6, 2) > .93 && Math.abs(lat) < 60 && fbm(x, y, z, 3, 2, 9) > .1;
     const land = land0 > .5 || polar || isl;
     if (!land) { const depth = cl01((.5 - land0) * 2.2); ramp(o, [[0, C['3ad6c6']], [.18, C['1aa0aa']], [.55, C['0c6488']], [1, C['083c64']]], depth); o.sea = 1;
@@ -158,7 +161,7 @@ W_.earth = {
   pre(W, H) { const m = blur(polyMask(W, H, EARTH), W, H, Math.max(1, W >> 9)); const inl = blur(Float32Array.from(m), W, H, Math.max(4, W >> 6)); return { m, inl }; },
   night: 1, clouds: { cover: .5, scale: 3, warp: 1.4, col: C.ffffff },
   px(o, lat, lon, x, y, z, i, j, { m, inl, W, H }) {
-    const n = fbm(x, y, z, 6, 3, 4), v = sample(m, W, H, lat, lon) + n * .22 + fbm(x, y, z, 4, 11, 44) * .07 + fbm(x, y, z, 3, 36, 45) * .035, ice = lat < -66 + n * 6;
+    const n = fbm(x, y, z, 6, 3, 4), v = sampleW(m, W, H, lat, lon, x, y, z, 1.2) + n * .22 + fbm(x, y, z, 4, 11, 44) * .07 + fbm(x, y, z, 3, 36, 45) * .035, ice = lat < -66 + n * 6;
     if (v < .5 && !ice) { const d = cl01((.5 - v) * 2.4); ramp(o, [[0, C['2a7ab0']], [.25, C['154f8a']], [1, C['0a2654']]], d); o.sea = 1; return; }
     if (ice || (lat > 60 + n * 4 && lon > -58 + n * 8 && lon < -18 + n * 6)) { ramp(o, [[0, C.d8e2ea], [1, C.ffffff]], n + .5); o.h = .5 + n * .3; return; } // the ice caps, Greenland
     const interior = sample(inl, W, H, lat, lon), al = Math.abs(lat);
@@ -242,7 +245,7 @@ W_.mars = { // green and white from orbit: the Borealis Basin ocean round a pola
     const vm = lon > -92 && lon < -38 ? sm(2.6, .6, Math.abs(lat + 8 + 2 * Math.sin(lon * .2))) : 0; e -= vm * .6;
     const th = Math.abs((lon + 100) + (lat - 28) * .55 + fbm(x, y, z, 4, 3, 21) * 14); e -= sm(11, 2, th) * sm(-18, -6, lat) * sm(36, 26, lat) * .9; // the Thermic Sea
     e += sm(68, 78, lat) * 1.2;                                                          // the north polar plain
-    e -= sm(10, 2, Math.abs(lat + 63)) * .8;                                             // the South Sea
+    e -= sm(10, 2, Math.abs(lat + 63 + fbm(x, y, z, 3, 3, 71) * 7 + fbm(x, y, z, 3, 9, 72) * 2.5)) * .8;  // the South Sea, its shore wandering
     e += n * .35 + fbm(x, y, z, 4, 9, 48) * .1 + fbm(x, y, z, 3, 30, 49) * .05;
     if (Math.abs(lat) > 80 + n * 6 || (lat > 74 && e > 0)) { ramp(o, [[0, C.e6e8ec], [1, C.ffffff]], n + .5); return; }
     if (e < 0) { ramp(o, [[-.5, C['0c2e5a']], [-.12, C['15528a']], [0, C['2c7aa6']]], e); o.sea = 1; lights(o, x, y, z, i, j, spot(x, y, z, MARS_CORINTH, 3) * .9); return; }
@@ -257,24 +260,60 @@ W_.mars = { // green and white from orbit: the Borealis Basin ocean round a pola
   } };
 const MARS_THARSIS = vec(2, -105), MARS_OLYMPUS = vec(18, -134), MARS_ELYSIUM = vec(25, 147), MARS_MONTES = [vec(-2, -112), vec(1.5, -104), vec(12, -101)];
 const MARS_HELLAS = vec(-42, 70), MARS_ARGYRE = vec(-50, -43), MARS_AGEA = vec(-8, -70), MARS_CORINTH = vec(5, -104);
-W_.phobos = { // hollowed and roofed in metal: the Hive, the Needles, red lights for incoming ships
-  night: 1, px(o, lat, lon, x, y, z, i, j) {
-    const b = fbm(x, y, z, 3, 26, 4), gx = Math.abs(((lon + 360) * 1.2) % 3 - 1.5), gy = Math.abs(((lat + 90) * 1.2) % 3 - 1.5), grid = gx < .18 || gy < .18;
-    ramp(o, [[-.6, C['24252a']], [0, C['3c3e46']], [.6, C['5c5e66']]], b + (hash(i >> 2, j >> 2) - .5) * .5);
-    if (grid) mixTo(o, C['15161a'], .8);
-    const st = craters(x, y, z, .4); mixTo(o, C['1a1a1e'], st.bowl * .6);
-    if (hash(i, j) > .995) mixTo(o, C.f0f0f0, .8); // glyphs
-    lights(o, x, y, z, i, j, .75, C.ffd8a8, 1.2);
-    if (hash(i + 7, j + 3) > .9985) { o.lr += 255; o.lg += 40; o.lb += 30; }
+W_.phobos = { // the Hive: a moon hollowed out and roofed in metal — plated sectors with lit seams, the Needles' spike ridges,
+  // dock bays along the equator, refinery glow, and a few places where the old rock still shows through
+  night: 1, craterK: 0, px(o, lat, lon, x, y, z, i, j) {
+    const wl = fbm(x, y, z, 2, 3, 81) * 2.5, wa = fbm(x, y, z, 2, 3, 82) * 2.5;                // the sectors are laid to the shape, nearly square
+    const gx = ((lon + wl + 360) / 15) % 1, gy = ((lat + wa + 90) / 15) % 1, ci = Math.floor((lon + wl + 360) / 15), cj = Math.floor((lat + wa + 90) / 15);
+    const em = Math.min(Math.abs(gx - .5), Math.abs(gy - .5)), seam = em > .475, edge = em > .44;
+    const tone = hash(ci, cj) * .7 - .35, grain = fbm(x, y, z, 4, 40, 83) * .15, b = fbm(x, y, z, 3, 9, 84);
+    ramp(o, [[-.6, C['1e2026']], [0, C['363942']], [.6, C['585c68']]], b * .5 + tone + grain);
+    const along = hash(ci + 3, cj + 7) > .5 ? gx : gy, rib = sm(.8, .95, Math.abs(Math.sin(along * Math.PI * 9)));  // ribbing along each plate, one way or the other
+    mixTo(o, C['262830'], rib * .4);
+    if (edge) mixTo(o, C['15161a'], .55); if (seam) mixTo(o, C['0b0c0f'], .95);
+    if (hash(i >> 1, j >> 1) > .985 && edge && !seam) mixTo(o, C['7a7e8a'], .7);                // rivets along the seams
+    // the Needles: three fields of spike ridges in bright steel, white and red lights along them
+    const field = sm(.3, .8, Math.max(spot(x, y, z, PHOBOS_NEEDLE_A, 26), spot(x, y, z, PHOBOS_NEEDLE_B, 22), spot(x, y, z, PHOBOS_NEEDLE_C, 18)));
+    const nd = ridged(x, y, z, 4, 7, 85), needle = sm(.62, .9, nd) * field;
+    mixTo(o, C['9a9eaa'], needle * .9); mixTo(o, C.e0e4ee, sm(.86, 1, nd) * field);
+    // dock bays: deep rectangular pits in a belt along the equator, lit at the lips
+    const bay = Math.abs(lat) < 7 && ((lon + 360) % 22) > 4 && ((lon + 360) % 22) < 15, lip = bay && (Math.abs(lat) > 5.4 || ((lon + 360) % 22) < 5.2 || ((lon + 360) % 22) > 13.8);
+    if (bay) mixTo(o, C['0c0d10'], .85); if (lip) mixTo(o, C['6a6e78'], .9);
+    // the old rock where the wrap was never finished
+    const bare = sm(.2, .6, spot(x, y, z, PHOBOS_STICKNEY, 22) + fbm(x, y, z, 4, 4, 86) * .3);
+    if (bare > .05) { const cr = craters(x, y, z, .9); const rock = { r: 0, g: 0, b: 0 }; ramp(rock, [[-.6, C['3e3630']], [0, C['5a5048']], [.6, C['7a6e62']]], fbm(x, y, z, 5, 6, 87) + cr.rim * .5 - cr.bowl * .5); mixTo(o, [rock.r, rock.g, rock.b], bare); }
+    // night: refinery glow along the seams and bay lips, sparse work lights on the plates, red beacons on the Needles
+    if (seam && !bare) { o.lr += 200; o.lg += 110; o.lb += 50; }
+    if (lip) { o.lr += 255; o.lg += 170; o.lb += 90; }
+    lights(o, x, y, z, i, j, .1 * (1 - bare) + rib * .05, C.ffc890, 1.0);
+    if (needle > .25 && hash(i, j) > .985) { o.lr += 255; o.lg += 60; o.lb += 40; }
+    if (hash(i + 7, j + 3) > .999 && !bare) { o.lr += 230; o.lg += 230; o.lb += 255; }
   } };
-W_.deimos = { // the Battle Moon: bare rock, ringed with fleet berths and batteries
+const PHOBOS_STICKNEY = vec(0, -90), PHOBOS_NEEDLE_A = vec(38, 40), PHOBOS_NEEDLE_B = vec(-30, 120), PHOBOS_NEEDLE_C = vec(20, -150);
+W_.deimos = { // the Battle Moon: bare rock armoured in sectors, a berth ring round the equator with bays and gantries,
+  // gun batteries in rings of blast walls, a citadel over the pole, hangar doors cut into the plate
   night: 1, px(o, lat, lon, x, y, z, i, j) {
     const n = fbm(x, y, z, 5, 4, 6), cr = craters(x, y, z, .8);
     ramp(o, [[-.6, C['4a4440']], [0, C['6a625a']], [.6, C['8a8278']]], n + cr.rim * .4 - cr.bowl * .4);
-    const base = Math.abs(lat) < 18 && (Math.abs(((lon + 360) * 2) % 6 - 3) < .4 || Math.abs(lat) < 2.5);
-    if (base) mixTo(o, C['3a3c44'], .85);
-    lights(o, x, y, z, i, j, base ? .9 : .05, C.ffe2c0);
+    // armour plate over most of the rock: broad sectors bounded by warped meridians and parallels, riveted at the seams
+    const wl = fbm(x, y, z, 3, 3, 91) * 5, pl = ((lon + wl + 360) / 30) % 1, pq = ((lat + fbm(x, y, z, 3, 3, 92) * 5 + 90) / 30) % 1;
+    const armoured = fbm(x, y, z, 3, 2, 93) > -.25, seam = Math.min(Math.abs(pl - .5), Math.abs(pq - .5)) > .47;
+    if (armoured) { mixTo(o, C['52555c'], .75 + fbm(x, y, z, 4, 30, 94) * .1); if (seam) mixTo(o, C['2a2c30'], .8); if (hash(i >> 1, j >> 1) > .97 && seam) mixTo(o, C['8a8e96'], .6); }
+    // the berth ring: a belt of bays and gantries round the equator, every fourth berth open and lit from inside
+    const ring = Math.abs(lat) < 16, bay = ring && Math.abs(lat) > 3 && (((lon + 360) * 2) % 6) < 2.4, gantry = ring && Math.abs(lat) < 3, open = bay && hash(Math.floor((lon + 360) / 3), lat > 0 ? 1 : 2) > .72;
+    if (ring) mixTo(o, C['3a3c44'], .85); if (bay) mixTo(o, open ? C['14151a'] : C['2e3038'], .9); if (gantry) mixTo(o, C['5c6068'], .6 + (Math.abs(((lon + 360) * 8) % 2 - 1) < .15 ? .3 : 0));
+    // gun batteries: rings of blast wall with a turret pit, scattered over the plates
+    const bt = craters(x, y, z, 1.4), battery = armoured && !ring && bt.bowl > .3 && hash(Math.floor(x * 9), Math.floor(y * 9 + z * 5)) > .55;
+    if (battery) { mixTo(o, C['2a2c30'], sm(.3, .5, bt.bowl) * .9); mixTo(o, C['70747c'], sm(.45, .6, bt.bowl) * sm(.75, .6, bt.bowl) * .9); mixTo(o, C['1a1b1f'], sm(.8, 1, bt.bowl)); }
+    // the citadel over the north pole: concentric plate rings and a lit core
+    const cit = spot(x, y, z, DEIMOS_CITADEL, 24), rings = sm(.6, .9, Math.abs(Math.sin(cit * Math.PI * 7)));
+    if (cit > .05) { mixTo(o, C['46484f'], cit * .8); mixTo(o, C['22232a'], rings * cit * .7); mixTo(o, C['9aa0aa'], sm(.85, 1, cit) * .6); }
+    // night: the berths white, batteries amber, the citadel cold blue-white
+    lights(o, x, y, z, i, j, (gantry ? .4 : bay && !open ? .15 : battery ? .25 : armoured ? .03 : .01) + cit * .3, C.ffe2c0);
+    if (open) { o.lr += 150; o.lg += 170; o.lb += 210; }   // an open berth is lit from inside
+    if (cit > .6 && hash(i, j) > .97) { o.lr += 180; o.lg += 210; o.lb += 255; }
   } };
+const DEIMOS_CITADEL = vec(88, 0);
 W_.thebe = { // the bombed-out base, abandoned early in the Second Moon Lord Rebellion
   px(o, lat, lon, x, y, z) {
     const n = fbm(x, y, z, 5, 4, 9), cr = craters(x, y, z, 1.4);

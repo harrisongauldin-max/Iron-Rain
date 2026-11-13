@@ -8,7 +8,7 @@ import * as TSL from 'three/tsl';
 import { bloom } from '../vendor/three/tsl/BloomNode.js';
 import { smaa } from '../vendor/three/tsl/SMAANode.js';
 import { loadGfx, preset, meterTick, gpuTimer } from './gfx.js';
-import { HAS_3D, buildHull, hullTextures, paintOf, buildStation, missileGeoOf, missileMaterial, MISSILE_M } from './hulls.js';
+import { HAS_3D, buildHull, hullTextures, paintOf, buildStation, missileGeoOf, missileMaterial, MISSILE_M , planetGeo } from './hulls.js';
 import { mergeGeometries } from '../vendor/three/utils/BufferGeometryUtils.js';
 import { buildSlip, ganymedeDocks, phobosTraffic } from './yards.js';
 import { S } from './state.js';
@@ -705,9 +705,9 @@ function pump() {
 }
 function genDone(r) {
   const prev = GEN.have[r.id]; if (prev && prev.W >= r.W) return;
-  const t = { W: r.W, map: dataTex(r.day, r.W, r.H), night: r.night ? dataTex(r.night, r.W, r.H) : null, clouds: r.clouds ? dataTex(r.clouds, r.cW, r.cH) : null, hgt: r.hgt ? heightTex(r.hgt, r.W, r.H) : null };
+  const t = { W: r.W, H: r.H, map: dataTex(r.day, r.W, r.H), night: r.night ? dataTex(r.night, r.W, r.H) : null, clouds: r.clouds ? dataTex(r.clouds, r.cW, r.cH) : null, hgt: r.hgt ? heightTex(r.hgt, r.W, r.H) : null, hgtArr: r.hgt || null };
   GEN.have[r.id] = t;
-  if (prev) for (const k of ['map', 'night', 'clouds', 'hgt']) if (prev[k]) prev[k].dispose();
+  if (prev) { for (const k of ['map', 'night', 'clouds', 'hgt']) if (prev[k]) prev[k].dispose(); if (prev.geo) prev.geo.dispose(); }
   for (const v of bodyVis) if (v.b.id === r.id) applySurface(v);
   if (!PORT[r.id]) setTimeout(() => portrait(r.id), 0);
 }
@@ -749,6 +749,8 @@ function applySurface(v) {
   const U = v.mesh.material.uniforms; U.map.value = t.map; if (U.night) { U.night.value = t.night; U.hasNight.value = t.night ? 1 : 0; }
   if (U.texel) U.texel.value.set(1 / t.W, 2 / t.W); if (U.hmap) { U.hmap.value = t.hgt; U.hasH.value = t.hgt ? 1 : 0; } if (U.clouds) { U.clouds.value = t.clouds; U.hasClouds.value = t.clouds ? 1 : 0; }
   if (t.clouds) { if (!v.clouds) { v.clouds = new THREE.Mesh(GEO.sphere, cloudMat({ storms: v.b.id === 'earth' ? STORMS.earthClouds : null, lightning: v.b.id === 'earth' || v.b.id === 'venus' })); v.clouds.scale.setScalar(1.012); v.clouds.renderOrder = 2; v.g.add(v.clouds); } v.clouds.material.uniforms.map.value = t.clouds; }
+  // the ground itself (model builder's hook): the mesh raised by the height field, small bodies lumpy; gas giants and the Sun stay round
+  if (!v.b.gas && v.b.kind !== 'star' && (t.hgtArr || (v.b.km || 1e4) < 300)) { if (!t.geo) t.geo = planetGeo(t.hgtArr, t.W, t.H, { km: v.b.km || 1e4, amp: t.clouds ? .009 : .013, seg: t.W >= 1536 ? 256 : t.W >= 1024 ? 192 : 128, seed: [...v.b.id].reduce((a, c) => a + c.charCodeAt(0), 0) }); if (v.mesh.geometry !== t.geo) v.mesh.geometry = t.geo; }
   v.mesh.visible = true;
 }
 // the outline of a world as the camera really sees it: the sphere's horizon circle (a sphere under perspective is
