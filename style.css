@@ -1246,6 +1246,32 @@ body.ground #c,body.ground #ov{visibility:hidden}
 #gb .gb-help{position:absolute;left:50%;bottom:150px;transform:translateX(-50%);font-size:10.5px;color:rgba(233,227,212,.6);text-shadow:0 1px 2px #000;pointer-events:none;white-space:nowrap}
 #gb .gb-brief,#gb .gb-end{position:absolute;left:50%;top:84px;transform:translateX(-50%);width:min(560px,92vw);padding:18px 22px;background:linear-gradient(180deg,rgba(18,14,16,.97),rgba(8,9,14,.97));border:1px solid var(--line);border-top:2px solid var(--gold);font-size:13px;line-height:1.5}
 #gb .gb-brief.hide,#gb .gb-end.hide,#gb .gb-sel.hide{display:none}
+/* the drop plan (ground battles chat) */
+#gb .gb-plan{position:absolute;z-index:4;right:12px;top:84px;width:330px;max-height:calc(100% - 110px);overflow-y:auto;padding:10px 12px;font-size:12px;background:linear-gradient(180deg,rgba(18,14,16,.96),rgba(8,9,14,.96));border:1px solid var(--line);border-top:2px solid var(--gold)}
+#gb .gb-plan.hide{display:none}
+#gb .gb-plan .ph{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px}
+#gb .gb-plan .ph b{font-family:Cinzel,Georgia,serif;font-size:14px;letter-spacing:.06em;color:var(--gold)}
+#gb .gb-plan .ph span,#gb .gb-plan .dim{color:var(--dim);font-size:11px}
+#gb .gb-plan .pz{border:1px solid var(--line);margin:6px 0;padding:5px 6px;background:rgba(10,12,20,.6)}
+#gb .gb-plan .pz.tgt{cursor:pointer}
+#gb .gb-plan .pz.tgt:hover{border-color:var(--gold);background:rgba(242,193,78,.08)}
+#gb .gb-plan .pzh{display:flex;gap:8px;align-items:center;font-size:11px;color:var(--dim);margin-bottom:3px}
+#gb .gb-plan .pzh b{color:var(--gold);font-family:Cinzel,Georgia,serif;font-size:12px}
+#gb .gb-plan .pzh .x{margin-left:auto;background:none;border:1px solid var(--line);color:var(--dim);cursor:pointer;width:18px;height:18px;line-height:14px;padding:0}
+#gb .gb-plan .pzh .x:hover{color:#ff7a62;border-color:#ff7a62}
+#gb .gb-plan .good{color:#7fdc6e}#gb .gb-plan .gold{color:var(--gold)}#gb .gb-plan .bad{color:#ff7a62}
+#gb .gb-plan .pw{display:flex;flex-wrap:wrap;gap:3px;align-items:center;margin:2px 0}
+#gb .gb-plan .pw em{font-style:normal;color:var(--dim);font-size:10px;width:58px;flex:none}
+#gb .gb-chip{display:inline-flex;align-items:center;gap:3px;padding:1px 4px 1px 1px;font:10px ui-monospace,Consolas,monospace;color:var(--txt);background:rgba(10,12,20,.9);border:1px solid var(--line);border-bottom-width:2px;cursor:pointer;user-select:none}
+#gb .gb-chip i{font-style:normal;width:14px;height:14px;display:grid;place-items:center;color:#0a0c12;font:700 10px Cinzel,Georgia,serif}
+#gb .gb-chip:hover{border-color:var(--gold)}
+#gb .gb-chip.on{border-color:var(--gold);background:rgba(242,193,78,.2);box-shadow:0 0 0 1px var(--gold) inset}
+#gb .gb-plan .h-shell,#gb .gb-chip.h-shell{border-bottom-color:#ff9a4a;color:inherit}#gb .gb-plan .pk .h-shell{color:#ff9a4a}
+#gb .gb-chip.h-boots{border-bottom-color:#8fd0ff}#gb .gb-plan .pk .h-boots{color:#8fd0ff}
+#gb .gb-chip.h-pod{border-bottom-color:#c9b48a}#gb .gb-plan .pk .h-pod{color:#c9b48a}
+#gb .gb-chip.h-stork{border-bottom-color:#9fd77f}#gb .gb-plan .pk .h-stork{color:#9fd77f}
+#gb .gb-plan .pk{font-size:10px;color:var(--dim);margin-top:6px}
+#gb .gb-plan .pk span{font-size:9px;margin-left:4px}
 #gb .gb-end{top:50%;transform:translate(-50%,-50%)}
 #gb .kicker{font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim)}
 #gb h2{font-family:Cinzel,Georgia,serif;font-weight:700;color:var(--gold);margin:6px 0 10px;font-size:22px;letter-spacing:.04em}
