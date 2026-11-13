@@ -91,6 +91,13 @@ export function buildSlip(M, hullMatsOf, type, fac, seed) {
   return { g, update: t => { for (const f of anim) f(t); }, blink: [] };
 }
 
+// a lane ship beyond the yard's ends: the lane runs three yard-lengths each way, and past the docks a ship climbs away to
+// a higher orbit (or comes down from one) and dwindles to nothing at the lane's far end, so the wrap from one end of the
+// lane to the other happens out of sight instead of a hull popping into being at the edge of the docks
+const LANE_W = 3;
+function laneAt(phi, span, r, y, s) { const w = span * LANE_W, e = Math.max(0, Math.abs(phi) - span * 1.15), k = Math.min(1, e / (w - span * 1.15));
+  return { r: r + k * k * (r * .45), y: y * (1 - k * .5), s: s * Math.max(0, 1 - k * k * k) }; }
+const laneWrap = (ph, span) => { const w = span * LANE_W; return ((ph + w) % (2 * w) + 2 * w) % (2 * w) - w; };
 // ---------------------------------------------------------------- Ganymede: 200 km of docks at the equator
 // world units; the group is centred on Ganymede, the docks' middle at local +x, in the battle plane
 export function ganymedeDocks(R0, rMoon, M, hullMats, fac) {
@@ -136,9 +143,9 @@ export function ganymedeDocks(R0, rMoon, M, hullMats, fac) {
   for (let i = 0; i < nD; i++) { const phi = -span + (11 + R() * 5) / NB * span * 2, r = R0 + (R() - .3) * 420; deb.push({ phi, r, y: (R() - .5) * 160, s: [4 + R() * 30, 2 + R() * 8, 3 + R() * 14], rx: R() * TAU, ry: R() * TAU, w: (R() - .5) * .2, d: (R() - .5) * .0004 }); }
   g.add(debris);
   // hundreds of haulers and freighters: lanes running the length of the docks, outbound and inbound, and shuttles to the berths
-  const fg = merge([box(14, 5, 6), box(5, 6, 7, -6, 1, 0), box(8, 3, 9, 3, 0, 0)]), nF = 320;
+  const fg = merge([box(14, 5, 6), box(5, 6, 7, -6, 1, 0), box(8, 3, 9, 3, 0, 0)]), nF = 480;
   const ships = new THREE.InstancedMesh(fg, M.hull, nF), burns = new THREE.InstancedMesh(new THREE.BoxGeometry(3, 2.4, 2.4), new THREE.MeshBasicMaterial({ color: 0xffb070, toneMapped: false }), nF), lane = [];
-  for (let i = 0; i < nF; i++) { const kind = R(); const out = R() < .72, r = out ? R0 + 240 + R() * 520 : R0 - 110 - R() * Math.min(80, R0 - rMoon - 140); lane.push(kind < .75 ? { r, y: (R() - .5) * 140, ph: R() * span * 2.6 - span * 1.3, v: (8 + R() * 16) / r * (out ? 1 : -1), s: .6 + R() * 1.4 }
+  for (let i = 0; i < nF; i++) { const kind = R(); const out = R() < .72, r = out ? R0 + 240 + R() * 520 : R0 - 110 - R() * Math.min(80, R0 - rMoon - 140); lane.push(kind < .75 ? { r, y: (R() - .5) * 140, ph: (R() * 2 - 1) * span * LANE_W, v: (8 + R() * 16) / r * (out ? 1 : -1), s: .6 + R() * 1.4 }
     : { berth: Math.floor(R() * 11), ph: R() * TAU, v: .05 + R() * .08, s: .4 + R() * .5, y: (R() - .5) * 80 }); }
   g.add(ships, burns);
   const update = t => {
@@ -146,7 +153,7 @@ export function ganymedeDocks(R0, rMoon, M, hullMats, fac) {
     debris.instanceMatrix.needsUpdate = true;
     for (let i = 0; i < nF; i++) { const l = lane[i]; let phi, r, y, dir;
       if (l.berth !== undefined) { const bphi = -span + (l.berth + .5) * span * 2 / NB, u = (Math.sin(t * l.v + l.ph) + 1) / 2; phi = bphi + Math.sin(l.ph) * .01; r = R0 + 160 + u * 500; y = l.y; dir = Math.cos(t * l.v + l.ph) > 0 ? 0 : Math.PI; o.position.copy(at(phi, r, y)); o.rotation.set(0, -phi + dir, 0); }
-      else { const w = span * 1.3; phi = ((l.ph + t * l.v + w) % (2 * w) + 2 * w) % (2 * w) - w; r = l.r; y = l.y; o.position.copy(at(phi, r, y)); o.rotation.set(0, -phi - Math.sign(l.v) * Math.PI / 2, 0); }
+      else { phi = laneWrap(l.ph + t * l.v, span); const q = laneAt(phi, span, l.r, l.y, l.s), q2 = laneAt(phi + l.v * .5, span, l.r, l.y, l.s), p2 = at(phi + l.v * .5, q2.r, q2.y); o.position.copy(at(phi, q.r, q.y)); o.rotation.set(0, Math.atan2(-(p2.z - o.position.z), p2.x - o.position.x), 0); o.scale.setScalar(q.s); o.updateMatrix(); ships.setMatrixAt(i, o.matrix); o.translateX(-9); o.updateMatrix(); burns.setMatrixAt(i, o.matrix); continue; }
       o.scale.setScalar(l.s); o.updateMatrix(); ships.setMatrixAt(i, o.matrix);
       o.translateX(-9); o.updateMatrix(); burns.setMatrixAt(i, o.matrix); }
     ships.instanceMatrix.needsUpdate = true; burns.instanceMatrix.needsUpdate = true;
@@ -201,14 +208,14 @@ export function venusDocks(R0, rPlanet, M, hullMats, fac, gold) {
   for (let i = 0; i < nLt; i++) { const phi = -span + (i + .5) * span * 2 / nLt, y = i % 2 ? -TIER - 10 : TIER + 10; o.position.copy(at(phi, R0 + (i % 4 < 2 ? -124 : 124), y)); o.rotation.set(0, 0, 0); o.scale.setScalar(1); o.updateMatrix(); lights.setMatrixAt(li++, o.matrix); }
   lights.count = li; g.add(lights);
   // haulers and the Carthii's own yachts in lanes along the yard, shuttles to the berths
-  const fg = merge([box(14, 5, 6), box(5, 6, 7, -6, 1, 0), box(8, 3, 9, 3, 0, 0)]), nF = 220;
+  const fg = merge([box(14, 5, 6), box(5, 6, 7, -6, 1, 0), box(8, 3, 9, 3, 0, 0)]), nF = 330;
   const ships = new THREE.InstancedMesh(fg, M.hull, nF), burns = new THREE.InstancedMesh(new THREE.BoxGeometry(3, 2.4, 2.4), new THREE.MeshBasicMaterial({ color: 0xffd090, toneMapped: false }), nF), lane = [];
-  for (let i = 0; i < nF; i++) { const out = R() < .7, r = out ? R0 + 380 + R() * 500 : R0 - 380 - R() * Math.min(200, R0 - rPlanet * 1.03 - 500); lane.push(R() < .75 ? { r, y: (R() - .5) * 400, ph: R() * span * 2.6 - span * 1.3, v: (.04 + R() * .08) * (out ? 1 : -1) * (R() < .5 ? 1 : -1), s: .5 + R() * .8 } : { berth: Math.floor(R() * NB), tier: R() < .5 ? -TIER : TIER, ph: R() * TAU, v: .05 + R() * .08, s: .4 + R() * .5 }); }
+  for (let i = 0; i < nF; i++) { const out = R() < .7, r = out ? R0 + 380 + R() * 500 : R0 - 380 - R() * Math.min(200, R0 - rPlanet * 1.03 - 500); lane.push(R() < .75 ? { r, y: (R() - .5) * 400, ph: (R() * 2 - 1) * span * LANE_W, v: (.04 + R() * .08) * (out ? 1 : -1) * (R() < .5 ? 1 : -1), s: .5 + R() * .8 } : { berth: Math.floor(R() * NB), tier: R() < .5 ? -TIER : TIER, ph: R() * TAU, v: .05 + R() * .08, s: .4 + R() * .5 }); }
   g.add(ships, burns);
   const update = t => {
     for (let i = 0; i < nF; i++) { const l = lane[i];
       if (l.berth !== undefined) { const bphi = -span + (l.berth + .5) * span * 2 / NB, u = (Math.sin(t * l.v + l.ph) + 1) / 2; o.position.copy(at(bphi + Math.sin(l.ph) * .01, R0 + 200 + u * 500, l.tier)); o.rotation.set(0, -bphi - (Math.cos(t * l.v + l.ph) > 0 ? 0 : Math.PI), 0); }
-      else { const w = span * 1.3; const phi = ((l.ph + t * l.v + w) % (2 * w) + 2 * w) % (2 * w) - w; o.position.copy(at(phi, l.r, l.y)); o.rotation.set(0, -phi - Math.sign(l.v) * Math.PI / 2, 0); }
+      else { const phi = laneWrap(l.ph + t * l.v, span), q = laneAt(phi, span, l.r, l.y, l.s), q2 = laneAt(phi + l.v * .5, span, l.r, l.y, l.s), p2 = at(phi + l.v * .5, q2.r, q2.y); o.position.copy(at(phi, q.r, q.y)); o.rotation.set(0, Math.atan2(-(p2.z - o.position.z), p2.x - o.position.x), 0); o.scale.setScalar(q.s); o.updateMatrix(); ships.setMatrixAt(i, o.matrix); o.translateX(-9); o.updateMatrix(); burns.setMatrixAt(i, o.matrix); continue; }
       o.scale.setScalar(l.s); o.updateMatrix(); ships.setMatrixAt(i, o.matrix); o.translateX(-9); o.updateMatrix(); burns.setMatrixAt(i, o.matrix); }
     ships.instanceMatrix.needsUpdate = true; burns.instanceMatrix.needsUpdate = true;
   };
