@@ -501,6 +501,7 @@ export function capitulate(f, o, s) {
 // a power capitulates only when its realm is broken, not just its fleet: its capital lost, or half its worlds
 const broken = f => capLostOf(f) > 0 || Object.values(C.worlds).filter(w => w.owner === f).length <= Math.max(1, Math.floor(((C.startN || {})[f] || 3) * .5));
 function aiDiplo() {
+  C.aiFell = C.aiFell || {}; for (const x of POW) if (!C.fac[x].alive && C.aiFell[x] == null) C.aiFell[x] = C.turn; // the week each power fell
   for (const f of POW) {
     if (!C.fac[f].alive || human(f)) continue;
     const D = RU.docOf(f);
@@ -519,7 +520,7 @@ function aiDiplo() {
       }
       else if (!finish && (s < -40 + D.peace * .6 + op / 10 || wf > 80 || (POW.some(x => x !== f && x !== o && runaway(x) && hostile(f, x)) && s < 20)) && rnd() < .08 && !(f === 'soc' && o === 'rep' && supportOf('soc') > 60)) { const items = aiOfferItems(f, o, Math.max(0, -s * .6)); applyDeal(f, o, items); }
     }
-    aiWar(f, D);
+    aiWar(f, D); balance(f, D);
     // the Republic and the Remnant are enemies to the death: a truce between them holds only as long as it must
     for (const o of ['rep', 'soc']) if (o !== f && (f === 'rep' || f === 'soc') && C.fac[o].alive && relOf(f, o) === 'peace' && truceLeft(f, o) === 0 && rnd() < .15 * (D.truce > 0 ? 1 : .4)) declareWar(f, o);
     // a ruler who holds nothing sacred may break a truce with a power it hates
@@ -558,6 +559,45 @@ function aiWar(f, D) {
     // the player hears of it first: once, when a power at peace begins to look for its chance
     C.warWarn = C.warWarn || {}; if (human(o) && !C.warWarn[f]) { C.warWarn[f] = C.turn; note(`Our agents report that ${(RU.actingOf(f) || { name: 'the ruler of ' + BLOC_NAME[f] }).name.split(',')[0]} is counting our fleets. ${BLOC_NAME[f]} may not keep the peace much longer.`, 'bad', CAPITAL[f], { title: 'A peace in doubt', kind: 'war' }); continue; }
     if (rnd() < .05 * D.ops * (1 + hate) * (1 + chance * .6)) { declareWar(f, o); C.aiStats = C.aiStats || {}; C.aiStats.declared = (C.aiStats.declared || 0) + 1; return; }
+  }
+}
+// the balance of power (task A3): the third power does not sit by while one rival swallows the other. While a power
+// is beating its rival down (war score 40 or more, the rival near dead, or running away with the war), the third makes
+// common cause with the loser: an alliance, if the loser is an AI power and not its sworn enemy, and war on the winner,
+// when the two together are a match for him. A patient ruler counts this as the chance he waits for. Once a rival has
+// fallen, the third does not wait to be next: the winner is the enemy, and the edge it asks for war comes down week by
+// week from the fall, to a third of the usual after twenty weeks
+function balance(f, D) {
+  if (human(f) || (C.weary[f] || 0) > 30 || C.turn < 10) return;
+  const live = POW.filter(x => C.fac[x].alive), stat = k => { C.aiStats = C.aiStats || {}; C.aiStats[k] = (C.aiStats[k] || 0) + 1; };
+  if (live.length === 2 && live.includes(f)) { // after the fall: the final war
+    const o = live.find(x => x !== f); if (relOf(f, o) !== 'peace' || truceLeft(f, o) > 0) return;
+    if (human(o) && C.turn < [40, 26, 16][C.difficulty]) return;
+    const wk = C.turn - Math.max(...POW.filter(x => !C.fac[x].alive).map(x => C.aiFell[x] ?? C.turn));
+    const need = D.sup * 1.15 * Math.max(.35, 1 - wk / 30) * (runaway(o) ? .75 : 1);
+    if (wk >= 4 && warEdge(f, o) >= need && rnd() < .2 * Math.max(.5, D.ops)) {
+      if (human(o)) note(`${(RU.actingOf(f) || { name: 'The ruler of ' + BLOC_NAME[f] }).name.split(',')[0]} will not wait to be next. ${BLOC_NAME[f]} has turned its fleets on us.`, 'bad', CAPITAL[f], { title: 'The last war', kind: 'war' });
+      declareWar(f, o); stat('finalWar'); }
+    return;
+  }
+  for (const o of live) {
+    if (o === f || relOf(f, o) !== 'peace' || truceLeft(f, o) > 0) continue;
+    if (human(o) && C.turn < [40, 26, 16][C.difficulty]) continue;
+    for (const p of atWarWith(o)) {
+      if (p === f || !C.fac[p].alive || hostile(f, p)) continue;
+      if (!(warScore(o, p) >= 40 || nearDead(p) || runaway(o))) continue; // the winner and the loser of that war
+      const together = (FLEET(f) + FLEET(p) * .6) / Math.max(400, FLEET(o) * (atWarWith(o).length > 1 ? .8 : 1));
+      C.aiJoin = C.aiJoin || {}; if (C.turn - (C.aiJoin[f + '>' + o] ?? -99) < 30) continue; // one entry into a war a month and a half: no joining, making peace and joining again
+      if (together < D.sup * .9 || rnd() > .12 * Math.max(.5, D.ops) * (D.truce === 0 ? 1.5 : 1)) continue;
+      C.aiJoin[f + '>' + o] = C.turn;
+      const feud = (f === 'rep' && p === 'soc') || (f === 'soc' && p === 'rep');
+      if (!human(p) && !feud && relOf(f, p) === 'peace') {
+        setRel(f, p, 'ally'); addOpinion(p, f, 'ally', 'Allies in war', 10, .1); addOpinion(o, f, 'ally', `Allied with ${BLOC_NAME[p]} against us`, -10, .2);
+        note(`${BLOC_NAME[f]} and ${BLOC_NAME[p]} are allies against ${BLOC_NAME[o]}.`, human(o) ? 'bad' : 'gold'); chron('alliance', `${BLOC_NAME[f]} and ${BLOC_NAME[p]} ally against ${BLOC_NAME[o]}.`, null, f); stat('allied');
+      }
+      if (human(p)) note(`${BLOC_NAME[f]} declares war on ${BLOC_NAME[o]}: the enemy of our enemy.`, 'gold', CAPITAL[f], { title: 'A new front', kind: 'war' });
+      declareWar(f, o); stat('balJoin'); return;
+    }
   }
 }
 // the player answers an offer from an AI power
