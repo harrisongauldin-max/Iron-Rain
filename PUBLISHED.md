@@ -4,6 +4,7 @@ Each publish of `main` to the claude.ai artifact (slug `fc8b77cf-d69b-4cca-9154-
 
 | Artifact version | Date | Commit | What changed |
 |---|---|---|---|
+| 1794873292-f94d | 2026-11-16 | a4aca0b | `js/groundmodels.js`: P1, the pieces for the planet map (`mapPieceGeo`, `mapPieceMaterial`, `MAP_KINDS`): army, capital, city, port, towns, forts, landing, siege, battle. Nothing draws them yet; the planet-map screen (M2) will. |
 | 1794872945-ab22 | 2026-11-16 | 0bb0e26 | `js/planetgen.js`: cities visible from orbit on Mercury, Venus, Earth and Mars — built-up masses with a tower core, block grid, sprawl along radial roads, spaceports, a quilt of fields, roads strung with towns; night lights follow the same mask, rural scatter toned down. |
 | 1794865075-6145 | 2026-11-16 | 84e0f83 | `js/abilities.js`, `js/battle.js`, `js/stratview.js`, `js/tactics.js`, `style.css`: U4, ability buttons show when they pay and what they cost, the one whose window is open lights up with a hint above the bar; U5, half speed from the first shots until a minute after the first loss unless the player set the speed, and the result screen lists the orders that changed the exchange of fire. |
 | 1794864167-c16f | 2026-11-16 | e7097da | `js/sim.js`: U2 (part), attackers close as a pack, brake bow-on inside the enemy's guns (no stern flips), keep broadsides on in a gunfight, share targets on an attack-move; unguided rounds miss ships under thrust more. Equal attacks 2/12 (were 0), 1.5:1 6/6. New `tests/attack_balance.py`. |
