@@ -1597,3 +1597,12 @@ body.strat #sndp{top:64px;right:12px;z-index:45;max-height:calc(100vh - 84px)}
 #babhint i{color:var(--dim);font-style:normal}
 #babhint kbd{color:var(--gold-hi)}
 body.bcalm #babhint{top:-46px}
+/* U5: the orders that changed the fight, on the result screen */
+.aords{margin:0 0 10px;padding:8px 12px;border:1px solid rgba(232,200,126,.25);background:rgba(232,200,126,.04)}
+.aords .aord{display:grid;grid-template-columns:52px auto 1fr;gap:2px 10px;align-items:baseline;padding:3px 0;font-size:12px}
+.aords .aord i{font-style:normal;font-family:ui-monospace,Consolas,monospace;color:var(--dim);font-size:11px}
+.aords .aord b{font-family:var(--serif);letter-spacing:.08em;color:var(--ivory)}
+.aords .aord em{grid-column:2;font-style:normal;color:var(--dim);font-size:11px}
+.aords .aord span{grid-column:2 / 4;color:var(--dim)}
+.aords .aord.good span{color:#9fd8a5}.aords .aord.bad span{color:#ffb3a8}
+.aords .aord:only-child span{grid-column:1 / 4}

@@ -19,7 +19,7 @@ const armedShip = s => !s.dead && !s.def.static && !s.surrendered && !s.derelict
 export const T = { feed: [], callouts: [], hits: [], tac: false, ff: false, prev: 1, contact: false, rain: [] };
 
 export function setup() {
-  Object.assign(T, { framed: false, glide: null, tags: null, tagT: 0, dmg: [{}, {}], kills: [], rain: [], feed: [], callouts: [], hits: [], beams: [], ff: false, ffOff: false, stall: false, stallG: null, stallM: null, stallT: 0, prev: S.speed || 1, contact: false, lastCheck: 0, engaged: false, foe0: str(1), real: 0, slowUntil: 0, slowPrev: 1, lastSlow: -99 });
+  Object.assign(T, { met: false, meet: null, userSpeed: false, spdMine: null, framed: false, glide: null, tags: null, tagT: 0, dmg: [{}, {}], kills: [], rain: [], feed: [], callouts: [], hits: [], beams: [], ff: false, ffOff: false, stall: false, stallG: null, stallM: null, stallT: 0, prev: S.speed || 1, contact: false, lastCheck: 0, engaged: false, foe0: str(1), real: 0, slowUntil: 0, slowPrev: 1, lastSlow: -99 });
   S.hooks = { kill: onKill, shDown: onShDown, hit: onHit, absorb: onAbsorb, halfDown: onHalfDown, note: (t, c) => push(t, c), board: onBoard, beam: onBeam, wrecked: onWrecked, nuke: onNuke, voice, capture: onCapture, ripple: onRipple, bombFx, banner }; T.rip = []; T.bombs = []; T.decks = new Map(); CO.reset(); T.hullTold = new Set(); T.nukes = [0, 0]; S.wash = [];
   S.battleOverlay = draw; SNS.setup(); S.decksFn = decks; S.boardAim0 = null; DIR.cur = null; DIR.heat = new Map(); DIR.lastCut = -99; S.pip = null;
 }
@@ -137,6 +137,7 @@ export const decks = () => [...T.decks.values()].filter(D => !D.t.dead && D.t.te
 export function teardown() { S.stepCap = 10; S.pip = null; DIR.cur = null; DIR.takeUntil = 0; T.glide = null; { const el = typeof document !== 'undefined' && document.getElementById('pip'); if (el) el.classList.remove('take'); } { const el = typeof document !== 'undefined' && document.getElementById('pip'); if (el) el.classList.remove('show'); } S.hooks = null; S.battleOverlay = null; S.bzone = null; if (T.slowUntil) { S.speed = T.slowPrev; T.slowUntil = 0; } if (T.ff) { S.speed = T.prev; T.ff = false; } S.ffStep = null; speedLabel(); }
 
 // ---------------------------------------------------------------- the clock
+const MEET = .5;   // U5: the speed of the decisive minute
 const speedLabel = () => { const b = typeof document !== 'undefined' && document.getElementById('bSpd'); if (b) b.textContent = T.ff ? `Closing · ${S.speed}×` : T.slowUntil ? 'Slow time' : 'Speed ' + speedTxt(S.speed); };
 export function closest() { // the gap between the nearest armed ships of the two sides
   const a = S.ships.filter(s => s.team === 0 && armedShip(s)), b = S.ships.filter(s => s.team === 1 && armedShip(s));
@@ -170,8 +171,14 @@ export function tick(dt, paused) {
   if (!engaged && !paused) { const g = mainGap();
     const moved = (T.stallG == null || d < T.stallG - 400) || (g != null && (T.stallM == null || g < T.stallM - 400));
     if (moved) { T.stallG = d; T.stallM = g; T.stallT = S.time; T.stall = false; } else if (S.time - T.stallT > 20) T.stall = true; } else T.stall = false;
+  // U5: when the lines first meet, time drops to half speed for the decisive minute (until a minute after the first loss,
+  // or two and a half minutes at most), unless the player has set the speed. Any change of speed by the player ends it
+  if (T.spdMine != null && S.speed !== T.spdMine && !T.ff && !T.slowUntil) { T.userSpeed = true; if (T.meet) { T.meet = null; push('Your speed: the slow minute is off', 0xd8c8a8); } }
+  if (T.meet) { if (T.meet.loss == null && T.kills.length > T.meet.k0) T.meet.loss = S.time;
+    if ((T.meet.loss != null && S.time > T.meet.loss + 60) || S.time > T.meet.t + 150) { if (S.speed === MEET) { S.speed = T.meet.prev; speedLabel(); } push('The decisive minute is over: back to your speed', 0xd8c8a8); T.meet = null; } }
   if (T.ff && engaged) { const fired = gunsTalking(); S.speed = T.prev; T.ff = false; T.manual = false; S.ffStep = null; speedLabel(); push(fired ? 'First shots: closing speed off' : 'Inside weapons reach: closing speed off', 0xffd27a); }
   if (engaged) T.ffOff = false;
+  if (!T.met && gunsTalking() && !paused) { T.met = true; if (!T.userSpeed && !T.ff && S.speed >= 1 && !T.slowUntil) { T.meet = { t: S.time, prev: S.speed, k0: T.kills.length, loss: null }; S.speed = MEET; speedLabel(); push('The lines meet: half speed for the decisive minute. Change the speed to take it back', 0xffd27a); } }
   if (contact && !T.saidContact) { T.saidContact = S.time; voice('contact', null, { N: SNS.counts().seen + SNS.counts().contacts || 'several' }); }
   if (T.saidContact && !T.saidIcpt && S.time - T.saidContact > 5) { T.saidIcpt = true; voice('contact', null, { enemy: true }); }
   if (!T.saidPicket && SNS.SN.contacts[0].length) { const pk = S.ships.find(s => s.team === 0 && s.picket && !s.dead); if (pk) { T.saidPicket = true; voice('picket', pk, { N: SNS.SN.contacts[0].length }); } }
@@ -179,6 +186,7 @@ export function tick(dt, paused) {
   for (const s of S.ships) if (s.team === 0 && !s.dead && !s.def.static && !s.def.fighter && !s.def.shell && s.hp < s.def.hp * .33 && !T.hullTold.has(s.id) && s.def.hp >= 600) { T.hullTold.add(s.id); voice('hull', s); break; }
   if (!T.framed && T.contact && (gunsTalking() || d < 8000)) { T.framed = true; frameFight(); }
   T.contact = contact; T.gap = d; if (contact) T.engaged = true; duelTick();
+  T.spdMine = S.speed;
   if (S.bzone) { const b = bodyOf(S.bzone.world); S.bzone.x = b.x; S.bzone.y = b.y; }
   const now = S.time; T.rip = T.rip.filter(r => now - r.t < .45 && !r.s.dead); T.bombs = T.bombs.filter(b => now - b.t < 1.6); T.feed = T.feed.filter(e => now - e.t < 14); T.callouts = T.callouts.filter(e => now - e.t < (e.long ? 4 : 2.2)); T.hits = T.hits.filter(e => now - e.t < .5); T.beams = T.beams.filter(e => now - e.t < .45);
 }

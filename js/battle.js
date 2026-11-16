@@ -112,6 +112,7 @@ export function battleTick(dt) {
   document.body.classList.toggle('bdep', !!B.deploy);
   document.body.classList.toggle('bcalm', !B.deploy && !B.cmdOpen && !S.inspect && !S.selection.some(s => s.team === 0) && !S.tmode && !S.nmode);
   if (S.paused) return; TC.tick(dt, false); B.t += dt * S.speed;
+  if (!B.dlogT || S.time - B.dlogT >= 1) { B.dlogT = S.time; const tot = t => Object.values(TC.T.dmg[t] || {}).reduce((a, e) => a + e.sh + e.hull, 0); (B.dlog || (B.dlog = [])).push([S.time, tot(0), tot(1)]); }
   if (B.t0 == null && TC.T.contact) { B.t0 = S.time; updBar(); }
   // skipping the approach: the sim runs many steps a frame until someone holds a lock within reach
   if (B.skip) { if (TC.T.contact || B.endT != null) { B.skip = false; S.stepCap = 16; if (S.speed > 12) S.speed = 1; const el = $('bSkip'); if (el) el.classList.add('hide'); } else { { const t0 = performance.now(); let n = 0; while (performance.now() - t0 < 28) { simUpdate(1 / 12); if (++n % 6 === 0 && TC.closest() < 16000) break; } } /* big steps, as many as a frame allows: nobody is in reach yet */ const g = TC.T.gap || 0; if (B.skipG == null || g < B.skipG - 500) { B.skipG = g; B.skipT = S.time; } else if (S.time - B.skipT > 60) { B.skip = false; S.stepCap = 16; toast('Nobody is closing: give the fleet its orders (X advances), then skip', 'prompt', null, true); } } }
@@ -258,7 +259,22 @@ function aarOf(r) {
   const D = MO.doc();
   return { mvp: best[0] ? row(best[0]) : null, honours: best.slice(1, 4).map(row), t: Math.round(S.time), rout: MO.M.rout.map(x => x != null), esc: MO.M.esc.slice(), broke: MO.M.broke.slice(), surr: MO.M.prizes,
     cmdrs: (out.tac || []).map(t => ({ name: t.name, ours: t.team === 0, fate: fate(t) })), field: TRN.info().name, foe: MO.M.lead ? `${MO.M.lead.name} (${D.name})` : null,
-    convoy: OPS.OP.kind ? { kind: OPS.OP.kind, got: OPS.OP.got, lost: OPS.OP.lost, of: OPS.OP.convoy.length } : null, held: !!r.held, champs: [...(B.champDead || [])].map(a => a.name), foeOwner: B.foe, ...whyOf() };
+    orders: ordersThatMattered(), convoy: OPS.OP.kind ? { kind: OPS.OP.kind, got: OPS.OP.got, lost: OPS.OP.lost, of: OPS.OP.convoy.length } : null, held: !!r.held, champs: [...(B.champDead || [])].map(a => a.name), foeOwner: B.foe, ...whyOf() };
+}
+// U5: for each order, how the exchange of fire went in the 25 seconds after it against the 25 before (or, for the
+// approach, against the first 25 seconds of the enemy's fire). Kept: the orders that moved it most, up to five
+function ordersThatMattered() {
+  const L = B.dlog || [], at = t => { let r = L[0] || [0, 0, 0]; for (const e of L) { if (e[0] > t) break; r = e; } return r; };
+  const win = (a, b) => { const x = at(a), y = at(b); return [y[1] - x[1], y[2] - x[2]]; };
+  const out = [];
+  for (const o of B.orders || []) {
+    const [d0, t0] = win(o.t - 25, o.t), [d1, t1] = win(o.t, o.t + 25);
+    if (d1 + t1 < 40 && d0 + t0 < 40) continue; /* nothing much was happening */
+    const r0 = (d0 + 30) / (t0 + 30), r1 = (d1 + 30) / (t1 + 30), k = r1 / r0;
+    out.push({ t: Math.round(o.t - (B.t0 ?? 0)), what: o.what, who: o.who, k: +k.toFixed(2), dealt: Math.round(d1), taken: Math.round(t1) });
+  }
+  if (B.approach) { const f = L.find(e => e[1] + e[2] > 0); if (f) { const [d, t] = win(f[0], f[0] + 25); out.push({ t: 0, what: 'Approach: ' + (approaches().find(a => a[0] === B.approach) || [, B.approach])[1], who: '', k: +((d + 30) / (t + 30)).toFixed(2), dealt: Math.round(d), taken: Math.round(t), first: true }); } }
+  return out.filter(o => Math.abs(Math.log(o.k)) > .25).sort((a, b) => Math.abs(Math.log(b.k)) - Math.abs(Math.log(a.k))).slice(0, 5).sort((a, b) => a.t - b.t);
 }
 // why it went the way it did: strength over time, damage by weapon and side, time lost to EMP, ordnance spent,
 // and the ten seconds that decided it. Team 0 is always the player.
@@ -326,7 +342,7 @@ export function autoRest() {
 }
 export const inBattle = () => !!B;
 function cmdClick(e) { const b = e.target.closest('[data-ba]'); if (!b || !B) return; const k = b.dataset.ba;
-  if (k === 'cmdopen') { B.cmdOpen = true; B.abSig = null; return; } if (k === 'cmdfold') { B.cmdOpen = false; S.selection = []; S.inspect = null; B.abSig = null; return; } if (k === 'hang') hangar(b.dataset.hg); else if (k === 'closing') closingToggle(); else if (k === 'finish') autoRest(); else if (k === 'commit') commitReserves(); else if (k === 'ab') { useAb(b.dataset.ab); } else if (k === 'helm') { helmSel(b.dataset.helm); } else if (k === 'adv') { TC.advance(); if (S.paused) { S.paused = false; document.body.classList.remove('paused'); } } else if (k === 'tac') { TC.T.tac = !TC.T.tac; updBar(); } else if (k === 'fire') fireToggle(); }
+  if (k === 'cmdopen') { B.cmdOpen = true; B.abSig = null; return; } if (k === 'cmdfold') { B.cmdOpen = false; S.selection = []; S.inspect = null; B.abSig = null; return; } if (k === 'hang') hangar(b.dataset.hg); else if (k === 'closing') closingToggle(); else if (k === 'finish') autoRest(); else if (k === 'commit') commitReserves(); else if (k === 'ab') { useAb(b.dataset.ab); } else if (k === 'helm') { helmSel(b.dataset.helm); } else if (k === 'adv') { TC.advance(); logOrder('Advance', 'the whole fleet'); if (S.paused) { S.paused = false; document.body.classList.remove('paused'); } } else if (k === 'tac') { TC.T.tac = !TC.T.tac; updBar(); } else if (k === 'fire') fireToggle(); }
 // the hangar row: what the ships selected (or the whole fleet) carry, and how to send it
 function hangInfo(G) {
   const L = G ? G.ships : [], sum = k => L.reduce((a, s) => a + (s.h && s.h[k] > 0 ? s.h[k] : 0), 0), has = k => L.some(s => s.def.hangar && s.def.hangar[k]);
@@ -335,7 +351,7 @@ function hangInfo(G) {
   return { shells: sum('starshell'), pods: sum('boarder'), wings: sum('ripwing'), storks: sum('stork'), out, nk, held, any: { shells: has('starshell'), pods: has('boarder'), wings: has('ripwing'), storks: sum('stork') > 0, nk: L.some(s => nukesOn(s).length) } };
 }
 function hangar(k) {
-  const G = AB.forSel(); if (!G) return; const L = G.ships;
+  const G = AB.forSel(); if (!G) return; const L = G.ships; logOrder({ shells: 'starShells', pods: 'leechCraft', nuke: 'Nuclear missile', wings: 'ripWings' }[k] || k, G.name);
   if (k === 'shells' || k === 'pods') { const I = hangInfo(G); if (!(k === 'pods' ? I.pods : I.shells)) { toast(k === 'pods' ? 'No leechCraft aboard' : 'No starShells aboard', 'bad', null, true); return; } setTargetMode(k, L); toast(`Click an enemy capital ship within ${LAUNCH_R.toLocaleString()} km of the carriers · right-click or Esc to cancel`, 'prompt'); }
   else if (k === 'nuke') { if (!L.some(s => nukesOn(s).some(w => w.ammo >= 1))) { toast('No nuclear missiles ready in these ships', 'bad', null, true); return; } setNukeMode(L); }
   else if (k === 'wings') { const was = S.selection; S.selection = L.filter(s => s.h); if (S.selection.length) toggleHangars(); else toast('No hangars among these ships', 'bad', null, true); S.selection = was; }
@@ -726,12 +742,14 @@ const AB_ICON = { shells: 'M8 2l2 3h3l-2 3 1 4-4-2-4 2 1-4-2-3h3z', nuke: 'M8 6.
   lock: 'M8 2v3M8 11v3M2 8h3M11 8h3M8 4.5a3.5 3.5 0 1 1 0 7a3.5 3.5 0 1 1 0-7z', burn: 'M2 4l4 4-4 4M7 4l4 4-4 4M12 4l2 4-2 4', dark: 'M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8zM2 14L14 2',
   bridge: 'M2 10l6-6 6 6-2 2H4zM8 7.2a1.4 1.4 0 1 1 0 2.8a1.4 1.4 0 1 1 0-2.8z', shells: 'M3 3l4 2-1 1zM9 3l4 2-1 1zM6 9l4 2-1 1zM2 13l3-1M8 14l3-1', rain: 'M4 2v7M2 7l2 3 2-3M8 4v7M6 9l2 3 2-3M12 2v7M10 7l2 3 2-3M2 14.5h12' };
 const abIcon = (k, st) => `<span class="aic" style="--cd:${st.cd && st.tot ? Math.min(1, st.cd / st.tot) : 0}"><svg viewBox="0 0 16 16"><path d="${AB_ICON[k] || AB_ICON.sig}"/></svg>${st.cd ? `<b>${st.cd}</b>` : ''}</span>`;
+// U5: the player's orders, kept with the time they were given, so the result screen can say which of them changed the fight
+function logOrder(what, who) { if (!B || B.deploy) return; (B.orders || (B.orders = [])).push({ t: S.time, what, who: who || '' }); }
 function useAb(k) {
   const G = AB.forSel(); if (!G) return;
   if (k === 'rain' && B.senate && !B.defied && S.rainCtx && !S.rainCtx.why() && !(B.senateArm && S.time - B.senateArm < 8)) { B.senateArm = S.time; toast('The Senate voted to hold the siege. Order the Rain again (I) to defy it and let the legions fall', 'prompt', null, true); B.abSig = null; return; }
   const A = k === 'sig' ? AB.sigOf(G) : AB.ABIL[k]; if (!A) { toast(k === 'sig' ? 'No commander among the ships selected' : 'Not possible here', 'bad', null, true); return; }
   const st = AB.state(G, k, A); if (!st.ok) { toast(`${A.name}: ${st.why}`, 'bad', null, true); return; }
-  AB.use(G, k); B.abSig = null; updBar();
+  AB.use(G, k); logOrder(A.name, G.name); B.abSig = null; updBar();
 }
 // the helm, for the ships selected (or the whole fleet): which side to show the enemy, or to keep at range
 function helmSel(k) {
