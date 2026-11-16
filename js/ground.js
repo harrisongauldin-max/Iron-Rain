@@ -198,9 +198,9 @@ export function cityPlan(blocks, CH, world) {
   const cell = new Map(); for (const b of blocks) cell.set(b.i + ',' + b.j, b);
   const used = new Set(), plots = [];
   // whole blocks between the streets (3x3 cells) in the heart become one grand structure
-  for (const b of blocks) { if (b.i % 4 !== 1 || b.j % 4 !== 1) continue; const d = Math.hypot(b.i + 1.5 - cx0, b.j + 1.5 - cz0) / R; if (d > .45 || hashf(b.i, b.j, 11) > LAY.grand) continue;
-    let ok = true, hm = 0; for (let a = 0; a < 3 && ok; a++) for (let c = 0; c < 3; c++) { const q = cell.get((b.i + a) + ',' + (b.j + c)); if (!q) { ok = false; break; } hm = Math.max(hm, q.h); }
-    if (!ok) continue; for (let a = 0; a < 3; a++) for (let c = 0; c < 3; c++) used.add((b.i + a) + ',' + (b.j + c));
+  for (const b of blocks) { if (b.i % 4 !== 1 || b.j % 4 !== 1) continue; const d = Math.hypot(b.i + 1.5 - cx0, b.j + 1.5 - cz0) / R; if (d > .6 || hashf(b.i, b.j, 11) > LAY.grand) continue;
+    let got = 0, hm = 0; for (let a = 0; a < 3; a++) for (let c = 0; c < 3; c++) { const q = cell.get((b.i + a) + ',' + (b.j + c)); if (q) { got++; hm = Math.max(hm, q.h); } }
+    if (got < 7) continue; /* a monument takes its whole block even where a lot or two stood empty */ for (let a = 0; a < 3; a++) for (let c = 0; c < 3; c++) used.add((b.i + a) + ',' + (b.j + c));
     plots.push({ i: b.i, j: b.j, x: (b.i + 1.5) * CH, z: (b.j + 1.5) * CH, w: CH * 2.6, h: hm * 1.5, d, grand: true }); }
   for (const b of blocks) { if (used.has(b.i + ',' + b.j)) continue; const d = Math.hypot(b.i + .5 - cx0, b.j + .5 - cz0) / R, x = (b.i + .5) * CH, z = (b.j + .5) * CH, u = hashf(b.i, b.j, 23);
     if (d > .55 && u < LAY.open) { plots.push({ i: b.i, j: b.j, x, z, w: CH * .86, h: b.h, d, open: true }); continue; } // a plaza, garden or yard
