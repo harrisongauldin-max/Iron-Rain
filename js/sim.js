@@ -618,6 +618,9 @@ function think(s, dt) {
       else if (o.next && d < 140 + s.r) orderDone(s, o, o.x, o.y);
       { const pc = o.cruise ?? packCruise(s, o, d), bc = s.def.fighter || s.def.shell ? undefined : brakeCap(s, foeGap(s) - acq(s) + 150); arrive(s, o.x, o.y, 0, 0, pc != null && bc != null ? Math.min(pc, bc) : pc ?? bc); }
       if (o.face != null && d < 400 + s.r) G.face = o.face;
+      // U2: a broadside ship closing on an enemy line swings her broadside on before she comes into its guns, so she can
+      // answer from the first round instead of turning under fire (the line she is closing on is already broadside on)
+      else if (s.def.broadside && !s.def.fighter && foeGap(s) < acq(s) * 1.4 && s.gapO && !s.gapO.dead) G.face = broadsideFace(s, s.gapO);
       return;
     }
     case 'attack': return combat(s, o.t, dt);
@@ -668,7 +671,7 @@ function brakeCap(s, gap) {
 function foeGap(s) {
   if (s.gapT > S.time) return s.gapD; s.gapT = S.time + .5; let best = 1e18;
   let bo = null; for (const o of S.ships) { if (o.dead || o.team === s.team || o.team > 1 || o.def.fighter || o.def.shell || o.surrendered || o.derelict || (!o.weapons.length)) continue; if (o.vis && !o.vis[s.team]) continue; const d = hyp(o.x - s.x, o.y - s.y); if (d < best) { best = d; bo = o; } }
-  s.gapB = bo ? Math.atan2(bo.y - s.y, bo.x - s.x) : null; return s.gapD = best;
+  s.gapB = bo ? Math.atan2(bo.y - s.y, bo.x - s.x) : null; s.gapO = bo; return s.gapD = best;
 }
 // U2: a pack on the same attack-move fires as one, the way a line that waits for it does: a ship joins the target most
 // of her packmates are already on, if it is in her reach, rather than each taking whatever is nearest to her
@@ -681,18 +684,22 @@ function packTarget(s, o) {
 }
 // ships sent on the same attack-move outside a battle group close as a pack: the quick ones hold back on the slowest, so the
 // line arrives together instead of one hull at a time into the enemy's guns (U2). Recomputed twice a second
+// how far her guns (not her missiles or point defence) reach, for keeping a pack's order
+function gunReach(s) { if (s.gunR != null) return s.gunR; let r = 0; for (const w of s.weapons) { const D = w.def; if (D.pd || D.kind === 'missile') continue; r = Math.max(r, effR(D)); } return s.gunR = r; }
 function packCruise(s, o, d) {
   if ((s.group && !s.detached) || s.def.fighter || s.def.shell || s.def.static || o.flank) return undefined;
   if (s.packT > S.time) return s.packC; s.packT = S.time + .5; s.packC = undefined;
-  let n = 0, sum = 0, slow = 1e9;
+  let n = 0, sum = 0, slow = 1e9, reach = 0;
   for (const m of S.ships) {
     if (m.team !== s.team || m.dead || m.def.fighter || m.def.shell || m.def.static || (m.group && !m.detached)) continue;
     const mo = m.order; if (mo.type !== 'amove' || hyp(mo.x - o.x, mo.y - o.y) > 5000) continue;
-    n++; sum += hyp(mo.x - m.x, mo.y - m.y); slow = Math.min(slow, m.def.cruise * Math.max(.15, m.hf || 1));
+    n++; sum += hyp(mo.x - m.x, mo.y - m.y); slow = Math.min(slow, m.def.cruise * Math.max(.15, m.hf || 1)); reach = Math.max(reach, gunReach(m));
   }
   if (n < 2) return undefined;
-  const lag = d - sum / n;               // how far behind (+) or ahead (-) of the pack she is
-  return s.packC = lag > 1500 ? undefined : lag < -1200 ? slow * .5 : slow;
+  // the long guns lead and the short ones keep behind them by the difference in reach, so the first ships into the
+  // enemy's range are the ones that can answer him (gunnery edge, U2)
+  const want = clamp((reach - gunReach(s)) * .8, 0, 3000), lag = d - sum / n - want;
+  return s.packC = lag > 1500 ? undefined : lag < -900 ? slow * .5 : slow;
 }
 function combat(s, t, dt) {
   if (s.def.fighter) return fighterAttack(s, t, dt);
@@ -985,8 +992,8 @@ function fire(s, w, mx, my, ang, D, resetCd) {
   const spr = (D.spread * (bonus(s, 'gunnery') ? .6 : 1) * (1 - .15 * s.rank) + far) * lk;
   ang += rand(-spr, spr) + jink(s, w, D);
   const c = Math.cos(ang), sn = Math.sin(ang);
-  if (S.dbgFire) S.dbgFire(s, w, D); /* test harnesses only */
   S.shots.push({ x: mx, y: my, px: mx, py: my, vx: s.vx + c * D.speed, vy: s.vy + sn * D.speed, team: s.team, D, life: D.life, owner: s, d0: w ? w.td || 0 : 0 });
+  if (S.dbgFire) S.dbgFire(s, w, D, S.shots[S.shots.length - 1]); /* test harnesses only */
   if (D.recoil && !s.def.static) { s.vx -= c * D.recoil / s.mass; s.vy -= sn * D.recoil / s.mass; }
   if (resetCd) w.cd = D.reload * (.9 + Math.random() * .2);
   if (w) w.fT = S.time; // when the gun last fired: the renderer recoils its barrels and kicks the hull
@@ -1519,6 +1526,7 @@ function updShots(dt) {
       const hx = p.px + (p.x - p.px) * ht, hy = p.py + (p.y - p.py) * ht, hx0 = hx, hy0 = hy;
       const shielded = hit.sh > 0;
       if (p.D.kind === 'slug' && !hit.def.static) { const J = p.D.dmg * 1.5 * k * (shielded ? .4 : 1); hit.vx += rvx / rs * J / hit.mass; hit.vy += rvy / rs * J / hit.mass; }
+      if (S.dbgShot) S.dbgShot(p, hit, k); /* test harnesses only */
       damage(hit, p.D.dmg * k, p.team, hx, hy, p.D.bow ? 'lance' : p.D.kind, p.owner);
       // the hit is judged on the hit circle, but it is SEEN where the round's line meets the hull as drawn (S.skinAt, from
       // the renderer): a long thin hull struck on the beam no longer sparks in empty space beside her. Shield hits stay on
