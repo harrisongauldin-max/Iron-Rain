@@ -44,6 +44,56 @@ function lights(o, x, y, z, i, j, dens, col = C.ffc58a, k = 1) { // clustered ci
   o.lr += col[0] * a; o.lg += col[1] * a; o.lb += col[2] * a;
 }
 
+// ---------------------------------------------------------------- cities, as seen from orbit
+// An inhabited world lists its cities: { c: vec(lat, lon), r: the built-up radius in degrees, k: weight (a capital 1,
+// a town .4), port: 1 for a spaceport flat beside it }, and roads: pairs of city indices. The layer is painted after
+// the world's own ground, on land only: the built-up mass greys the ground (a lighter core of towers, a block grid at
+// the finest scale, darker avenues), sprawl runs out along radial roads with suburbs between, a spaceport is a pale
+// flat with dark runways, a quilt of fields rings the city, and the roads between cities are pale lines strung with
+// towns. The same mask drives the night lights, so what glows at night is what was grey by day.
+const CITY_FIELD = [[150, 148, 90], [122, 134, 70], [168, 152, 96], [96, 118, 62], [178, 166, 118], [136, 128, 76]];
+function cityLayer(o, x, y, z, lat, lon, cities, roads, W, sd) {
+  let u = 0, core = 0, port = 0, field = 0, road = 0, town = 0, gx = 0, gy = 0;
+  const ppd = W / 360, far = ppd >= 4, g1 = Math.max(1.5, Math.round(ppd / 3)), sw = Math.min(.2, .8 / (ppd / g1)); // blocks of ~3 px whatever the map's size; streets under a pixel wide
+  for (let n = 0; n < cities.length; n++) {
+    const c = cities[n], cc = c.c, dot = x * cc[0] + y * cc[1] + z * cc[2]; if (dot < Math.cos((c.r * 3.6 + 1) * D)) continue;
+    const cl = Math.sqrt(cc[0] * cc[0] + cc[1] * cc[1]) || 1e-6, ex = (-cc[1] * x + cc[0] * y) / cl, ny = (-cc[2] * cc[0] * x - cc[2] * cc[1] * y + cl * cl * z) / cl; // local east and north, in radians
+    const rot = hash(n, 7 + sd) * 6.28, cs = Math.cos(rot), sn = Math.sin(rot), lx = (ex * cs - ny * sn) / D, ly = (ex * sn + ny * cs) / D; // the city's own grid, in degrees
+    const a = Math.sqrt(lx * lx + ly * ly) * (1 + fbm(x, y, z, 3, 24, sd + 3) * .3), r = c.r, th = Math.atan2(ly, lx);
+    const spokes = 5 + Math.floor(hash(n, 11 + sd) * 3), arm = sm(.6, .98, Math.cos((th - rot) * spokes)) * sm(r * 3.4, r * .9, a); // sprawl along the radial roads
+    const sub = sm(.3, .65, fbm(x, y, z, 3, 40, sd + 4) * .5 + .5) * sm(r * 3, r * 1.1, a) * .75; // suburbs and satellite estates between the spokes
+    const cu = Math.max(sm(r, r * .5, a), arm * .75, sub) * c.k ** .5;
+    if (cu > u) { u = cu; gx = lx; gy = ly; }
+    core = Math.max(core, sm(r * .55, r * .12, a));
+    if (c.port) { const px = lx - r * 1.2 * Math.cos(rot + 1.1), py = ly - r * 1.2 * Math.sin(rot + 1.1), rx = px * cs + py * sn, ry = -px * sn + py * cs, rag = 1 + fbm(x, y, z, 2, 50, sd + 8) * .25; // the spaceport: a flat off the core, its edge ragged with sheds
+      port = Math.max(port, sm(r * .34 * rag, r * .26, Math.abs(rx)) * sm(r * .22 * rag, r * .16, Math.abs(ry)) * (far && Math.abs(((ry / (r * .14)) % 1 + 1) % 1 - .5) < .07 && Math.abs(rx) < r * .24 ? .35 : 1)); }
+    field = Math.max(field, sm(r * 4.6, r * 1.8, a) * sm(r * .9, r * 1.5, a) * c.k ** .5); // the quilt of fields around
+  }
+  for (const [ia, ib] of roads) { const A = cities[ia].c, B = cities[ib].c, ab = A[0] * B[0] + A[1] * B[1] + A[2] * B[2]; // distance to the great-circle arc between two cities
+    const nx = A[1] * B[2] - A[2] * B[1], ny_ = A[2] * B[0] - A[0] * B[2], nz = A[0] * B[1] - A[1] * B[0], nl = Math.sqrt(nx * nx + ny_ * ny_ + nz * nz) || 1e-9;
+    const off = Math.abs(x * nx + y * ny_ + z * nz) / nl / D, ta = x * A[0] + y * A[1] + z * A[2], tb = x * B[0] + y * B[1] + z * B[2];
+    if (ta < ab || tb < ab) continue; // beyond either end
+    const wob = fbm(x, y, z, 3, 5, sd + 5) * .55 + fbm(x, y, z, 2, 16, sd + 9) * .15, d = Math.abs(off + wob); road = Math.max(road, sm(.14, .04, d)); // a road wanders with the ground
+    const t = Math.acos(Math.min(1, ta)) / Math.acos(Math.min(1, ab)); const slot = Math.floor(t * 9), hh = hash(slot + ia * 31, ib * 17 + sd);
+    if (hh > .35) { const tc = (slot + .3 + hh * .4) / 9, dt = Math.abs(t - tc) * Math.acos(Math.min(1, ab)) / D, tr = .25 + hh * .35; town = Math.max(town, sm(tr, tr * .3, Math.sqrt(dt * dt + d * d)) * .55); }
+  }
+  u = Math.max(u, town, road * .3);
+  if (field > 0 && u < .9) { const fq = Math.min(1.8, ppd / 4), fx0 = gx * fq * 1.7, fy0 = gy * fq, cx = Math.floor(fx0), cy = Math.floor(fy0), fx = fx0 - cx, fy = fy0 - cy, h = hash(cx + 9000, cy + 9000 + sd); // long fields, lying along the city's grid
+    const tint = CITY_FIELD[Math.floor(h * CITY_FIELD.length)], edge = Math.min(fx / 1.7, (1 - fx) / 1.7, fy, 1 - fy) < .06 ? .6 : 1, k = field * (1 - u) * sm(.2, .5, h + fbm(x, y, z, 2, 30, sd + 6) * .3) * .75;
+    mixTo(o, [tint[0] * edge, tint[1] * edge, tint[2] * edge], k * .85); }
+  if (u > 0) { const L = o.r * .3 + o.g * .59 + o.b * .11, mot = .82 + .25 * fbm(x, y, z, 3, 36, sd + 10), built = [(L * .25 + 118) * mot, (L * .25 + 112) * mot, (L * .25 + 102) * mot]; mixTo(o, built, sm(0, .5, u) * .92); // the built-up mass: warm concrete grey, mottled, a trace of the ground's colour
+    const tw = sm(.55, .9, fbm(x, y, z, 2, 70, sd + 11) * .5 + .5); mixTo(o, C['6e6c6a'], core * .5); mixTo(o, C.e4e2dc, core * tw * .7); // the core: denser, darker, its towers catching the light
+    if (far) { const sx = gx * g1 - Math.floor(gx * g1), sy = gy * g1 - Math.floor(gy * g1), street = Math.min(sx, 1 - sx, sy, 1 - sy) < sw ? 1 : 0, av = Math.min(Math.abs(gx * 1.6 - Math.round(gx * 1.6)), Math.abs(gy * 1.6 - Math.round(gy * 1.6))) < sw * .6 ? 1 : 0;
+      mixTo(o, C['3a3c40'], (street * .3 + av * .5) * sm(.2, .8, u)); } // blocks and avenues
+  }
+  if (port > 0) { mixTo(o, C.b0b0ac, port * .75); mixTo(o, C['34343a'], port < .5 && port > 0 ? .5 : 0); }
+  if (road > 0) mixTo(o, C.c4bcac, road * (1 - u) * .4);
+  return { u, core, port, road, town };
+}
+// which worlds have the layer, and where their cities stand (lat, lon): the anchors the painters already light
+const CITIES = {};
+const cityList = (list, roads) => ({ cities: list.map(([la, lo, r, k, port]) => ({ c: vec(la, lo), r, k, port })), roads });
+
 // ---------------------------------------------------------------- polygon masks (for Earth and Mercury's continents)
 function polyMask(W, H, polys) { // polys: [[lon, lat], ...] in degrees; drawn with wrap-around in longitude
   const m = new Float32Array(W * H), X = lon => (lon + 180) / 360 * W, Y = lat => (90 - lat) / 180 * H;
@@ -129,16 +179,19 @@ W_.mercury = { // terraformed hard: coral seas, alpine north, the Waste of Ladon
     mixTo(o, C.d8b878, ladon * sm(-.3, .1, n)); mixTo(o, C.c49a5a, ladon * sm(.1, .5, h)); mixTo(o, C.a8824a, ladon * sm(.3, .7, Math.sin(lon * D * 60 + fbm(x, y, z, 3, 9, 53) * 5) * .5 + .5) * .4); // the Waste's dune seas
     mixTo(o, C['8a7c70'], mtn * .8); mixTo(o, C.f4f4f8, sm(.78, .95, h) * (.4 + north)); // Hesperides and Aigle snows
     // Tyche, Heliopolis, Keryx and the mining towns of the Ladon
-    const dens = .25 + .5 * spot(x, y, z, MERC_TYCHE, 7) + .55 * spot(x, y, z, MERC_HELIO, 6) + .3 * spot(x, y, z, MERC_KERYX, 6);
-    lights(o, x, y, z, i, j, dens * (1 - mtn * .6));
+    const cy = cityLayer(o, x, y, z, lat, lon, CITIES.mercury.cities, CITIES.mercury.roads, W, 3); // Tyche, Heliopolis, Keryx, the mining towns of the Ladon
+    lights(o, x, y, z, i, j, .2 * (1 - mtn * .6) + cy.u * 1.3 + cy.core * .6, C.ffd9a0, 1 + cy.core * .8);
   },
   post(o, lat, lon) { // the seams: straight scars at the edge of the polar ice and near Helios's southern end
     if ((Math.abs(lat - 71) < .35 && lon > -40 && lon < 30) || (Math.abs(lat + 43) < .3 && lon > -12 && lon < 26) || (Math.abs(lon - 160) < .3 && lat > -20 && lat < 40)) { mixTo(o, C.e8dcc8, .7); o.sea = 0; }
   } };
 const MERC_LADON = vec(6, 2), MERC_TYCHE = vec(46, -26), MERC_HELIO = vec(-4, -24), MERC_KERYX = vec(8, 40);
+// Tyche the capital (0), Heliopolis the centre of commerce with its spaceport (1), Keryx the eastern port (2), the mining towns of the Ladon (3, 4), towns of the north and the south (5–7), Borealis's two (8, 9)
+CITIES.mercury = cityList([[46, -26, 4.6, 1, 1], [-4, -24, 5, 1, 1], [8, 40, 3.2, .7, 1], [6, 2, 1.2, .35], [12, 10, 1, .3], [38, 8, 1.3, .4], [-30, 5, 1.2, .35], [-34, 24, 1, .3], [40, 180, 1.8, .5, 1], [-12, 210, 1.6, .45]],
+  [[0, 1], [0, 5], [5, 2], [5, 3], [1, 3], [1, 6], [3, 2], [3, 6], [2, 6], [3, 4], [6, 7], [8, 9]]);
 W_.venus = { // an ocean world: 80% sea, two continents, white-sand archipelagos and an ice cap at each pole
   night: 1, clouds: { cover: .5, scale: 2.6, warp: 1.6, col: C.fffaf0 },
-  px(o, lat, lon, x, y, z, i, j) {
+  px(o, lat, lon, x, y, z, i, j, { W }) {
     const n = fbm(x, y, z, 6, 2.4, 2);
     const ishtar = spot(x, y, z, VEN_ISHTAR, 30), aph = Math.max(spot(x, y, z, VEN_APH1, 30), spot(x, y, z, VEN_APH2, 28), spot(x, y, z, VEN_APH3, 22) * .9);
     const arch = sm(.6, .85, ridged(x, y, z, 5, 5, 6)) * sm(.0, .3, fbm(x, y, z, 3, 2.5, 4)) * sm(55, 30, Math.abs(lat));
@@ -150,8 +203,11 @@ W_.venus = { // an ocean world: 80% sea, two continents, white-sand archipelagos
     ramp(o, [[0, C['2f7a32']], [.25, C['1d5a22']], [.5, C['3d6a2c']], [.8, C['7a7060']], [1, C.e8e4dc]], e * 1.6 + h * .3 + h2 * .12);
     mixTo(o, C['5a8a3a'], sm(.2, .6, fbm(x, y, z, 4, 14, 58)) * .4 * (1 - sm(.5, .8, e * 1.6 + h * .3))); mixTo(o, C.f0e8d0, arch * sm(.0, .06, e) * .6); // lowland meadow; the white sands of the archipelagos
     o.h = e * 1.2 + h * .5 + h2 * .15;
-    lights(o, x, y, z, i, j, .35 + .5 * spot(x, y, z, VEN_HARMONIA, 8));
+    const cy = cityLayer(o, x, y, z, lat, lon, CITIES.venus.cities, CITIES.venus.roads, W, 5);
+    lights(o, x, y, z, i, j, .16 + cy.u * 1.3 + cy.core * .6, C.ffe0b8, 1 + cy.core * .8);
   } };
+// Harmonia (0), the cities of Aphrodite (1–3) and Ishtar (4)
+CITIES.venus = cityList([[-4, 100, 3.4, 1, 1], [-10, 140, 2.6, .7, 1], [2, 185, 2, .55], [-14, 118, 1.3, .4], [66, 10, 2.2, .6, 1]], [[0, 3], [3, 1], [1, 2]]);
 const VEN_ISHTAR = vec(68, 10), VEN_APH1 = vec(-6, 95), VEN_APH2 = vec(-12, 140), VEN_APH3 = vec(0, 185), VEN_HARMONIA = vec(-4, 100);
 // [lat, lon, radius°]: deserts, and points along the great ranges
 const EARTH_DESERTS = [[22, 8, 15], [24, -6, 11], [20, 26, 12], [26, 18, 10], [23, 46, 10], [29, 58, 6], [27, 70, 5], [42, 104, 8], [39, 84, 6], [-25, 128, 11], [-28, 137, 6], [-23, 20, 6], [-23, 15, 3], [-24, -69, 3], [-46, -69, 4], [33, -112, 6], [40, -117, 4], [44, 62, 6]];
@@ -185,9 +241,12 @@ W_.earth = {
     mixTo(o, C['5e5446'], sm(.15, .55, peak) * .75); mixTo(o, C['3a332c'], sm(.5, .75, peak) * .3 * (1 - sm(.75, .9, peak)));
     mixTo(o, C.eef0f2, sm(.72, .92, peak + sm(30, 60, al) * .12) * .95);
     o.h = .12 + interior * .15 + peak * 1.3 + rg * .12 + n * .1;
-    const dens = .3 + .25 * sm(25, 45, lat) * (1 - sm(55, 65, lat)) - .3 * cl01(arid);
-    lights(o, x, y, z, i, j, dens);
+    const cy = cityLayer(o, x, y, z, lat, lon, CITIES.earth.cities, CITIES.earth.roads, W, 7);
+    lights(o, x, y, z, i, j, .17 + .14 * sm(25, 45, lat) * (1 - sm(55, 65, lat)) - .3 * cl01(arid) + cy.u * 1.3 + cy.core * .6, C.ffd9a0, 1 + cy.core * .8);
   } };
+// Earth's megacities stand where the old population centres were: the Yangtze and Ganges deltas, the Nile, the eastern seaboard, the Thames, Tokyo Bay, the Plate, the Gulf of Guinea, the Mexican plateau
+CITIES.earth = cityList([[31, 121, 3.2, 1, 1], [26, 85, 3, .8], [30, 31, 2.6, .7, 1], [40, -74, 3.2, 1, 1], [51, 0, 2.6, .7, 1], [35, 139, 2.8, .8, 1], [-23, -46, 2.8, .8], [6, 3, 2.2, .6], [19, -99, 2.4, .6, 1], [-34, -58, 2, .5], [55, 37, 2.4, .6], [-27, 153, 1.8, .45], [39, -122, 2, .55, 1], [41, 29, 2, .5]],
+  [[0, 1], [1, 2], [2, 4], [4, 10], [10, 13], [13, 2], [3, 12], [3, 8], [6, 9], [0, 5], [7, 2]]);
 W_.luna = { // seas poured into the old maria across the north; several great vertical cities over the equator and the
   // south, Hyperion alone on the shore of the Sea of Serenity; a seeded green over grey regolith; stuffy, hazy air
   night: 1, clouds: { cover: .22, scale: 3, warp: 1, col: C.e8e0cc },
@@ -236,7 +295,7 @@ function craters(x, y, z, k) { // cellular craters: bowl darker, rim bright (the
 W_.mars = { // green and white from orbit: the Borealis Basin ocean round a polar plain, the Thermic and Amazonian Seas,
   // the South Sea round the Martian Antarctic, red highlands scarred with grass, Olympus Mons and Valles Marineris
   night: 1, clouds: { cover: .38, scale: 3.2, warp: 1.2, col: C.fff6ee },
-  px(o, lat, lon, x, y, z, i, j) {
+  px(o, lat, lon, x, y, z, i, j, { W }) {
     const n = fbm(x, y, z, 6, 2.6, 3);
     let e = sm(-10, 40, -lat + 18 * Math.cos((lon - 20) * D) + 14) * .9 - .45;        // the dichotomy: high south, low north
     { const sq = v => v * v; e += .7 * spot(x, y, z, MARS_THARSIS, 38) + 1.1 * sq(spot(x, y, z, MARS_OLYMPUS, 8)) + .5 * sq(spot(x, y, z, MARS_ELYSIUM, 9)); }
@@ -255,9 +314,12 @@ W_.mars = { // green and white from orbit: the Borealis Basin ocean round a pola
     { const gr = fbm(x, y, z, 4, 11, 64), dn = fbm(x, y, z, 3, 9, 65); mixTo(o, C['6a7a3a'], sm(.2, .6, gr) * (1 - sm(.5, .9, e)) * .45); // the grass the terraformers seeded, scarring the red highlands in patches
       mixTo(o, C.d08a58, sm(.5, .9, e) * sm(.3, .7, Math.sin(lon * D * 50 + dn * 5) * .5 + .5) * .35); mixTo(o, C['6a2e1c'], sm(.55, .95, ridged(x, y, z, 4, 16, 66)) * .35); } // dune streaks on the high desert; dark rock ridges
     mixTo(o, C['3a2018'], vm * .8); mixTo(o, C['8a5a3a'], vm * sm(.3, .7, ridged(x, y, z, 4, 30, 67)) * .5); // the layered walls of the Valles
-    const dens = .32 + .9 * spot(x, y, z, MARS_AGEA, 5) + .2 * coast;
-    lights(o, x, y, z, i, j, dens * (1 - sm(.7, 1, e)));
+    const cy = cityLayer(o, x, y, z, lat, lon, CITIES.mars.cities, CITIES.mars.roads, W, 9); // Agea, Corinth on the Thermic shore, the mining towns of Tharsis and the cities of the south
+    lights(o, x, y, z, i, j, (.14 + .14 * coast) * (1 - sm(.7, 1, e)) + cy.u * 1.3 + cy.core * .6, C.ffd0a0, 1 + cy.core * .8);
   } };
+// Agea the capital (0), Corinth (1), the Tharsis mines (2, 3), Yorkton-like towns of the lowlands (4–6), the southern cities (7, 8)
+CITIES.mars = cityList([[-8, -70, 3.4, 1, 1], [7, -100, 2.2, .7, 1], [2, -112, 1.2, .35], [12, -101, 1, .3], [20, -60, 1.5, .45], [-2, -48, 1.4, .4], [30, -80, 1.2, .35], [-30, -40, 1.8, .55, 1], [-25, 30, 1.6, .5]],
+  [[0, 1], [1, 2], [2, 3], [0, 4], [0, 5], [4, 6], [0, 7], [5, 8]]);
 const MARS_THARSIS = vec(2, -105), MARS_OLYMPUS = vec(18, -134), MARS_ELYSIUM = vec(25, 147), MARS_MONTES = [vec(-2, -112), vec(1.5, -104), vec(12, -101)];
 const MARS_HELLAS = vec(-42, 70), MARS_ARGYRE = vec(-50, -43), MARS_AGEA = vec(-8, -70), MARS_CORINTH = vec(5, -104);
 W_.phobos = { // the Hive: a moon hollowed out and roofed in metal — plated sectors with lit seams, the Needles' spike ridges,
