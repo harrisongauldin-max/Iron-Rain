@@ -741,14 +741,19 @@ function helmSel(k) {
 }
 function abilUI() {
   const el = $('babil'); if (!el) return; const G = B.deploy ? null : AB.forSel();
-  const L = G ? AB.list(G).map(([k, A]) => [k, A, AB.state(G, k, A)]) : [];
+  const L = G ? AB.list(G).map(([k, A]) => { const st = AB.state(G, k, A); return [k, A, st, AB.windowOf(G, k)]; }) : [];
+  const hot = L.filter(([, , st, w]) => st.ok && w && w.now);
   const helmNow = G ? (() => { const hs = new Set(G.ships.map(s => (s.group && !s.detached ? s.group.helm : s.helm) || 'auto')); return hs.size === 1 ? [...hs][0] : null; })() : null;
-  const sig = (G ? JSON.stringify(hangInfo(G)) : '') + (S.tmode ? S.tmode.kind : '') + (S.nmode ? 'n' : '') + (B.senateArm && S.time - B.senateArm < 8 ? 'arm' : '') + (G && G.ships.every(s => s.cold) ? 'cold' : '') + (G ? G.key + G.ships.length + G.ships[0].id + (G.cmdr ? G.cmdr.id : '') + helmNow : '') + L.map(([k, , st]) => k + (st.ok ? 1 : 0) + (st.cd || '') + (st.n || '')).join('|');
+  const sig = (G ? JSON.stringify(hangInfo(G)) : '') + (S.tmode ? S.tmode.kind : '') + (S.nmode ? 'n' : '') + (B.senateArm && S.time - B.senateArm < 8 ? 'arm' : '') + (G && G.ships.every(s => s.cold) ? 'cold' : '') + (G ? G.key + G.ships.length + G.ships[0].id + (G.cmdr ? G.cmdr.id : '') + helmNow : '') + L.map(([k, , st, w]) => k + (st.ok ? 1 : 0) + (st.cd || '') + (st.n || '') + (w && w.now ? 'w' : '')).join('|') + (hot[0] ? hot[0][3].now : '');
   if (sig === B.abSig) return; B.abSig = sig;
   const who = G ? `<span class="abh" title="Orders go to the ships selected; with nothing selected, to the whole fleet">${G.cmdr ? `<b>${G.cmdr.name.split(' ')[0]}</b> · ` : ''}${G.name}</span>` : '';
-  const btn = ([k, A, st]) => { const key = AB_KEYS[k], part = st.ok && st.n && st.n < st.of ? ` <em>${st.n}/${st.of}</em>` : '';
-    return `<button class="btn ab ${k === 'sig' ? 'sig' : ''} ${k === 'rain' ? 'rain' : ''}" data-ba="ab" data-ab="${k}" ${st.ok ? '' : 'disabled'} title="${A.name} (${key}): ${A.desc}${st.ok ? '' : ' · ' + st.why}">${abIcon(k, st)}<span class="abn">${abShort(k, G) || A.name}${part}</span><kbd>${key}</kbd></button>`; };
+  // U4: each button says when it pays and what it costs; the one whose moment has come lights up, and the hint says why
+  const btn = ([k, A, st, w]) => { const key = AB_KEYS[k], part = st.ok && st.n && st.n < st.of ? ` <em>${st.n}/${st.of}</em>` : '', live = st.ok && w && w.now;
+    const tip = `${A.name} (${key}): ${A.desc}${w ? ` · When: ${w.when} · Costs: ${w.cost}` : ''}${live ? ' · NOW: ' + w.now : ''}${st.ok ? '' : ' · ' + st.why}`;
+    return `<button class="btn ab ${k === 'sig' ? 'sig' : ''} ${k === 'rain' ? 'rain' : ''} ${live ? 'live' : ''}" data-ba="ab" data-ab="${k}" ${st.ok ? '' : 'disabled'} title="${tip.replace(/"/g, '&quot;')}">${abIcon(k, st)}<span class="abt"><span class="abn">${abShort(k, G) || A.name}${part}</span>${w ? `<span class="abw">${live ? '● now' : w.when}<i>${w.cost}</i></span>` : ''}</span><kbd>${key}</kbd></button>`; };
   el.innerHTML = G ? who + L.map(btn).join('') : '';
+  { let h = $('babhint'); if (!h) { h = document.createElement('div'); h.id = 'babhint'; const bc = $('bcmd'); if (bc) bc.appendChild(h); }
+    const top = hot[0]; h.className = top ? '' : 'hide'; h.innerHTML = top ? `<b>${(abShort(top[0], G) || top[1].name)} now</b> <kbd>${AB_KEYS[top[0]]}</kbd> · ${top[3].now} <i>(costs: ${top[3].cost})</i>` : ''; }
   { const hg = $('bhang'); if (hg) { const I = G ? hangInfo(G) : null, row = [];
     const hb = (k, ic, name, n, key, tip, on, dis) => `<button class="btn ab hg ${on ? 'on' : ''}" data-ba="hang" data-hg="${k}" ${dis ? 'disabled' : ''} title="${tip}"><span class="aic"><svg viewBox="0 0 16 16"><path d="${ic}"/></svg>${n != null ? `<b class="cnt">${n}</b>` : ''}</span><span class="abn">${name}</span><kbd>${key}</kbd></button>`;
     if (I && I.any.shells) row.push(hb('shells', AB_ICON.shells, 'starShells', I.shells, 'Y', `Launch starShells (Y): click an enemy capital ship within ${LAUNCH_R.toLocaleString()} km. They hold station off her hull until her shields fall below 25%, then board. ${I.shells} aboard`, S.tmode && S.tmode.kind === 'shells', !I.shells));

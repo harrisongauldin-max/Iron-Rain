@@ -1584,3 +1584,16 @@ body.strat #sndp{top:64px;right:12px;z-index:45;max-height:calc(100vh - 84px)}
 #sfeed .ibh i{font-style:normal;font-family:"Segoe UI",system-ui,sans-serif;letter-spacing:0;color:var(--dim)}
 #sfeed .ibh em{margin-left:auto;font-style:normal;color:var(--dim)}
 #sfeed .ibnone{padding:4px 10px 6px;font-size:11px;color:var(--dim);font-style:italic}
+
+/* ---------------------------------------------------------------- U4: ability windows and costs */
+#bcmd .btn.ab .abt{display:flex;flex-direction:column;align-items:flex-start;gap:1px;line-height:1.1}
+#bcmd .btn.ab .abw{font:9px/1.15 var(--sans,inherit);letter-spacing:.02em;text-transform:none;color:var(--dim);max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#bcmd .btn.ab .abw i{display:block;font-style:normal;color:#c79a8a;opacity:.85}
+#bcmd .btn.ab.live{border-color:var(--gold-hi);box-shadow:0 0 0 1px rgba(232,200,126,.5),0 0 14px rgba(232,200,126,.35);animation:abLive 1.6s ease-in-out infinite}
+#bcmd .btn.ab.live .abw{color:var(--gold-hi)}
+@keyframes abLive{50%{box-shadow:0 0 0 1px rgba(232,200,126,.8),0 0 22px rgba(232,200,126,.55)}}
+#babhint{position:absolute;left:12px;right:12px;top:-50px;padding:6px 12px;font-size:11.5px;color:var(--ivory);background:linear-gradient(90deg,rgba(60,44,16,.95),rgba(24,18,10,.9));border:1px solid rgba(232,200,126,.55);border-radius:2px;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#babhint b{color:var(--gold-hi);font-family:var(--serif);letter-spacing:.12em;text-transform:uppercase;font-size:10.5px;margin-right:4px}
+#babhint i{color:var(--dim);font-style:normal}
+#babhint kbd{color:var(--gold-hi)}
+body.bcalm #babhint{top:-46px}

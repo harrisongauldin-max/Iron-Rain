@@ -37,6 +37,30 @@ export const ABIL = {
   rain: { name: 'Iron Rain', desc: 'Drop every assault pod near the world onto its surface. It needs the world’s guns silenced. The legions land in 15 seconds, and if they beat the garrison the world falls at once', cd: 1e9, once: true,
     why: G => S.rainCtx ? S.rainCtx.why(G) : 'Not possible in this battle', run: G => S.rainCtx && S.rainCtx.run(G) },
 };
+// U4: when each ability pays, and what it costs. `when` and `cost` are shown on the button; `now(G)` returns a line when
+// the window is open (the button lights up and the hint above the bar says it), else null
+const nearFoes = (G, R) => S.ships.filter(s => s.team !== G.team && s.team < 2 && alive(s) && !s.def.fighter && !s.def.shell && !s.def.static && (!s.vis || s.vis[G.team]) && hyp(s.x - G.flag.x, s.y - G.flag.y) < R);
+const gapOf = G => { let d = 1e18; for (const s of S.ships) { if (s.team === G.team || s.team > 1 || !alive(s) || s.def.fighter || s.def.shell || (s.vis && !s.vis[G.team])) continue; for (const m of G.ships) d = Math.min(d, hyp(s.x - m.x, s.y - m.y)); } return d; };
+const nm = s => s.title || s.def.name;
+export const WIN = {
+  brace: { when: 'a lance on her, or a side failing', cost: '½ fire · 8 s',
+    now: G => { const l = G.ships.find(s => s.lanceT > S.time && s.lanceT - S.time < 3.5); if (l) return `A lance is charging at ${nm(l)}`;
+      const f = G.ships.find(s => s.sub && s.def.shield && S.time - Math.max(s.hitP ?? -99, s.hitS ?? -99) < 2 && Math.min(s.shP, s.shS) < s.def.shield * .5 * .35 && Math.max(s.shP, s.shS) > s.def.shield * .5 * .6);
+      return f ? `${nm(f)}'s ${f.shP < f.shS ? 'port' : 'starboard'} shield is failing under fire` : null; } },
+  lock: { when: 'enemy 7–14k km, nothing close', cost: '⅓ thrust, holds course · 20 s',
+    now: G => { const d = gapOf(G); return d > 7000 && d < 14000 ? `Enemy ${Math.round(d / 1000)}k km out and nothing close: long fire lands` : null; } },
+  burn: { when: 'closing from far, before their guns', cost: 'guns silent, fuel ×2.5 · 12 s',
+    now: G => { const d = gapOf(G); return d > 16000 && d < 45000 && G.ships.some(s => s.order && (s.order.type === 'amove' || s.order.type === 'move' || s.order.type === 'form')) ? `${Math.round(d / 1000)}k km to close: get under their guns fast` : null; } },
+  dark: { when: 'before they lock on, far out', cost: 'no shields; 6 s to restore',
+    now: G => { if (G.ships.every(s => s.cold)) return null; const d = gapOf(G); return d > 18000 && d < 60000 ? `They are ${Math.round(d / 1000)}k km out: slip off their scopes before they lock` : null; } },
+  bridge: { when: 'a capital ship close, shields < 30%', cost: 'all guns on one ship · 30 s',
+    now: G => { const t = enemyCaps(G, 9000, s => s.sh < s.def.shield * .3)[0]; return t ? `${nm(t)} is close with her shields under 30%` : null; } },
+  sig: { when: 'the lines engaged at close range', cost: 'crews spent after: 75% · 25 s',
+    now: G => nearFoes(G, 6000).length >= 2 ? 'The lines are locked together within 6,000 km of the flagship' : null },
+  rain: { when: "the world's guns silenced", cost: 'once a battle', now: () => 'The guns are silent: the Rain can go down' },
+};
+// the window for one ability: its condition, its price, and what makes it right now (or null)
+export function windowOf(G, k) { const W = WIN[k]; if (!W || !G || !G.flag) return null; let now = null; try { now = W.now(G); } catch (e) { now = null; } return { when: W.when, cost: W.cost, now }; }
 const SPENT = '. The price: when it ends the crews are spent, and fight at 75% for 25 seconds';
 export function sigOf(G) { const n = (G.camp && G.camp.name) || (G.cmdr && G.cmdr.name) || ''; const e = SIGS.find(([k]) => n.startsWith(k)); if (e) return { ...e[1], desc: e[1].desc + SPENT };
   if (talents(G).includes('peerless')) return { name: 'Peerless Example', desc: 'A Peerless Scarred leads from the front: no crew in the group breaks for 30 seconds', cd: 120, run: G2 => G2.ships.forEach(s => { s.loyT = S.time + 30; }) };
