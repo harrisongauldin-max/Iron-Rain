@@ -135,7 +135,9 @@ export function defied(cf, o) { mod(cf, o, 1, 4, 'Defied a demand to yield'); }
 // ================================================================ ENEMY ANSWERS (AI chat)
 // How an AI commander meets a hail. q is the player's chance to win, so 1 - q is the enemy's.
 
-const DOC_YIELD = { reckless: .08, onslaught: .3, steady: .75, patient: 1, cunning: .8 };
+// a Steady or Patient commander keeps the ships for another day, but by fighting clear or asking terms, not by handing
+// them over: halved after the 16 Nov playtest, where demands at 90%+ won 16 of 20 against them (task A1)
+const DOC_YIELD = { reckless: .08, onslaught: .3, steady: .38, patient: .5, cunning: .8 };
 // strike their colours: only when the battle is hopeless, and never for the proudest. A commander whose crews
 // don't trust them, a junior officer, or a people tired of the war yield sooner; a legend of the books almost never
 export function surrenderChance(ctx) {
