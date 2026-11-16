@@ -209,9 +209,14 @@ function legionnaire() {
 }
 function railman() {
   const F = grayBody(new Fig(), { arm: '#7a808a' });
-  F.box(.08, .12, .4, .16, 1.2, .2, C.gun);                      // railRifle receiver
+  F.rbox(.07, .11, .42, .02, 2, .16, 1.2, .2, C.gun); F.rbox(.05, .08, .16, .015, 2, .16, 1.18, -.06, C.gun, 0, 0, .1);   // railRifle receiver and stock
+  F.box(.03, .07, .04, .16, 1.115, .04, C.gun, 0, 0, -.3); F.rbox(.045, .1, .07, .01, 2, .16, 1.12, .2, '#2e3036');           // grip, power cell
   F.cyl(.025, .03, 1.0, 8, .16, 1.24, .9, C.gun, 0, PI / 2);     // long barrel
+  for (let i = 0; i < 4; i++) F.cyl(.044, .044, .035, 10, .16, 1.24, .56 + i * .22, '#2e3036', 0, PI / 2);                     // accelerator coils down it
+  F.rbox(.07, .05, .1, .012, 2, .16, 1.24, 1.38, C.gun);                                                                    // muzzle brake
   F.box(.03, .03, .9, .16, 1.29, .85, C.edge, 0, 0, 0, 0, .9);   // the rail, lit blue-white
+  F.cyl(.02, .024, .2, 8, .16, 1.305, .16, C.duroD, 0, PI / 2); F.cyl(.019, .019, .01, 8, .16, 1.305, .262, C.visor, 0, PI / 2, 0, 0, false, .5); // scope, its lens
+  F.limb([.1, 1.14, -.2], [.16, 1.15, .1], .014, .014, 6, '#2e3036');                                                       // the cable from the pack
   F.rbox(.36, .5, .22, .05, 2, 0, 1.26, -.27, '#2e3036');        // capacitor pack
   F.cyl(.05, .05, .36, 8, .1, 1.5, -.3, C.edge, 0, PI / 2, 0, 0, false, .5); // coil, glowing
   return F.build();
@@ -236,9 +241,10 @@ function obsidian() {
   F.limb([0, 2.76, -.12], [0, 2.3, -.42], .06, .05, 8, C.hair); F.limb([.1, 2.7, -.14], [.22, 2.1, -.38], .035, .03, 6, C.hair); F.limb([-.1, 2.7, -.14], [-.22, 2.1, -.38], .035, .03, 6, C.hair); // braids down the back
   // pulseAxe: a long haft tilted forward, a crescent head above the helm with a glowing edge
   F.limb([.46, .9, .1], [.56, 3.2, .5], .03, .03, 8, C.haft);
-  F.rbox(.08, .56, .3, .02, 2, .56, 2.95, .62, C.obsD, 0, 0, .15); F.rbox(.08, .3, .22, .02, 2, .56, 3.22, .52, C.obsD, 0, 0, .15); F.rbox(.08, .3, .22, .02, 2, .56, 2.66, .66, C.obsD, 0, 0, .15); // crescent head
-  F.box(.03, .9, .06, .56, 2.95, .78, C.edge, 0, 0, .15, 0, 1.0);  // the edge
-  F.box(.06, .34, .1, .56, 2.95, .34, C.obsD, 0, 0, .15);         // back spike
+  F.loft([[-0.5, 0.008, 0.015, 0, 0.153], [-0.36, 0.02, 0.1, 0, 0.107], [-0.12, 0.03, 0.15, 0, 0.129], [0.12, 0.03, 0.15, 0, 0.171], [0.36, 0.02, 0.1, 0, 0.233], [0.5, 0.008, 0.015, 0, 0.327]], 4, .55, 2.95, .46, C.obsD);    // the crescent head: one bearded blade, diamond in section, horns above and below
+  F.loft([[-0.5, .009, .014, 0, 0.168], [-0.36, .009, .014, 0, 0.207], [-0.12, .009, .014, 0, 0.279], [0.12, .009, .014, 0, 0.321], [0.36, .009, .014, 0, 0.333], [0.5, .009, .014, 0, 0.342]], 4, .55, 2.95, .46, C.edge, 0, 1.0);    // its edge, lit
+  F.cyl(.05, .056, .5, 8, .55, 2.95, .457, C.obsD, 0, .174); F.cyl(0, .045, .3, 6, .55, 2.95, .3, C.obsD, 0, -PI / 2 + .174); // socket on the haft, back spike
+  F.both(s => F.cyl(.04, .04, .05, 8, .55 , 2.95 + s * .3, .457 + s * .052, C.bone, 0, .174));                                 // bone bands
   F.rbox(.1, .14, .26, .02, 2, -.44, 1.36, .4, C.gun); F.box(.03, .03, .08, -.44, 1.4, .54, C.edge, 0, 0, 0, 0, .5); // plasma pistol
   return F.build();
 }
@@ -261,13 +267,18 @@ function goldBody(F) {
   helm(F, 1.88, .105, C.gilt, { visor: C.visor, em: .6, crest: C.team, tm: 1, tall: 1.5, cheek: C.giltL });               // helm with a tall horsehair-style comb (team)
   F.loft([[1.8, .135, .14, 0, -.02], [1.86, .15, .15, 0, -.03], [1.93, .125, .13, 0, -.03]], 12, 0, 0, 0, C.giltL);       // the lion's mane: a gilt collar round the back of the helm
   F.both(s => F.cyl(0, .022, .13, 6, s * .1, 2.0, .02, C.giltL, 0, .25, -s * .45));                                     // its ears
-  F.box(.5, .5, .035, 0, 1.5, -.2, C.team, 1, 0, .1);                                                        // cape, upper
-  F.box(.58, .7, .035, 0, .9, -.3, C.team, 1, 0, .18);                                                       // cape, lower, flaring
-  F.box(.56, .06, .04, 0, .56, -.36, C.giltL, 0, 0, .18);                                                                 // cape hem
-  F.rbox(.1, .1, .12, .025, 2, .26, 1.14, .48, C.giltL);                                                                  // right gauntlet
-  F.bar([.26, 1.12, .54], [.24, .78, 1.5], .03, .035, C.razor, 0, .9);                                                    // the razor, rigid, lit
-  F.rbox(.17, .17, .22, .04, 2, -.3, 1.52, .58, C.giltL);                                                                 // pulseFist
-  F.box(.09, .09, .05, -.3, 1.52, .71, C.pulse, 0, 0, 0, 0, 1.0);                                                          // its emitter, lit
+  F.loft([[1.15, .3, .02, 0, -.275], [1.4, .27, .022, 0, -.225], [1.7, .2, .02, 0, -.185]], 8, 0, 0, 0, C.team, 1);                                    // cape, upper: hung from the shoulders, falling away from the back
+  F.loft([[.6, .37, .02, 0, -.39], [.9, .34, .022, 0, -.33], [1.2, .3, .02, 0, -.27]], 8, 0, 0, 0, C.team, 1);                                           // cape, lower, flaring
+  F.loft([[.53, .372, .024, 0, -.405], [.61, .374, .026, 0, -.388]], 8, 0, 0, 0, C.giltL);                                                               // its gilt hem
+  F.both(s => F.sph(.03, 6, 4, s * .19, 1.71, -.16, C.giltK, 0, 1, .6));                                                                                  // the clasps that pin it
+  F.loft([[0, .05, .05], [.1, .062, .058]], 8, .262, 1.2, .37, C.giltL, 0, 0, [-.02, -.4, .9]);                                                         // right gauntlet: a flared cuff
+  F.limb([.265, 1.175, .4], [.26, 1.12, .54], .017, .017, 6, C.giltD); F.sph(.022, 6, 5, .266, 1.18, .385, C.giltK);                                     // the razor's hilt and pommel
+  F.sph(.036, 8, 6, .26, 1.12, .54, C.giltK, 0, .55, .7);                                                                                                // its guard
+  F.loft([[0, .024, .007], [.78, .018, .006], [.97, .009, .004], [1.02, .001, .001]], 4, .26, 1.12, .54, C.razor, 0, .9, [-.02, -.34, .96]);             // the razor, rigid: a diamond-section blade drawn to a point, lit
+  F.loft([[0, .062, .062], [.13, .082, .078]], 8, -.3, 1.52, .4, C.giltD, 0, 0, [0, 0, 1]);                                                             // pulseFist: cuff,
+  F.sph(.092, 8, 6, -.3, 1.52, .59, C.giltL, 0, .92, 1.2);                                                                                              // the armoured fist,
+  F.rbox(.15, .05, .08, .02, 2, -.3, 1.575, .62, C.giltK);                                                                                               // a knuckle plate,
+  for (let i = -1; i <= 1; i++) F.sph(.02, 6, 5, -.3 + i * .045, 1.535, .695, C.pulse, 0, 1, 1, 1.0);                                                    // and three emitters, lit
   return F;
 }
 const peerless = () => goldBody(new Fig()).build();
@@ -299,7 +310,10 @@ function starshell() {
   F.both(s => { F.sph(.34, 12, 8, s * .62, 3.24, 0, C.team, 1, .55, 1.1); F.sph(.35, 12, 8, s * .62, 3.2, 0, C.shellL, 0, .25, 1.12); }); // pauldrons (team) with a rim
   helm(F, 3.48, .2, C.shellD, { visor: C.lens, em: 1, crest: C.shell, wide: 1 });                                     // helm: wide lit visor, a low steel comb
   F.cyl(.13, .13, 1.0, 12, .8, 1.75, .85, C.cannon, 0, PI / 2 - .35); F.cyl(.15, .12, .22, 12, .8, 1.95, 1.3, C.shellD, 0, PI / 2 - .35); // pulseCannon along the right forearm, muzzle
-  F.rbox(.4, .34, .36, .06, 3, -.82, 1.4, .3, C.shellD); F.both(s => F.rbox(.1, .18, .2, .03, 2, -.82 + s * .13, 1.26, .4, C.vent)); // the fist
+  for (let i = 0; i < 3; i++) F.cyl(.155, .155, .06, 12, .8, 1.66 + i * .1, .6 + i * .28, C.shellD, 0, PI / 2 - .35);                                 // its cooling collars
+  F.cyl(.085, .085, .02, 10, .8, 1.99, 1.41, C.pulse, 0, PI / 2 - .35, 0, 0, false, 1.0); F.rbox(.2, .16, .5, .04, 2, .8, 1.93, .78, C.shellL, 0, 0, -.35); // the bore, lit; a feed housing on top
+  F.sph(.2, 10, 7, -.82, 1.42, .3, C.shellD, 0, .9, 1.15); F.rbox(.36, .12, .2, .04, 2, -.82, 1.52, .38, C.shellL);                                    // the fist: a ball of plate under a knuckle guard
+  for (let i = -1; i <= 1; i++) F.rbox(.1, .2, .16, .03, 2, -.82 + i * .115, 1.28, .4, C.vent); F.rbox(.09, .16, .14, .03, 2, -.62, 1.38, .4, C.vent, 0, .4); // three curled fingers and a thumb
   F.rbox(.42, .34, .62, .05, 3, -.62, 3.62, -.2, C.shellD, 0, 0, .2); // missile pod over the left pauldron
   for (let i = 0; i < 6; i++) F.cyl(.055, .055, .1, 8, -.76 + (i % 3) * .14, 3.56 + Math.floor(i / 3) * .15, .1 - Math.floor(i / 3) * .04, C.vent, 0, PI / 2 + .2);
   return F.build();
