@@ -3,6 +3,7 @@ import { update, newGame, attract, setGameOverHandler, explosion, nukeBlast } fr
 import { initRender, render, drawMini, resizeRender, setBloom, applyQuality, setLowRes } from './render.js';
 import { preset, setQualityName, setHullX, nextIn, QUALITY_ORDER, HULL_STEPS } from './gfx.js';
 import { initInput, camUpdate, MMS, fitMini } from './input.js';
+import * as SL from './sessionlog.js';
 import { buildUI, updUI, togglePause, showHelp, endGame, $, buildMenu, toggleCmdPanel, forceUI, toggleGrpPanel, startRename, endRename, worldJump, toggleLog, jumpTo, setOTab, OPTS, saveOpts, AP_LIST, speedTxt } from './ui.js';
 import { setAim, commanderAction, setFormation, setStance, setHelm, braceSel, formGroup, cycle, selGroup } from './commands.js';
 import { disbandGroup, groupOrder, FORMATIONS, STANCES, HELMS } from './sim.js';
@@ -43,11 +44,13 @@ async function boot() {
   const SPEEDS = [.25, .5, 1, 2, 3], stepSpd = d => { if (S.mode === 'battle' && ffStop()) { $('bSpd').textContent = 'Speed ' + speedTxt(S.speed); return; } const i = SPEEDS.indexOf(S.speed); S.speed = SPEEDS[i < 0 ? 2 : (i + d + SPEEDS.length) % SPEEDS.length]; $('bSpd').textContent = 'Speed ' + speedTxt(S.speed); };
   $('bSpd').onclick = () => stepSpd(1); $('bSpd').oncontextmenu = e => { e.preventDefault(); stepSpd(-1); };
   // the options panel: auto-pause and the director, kept between sessions
-  const syncOpts = () => { for (const b of document.querySelectorAll('#optp [data-ap]')) b.classList.toggle('on', !!OPTS.ap[b.dataset.ap]); const d = $('bDir'); if (d) d.classList.toggle('on', !!OPTS.director); };
+  const syncOpts = () => { for (const b of document.querySelectorAll('#optp [data-ap]')) b.classList.toggle('on', !!OPTS.ap[b.dataset.ap]); const d = $('bDir'); if (d) d.classList.toggle('on', !!OPTS.director); const g = $('bSlog'); if (g) g.classList.toggle('on', SL.isOn()); };
   S.syncOpts = syncOpts;
   $('apRow').innerHTML = AP_LIST.map(([k, n, d]) => `<button class="btn sm" data-ap="${k}" title="Pause the battle when: ${d}">${n}</button>`).join('');
   $('optp').addEventListener('click', e => { const b = e.target.closest('[data-ap]'); if (b) { OPTS.ap[b.dataset.ap] = !OPTS.ap[b.dataset.ap]; saveOpts(); syncOpts(); } });
   $('bDir').onclick = () => { OPTS.director = !OPTS.director; S.dirShot = null; saveOpts(); syncOpts(); };
+  $('bSlog').onclick = () => { SL.setOn(!SL.isOn()); syncOpts(); };
+  $('bSlogX').onclick = () => { if (!SL.exportFile()) $('bSlogX').textContent = 'Nothing yet'; };
   syncOpts();
   $('bPause').onclick = togglePause;
   initSoundButton($('bSnd')); $('bSnd').onclick = e => { e.stopPropagation(); initAudio(); toggleSound($('bSnd')); }; // the sound menu (audiomenu.js)

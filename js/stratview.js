@@ -28,6 +28,7 @@ import { initAudio, sfx } from './audio.js';
 import { OPTS, saveOpts } from './ui.js';
 import { toggleGfx, gfxOpen } from './gfxmenu.js';
 import { toggleSound, soundOpen } from './audiomenu.js';
+import * as SL from './sessionlog.js';
 import { DEFS } from './data.js';
 import * as SV from './save.js';
 import * as PA from './parley.js';
@@ -230,7 +231,7 @@ export function startCampaign(playerFk, difficulty, start, opts) {
   const hero = C.start && C.cmdrs.find(c => c.hero && c.owner === f && c.state === 'fleet'), hf = hero && C.fleets.find(x => x.id === hero.fleet);
   const main = hf || C.fleets.filter(x => x.owner === f).sort((a, b) => K.fleetStr(b) - K.fleetStr(a))[0];
   V.sel = main ? { fl: main } : { w: K.CAPITAL[f] }; V.mark = new Set(); homeView();
-  refresh(); setTimeout(() => briefing(f), 400); autosave();
+  refresh(); setTimeout(() => briefing(f), 400); autosave(); SL.ev('campaign', { start: f, difficulty }); SL.turnStart(C.turn);
 }
 // a saved campaign, put back in place: the map is laid out again and the strongest fleet selected
 export function loadCampaign(d) {
@@ -238,7 +239,7 @@ export function loadCampaign(d) {
   enterStrat();
   const f = C.player, main = C.fleets.filter(x => x.owner === f).sort((a, b) => K.fleetStr(b) - K.fleetStr(a))[0];
   V.sel = main ? { fl: main } : { w: K.CAPITAL[f] }; V.mark = new Set(); homeView(); refresh();
-  toastS(`${date(C.turn)} · campaign loaded`, 'good');
+  toastS(`${date(C.turn)} · campaign loaded`, 'good'); SL.ev('campaign', { load: f }); SL.turnStart(C.turn);
 }
 function autosave() { if (!C.on || C.over) return; const e = SV.saveSlot('auto'); if (e) console.warn(e); }
 // the first thing a new campaign shows: who you are, who the enemy is, and three things to do first
@@ -305,7 +306,7 @@ function buildStratDOM() {
     if (S.gameState !== 'strat' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
     if (modalOpen()) { if (e.key === 'Escape' && M.esc) closeModal(M.esc); else if (e.key === 'Enter' && M.enter) closeModal(M.enter); return; }
     if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); if (!V.busy) savesUI('save'); return; } /* Ctrl+S: the save slots */
-    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key; V.keys[k] = true;
+    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key; V.keys[k] = true; if (!e.repeat) SL.key(k);
     if (e.key === 'Enter') endTurnUI();
     else if (e.key === 'Escape') { if (!$('spop').classList.contains('hide')) closePop(); else if (V.list) toggleList(); else select(null); }
     else if (e.key === ' ' || e.key === 'Home') { homeView(); e.preventDefault(); }
@@ -812,7 +813,7 @@ function drawList() {
 // ---------------------------------------------------------------- clicks
 function onClick(e) {
   const b = e.target.closest('[data-hl],[data-hlp],[data-hla],[data-dgive],[data-deal],[data-dclear],[data-propose],[data-law],[data-motion],[data-lg],[data-lm],[data-lf],[data-ctab],[data-honour],[data-marry],[data-recruit],[data-amis],[data-atgt],[data-attach],[data-arecall],[data-peace],[data-ally],[data-ransom],[data-release],[data-exec],[data-ttab],[data-tpick],[data-focus],[data-trad],[data-fit],[data-desig],[data-tax],[data-gov],[data-ungov],[data-govpick],[data-pickc],[data-siege],[data-promo],[data-war],[data-a],[data-bcancel],[data-scancel],[data-bld],[data-ship],[data-dz],[data-rcls],[data-tr],[data-selfl],[data-selw],[data-merge],[data-card],[data-go],[data-m],[data-need],[data-tab],[data-raid],[data-levy],[data-rising]'); if (!b || b.disabled) return;
-  const d = b.dataset, me = C.player, s = V.sel; hideTip();
+  const d = b.dataset, me = C.player, s = V.sel; hideTip(); SL.click(d);
   if (d.m === 'nowithdraw') { toastS('You withdrew from this enemy here last week: this time you must fight', 'bad'); return; }
   if (d.m === 'noassault') { toastS('An assault from orbit needs leechCraft hulls in orbit', 'bad'); return; }
   if (d.m !== undefined) return closeModal(d.m);
@@ -1209,8 +1210,22 @@ function warUI(f) {
     .then(v => { if (v === 'war') { if (council) { P.react(me, 'war', 3); toastS('The council is against it: the Moon Lords will not forget', 'bad'); } const e = K.declareWar(me, f, !!tl); if (e) toastS('The truce holds', 'bad'); else toastS(`${K.BLOC_NAME[me]} is at war with ${K.BLOC_NAME[f]}`, 'bad'); } refresh(); });
 }
 function menuUI() {
-  modal(`<h2>Campaign</h2><p class="dim">${date(C.turn)} · ${K.BLOC_NAME[C.player]}</p><div class="keys"><b>Click</b> select a world or fleet · <b>Right-click</b> send the selected fleet · <b>Wheel</b> zoom · <b>Drag / WASD</b> pan · <b>Tab</b> next fleet · <b>Space</b> home · <b>F</b> faction · <b>P</b> diplomacy · <b>H</b> ledger and chronicle · <b>L</b> lists · <b>R</b> dispatches · <b>Q</b> lay down a hull · <b>Enter</b> end turn · <b>Ctrl+S</b> save · <b>F10</b> graphics</div>`, [['back', 'Back to the war', 'go'], ['save', 'Save'], ['load', 'Load'], ['gfx', 'Graphics'], ['snd', 'Sound'], ['quit', 'Quit to the main menu']], { esc: 'back' })
-    .then(v => { if (v === 'quit') quitToMenu(); else if (v === 'save' || v === 'load') savesUI(v); else if (v === 'gfx' && !gfxOpen()) toggleGfx(); else if (v === 'snd' && !soundOpen()) toggleSound(); });
+  modal(`<h2>Campaign</h2><p class="dim">${date(C.turn)} · ${K.BLOC_NAME[C.player]}</p><div class="keys"><b>Click</b> select a world or fleet · <b>Right-click</b> send the selected fleet · <b>Wheel</b> zoom · <b>Drag / WASD</b> pan · <b>Tab</b> next fleet · <b>Space</b> home · <b>F</b> faction · <b>P</b> diplomacy · <b>H</b> ledger and chronicle · <b>L</b> lists · <b>R</b> dispatches · <b>Q</b> lay down a hull · <b>Enter</b> end turn · <b>Ctrl+S</b> save · <b>F10</b> graphics</div>`, [['back', 'Back to the war', 'go'], ['save', 'Save'], ['load', 'Load'], ['gfx', 'Graphics'], ['snd', 'Sound'], ['slog', 'Session log'], ['quit', 'Quit to the main menu']], { esc: 'back' })
+    .then(v => { if (v === 'quit') quitToMenu(); else if (v === 'save' || v === 'load') savesUI(v); else if (v === 'gfx' && !gfxOpen()) { SL.screen('gfx'); toggleGfx(); } else if (v === 'snd' && !soundOpen()) { SL.screen('snd'); toggleSound(); } else if (v === 'slog') sessionLogUI(); });
+}
+// the session log (sessionlog.js): an opt-in playtest record, kept on this machine until exported
+async function sessionLogUI() {
+  for (;;) {
+    const on = SL.isOn(), n = SL.counts(), sm = n && SL.summary();
+    const turns = sm && sm.turns ? `${sm.turns.n} week${sm.turns.n === 1 ? '' : 's'}, ${sm.turns.median}s median a week` : 'no weeks yet';
+    const body = n ? `<div class="slogst"><span><b>${n.screens}</b> screens opened</span><span><b>${n.battles}</b> battles</span><span>${turns}</span><span><b>${n.events}</b> events since ${new Date(n.started).toLocaleString()}</span></div>` : '<p class="dim">Nothing recorded yet.</p>';
+    const v = await modal(`<h2>Session log</h2><p>For playtests: while it is on, the game notes which screens you open and for how long, how long each week takes, and which battles you fight or let auto-resolve. It stays on this computer until you export it as a JSON file. While it is off nothing is recorded.</p><div class="kicker">${on ? '<span class="good">Recording</span>' : 'Off'}</div>${body}`,
+      [['back', 'Back'], ['toggle', on ? 'Stop recording' : 'Start recording', on ? '' : 'go'], [n ? 'export' : 'none', 'Export JSON', n ? '' : 'off'], [n ? 'clear' : 'none', 'Clear', n ? 'bad' : 'off']], { esc: 'back', cls: 'slog' });
+    if (v === 'toggle') { SL.setOn(!on); toastS(on ? 'Session log stopped' : 'Session log recording', on ? '' : 'good'); }
+    else if (v === 'export') { const f = SL.exportFile(); if (f) toastS(`Exported ${f}`, 'good'); }
+    else if (v === 'clear') { const ok = await modal('<h2>Clear the session log?</h2><p>Everything recorded so far is thrown away.</p>', [['no', 'Keep it'], ['yes', 'Clear', 'bad']], { esc: 'no' }); if (ok === 'yes') SL.clear(); }
+    else if (v !== 'none') return;
+  }
 }
 // the save slots: an autosave written every week, three of the player's own, and files for safe keeping
 const SIDE_NAME = { rep: 'The Solar Republic', soc: 'The Society Remnant', rim: 'The Rim Dominion' };
@@ -1221,7 +1236,7 @@ export function slotsHTML(mode, list) {
     const can = mode === 'save' ? sl !== 'auto' : !!m;
     return `<button class="slot ${m ? '' : 'empty'}" ${can ? `data-m="${mode}:${sl}"` : 'disabled'}><b>${label}</b>${m ? `<span>${esc(SIDE_NAME[m.player] || m.player)} · ${date(m.turn)}</span><i>${m.worlds} world${m.worlds === 1 ? '' : 's'} · saved ${ago(m.t)}</i>` : `<span class="dim">${sl === 'auto' ? 'Written at the start of every week' : 'Empty'}</span>`}${mode === 'save' && m && sl !== 'auto' ? '<em>Overwrite</em>' : ''}</button>`; }).join('');
 }
-async function savesUI(mode) {
+async function savesUI(mode) { SL.screen('saves');
   const list = SV.listSlots();
   const v = await modal(`<div class="kicker">${date(C.turn)} · ${K.BLOC_NAME[C.player]}</div><h2>${mode === 'save' ? 'Save the campaign' : 'Load a campaign'}</h2>
     <p class="dim">${mode === 'save' ? 'Saves are kept in this browser. Export a file as well if you want a copy that survives the browser being cleared.' : 'Loading replaces the war in progress. Anything since its last save is lost.'}</p>
@@ -1280,7 +1295,7 @@ async function assaultBattle(fl) {
   const me = C.player, w = C.worlds[fl.at], W0 = { gun: w.gun, shield: w.shield, owner: w.owner };
   const cf = { world: w.id, att: me, def: w.owner, atts: [me], defs: [w.owner], withWorld: true, alone: true, assault: true, fleets: K.fleetsAt(w.id, me).map(f => f.id) };
   const snap = [cf.att, cf.def].map(o => K.cfFleets(cf, o).flatMap(f => f.ships.map(s => ({ s, o: f.owner, hp0: s.hp }))));
-  V.busy = true; try { const res = await fightBattle(cf); await battleResult(cf, res, snap, W0); await pendingUI(); } catch (e) { console.error(e); } V.busy = false;
+  V.busy = true; try { const res = await fightBattle(cf); SL.battle('assault', cf, res); await battleResult(cf, res, snap, W0); await pendingUI(); } catch (e) { console.error(e); } V.busy = false;
   if (V.sel && V.sel.fl && !C.fleets.includes(V.sel.fl)) V.sel = { w: w.id }; refresh(); checkOver();
 }
 // a hero's quest battle, offered when the mission is done
@@ -1292,7 +1307,7 @@ async function questUI(qp) {
     [['no', 'Stand down', '', 'The quest is given up: it fails'], ['auto', `Let the dice decide · ${Math.round(p * 100)}%`, '', 'Resolve it at once'], ['fight', 'Take command ▸', 'go', 'Fight it on the tactical map']], { cls: 'event wide' });
   if (v === 'fight') { const cf = QS.conflictOf(qp); if (!cf) { QS.outcome(qp, false); return; } const w = C.worlds[cf.world], W0 = { gun: w.gun, shield: w.shield, owner: w.owner };
     const snap = [cf.att, cf.def].map(o => K.cfFleets(cf, o).flatMap(f => f.ships.map(s => ({ s, o: f.owner, hp0: s.hp }))));
-    const res = await fightBattle(cf); await battleResult(cf, res, snap, W0); QS.outcome(qp, res.quest === 'won'); }
+    const res = await fightBattle(cf); SL.battle('quest', cf, res); await battleResult(cf, res, snap, W0); QS.outcome(qp, res.quest === 'won'); }
   else if (v === 'auto') { const r = QS.autoQuest(qp); toastS(`${Q.title}: ${r.won ? 'it succeeds' : 'it fails'}`, r.won ? 'good' : 'bad'); }
   else QS.outcome(qp, false);
   refresh();
@@ -1319,7 +1334,7 @@ async function turnBanner() {
   for (const f of order) { const s = el.querySelector(`[data-f="${f}"]`); if (s) s.classList.add('on'); await wait(f === C.player ? 120 : 260); }
 }
 async function endTurnUI() {
-  if (V.busy || modalOpen() || C.over) return; V.busy = true; initAudio(); closePop(); hideTip();
+  if (V.busy || modalOpen() || C.over) return; V.busy = true; initAudio(); closePop(); hideTip(); SL.turnEnd(C.turn);
   try {
     await turnBanner();
     const cfs = K.endTurn(), me = C.player;
@@ -1330,7 +1345,7 @@ async function endTurnUI() {
       const mineIn = cf.att === me || cf.def === me;
       if (!K.cfFleets(cf, cf.att).length) continue;
       if (!mineIn) { K.autoResolve(cf); continue; }
-      if (cf.att === me && K.trivial(cf)) { K.autoResolve(cf); continue; } // the platforms cannot hurt us: no prompt, the guns do it
+      if (cf.att === me && K.trivial(cf)) { SL.battle('trivial', cf, K.autoResolve(cf)); continue; } // the platforms cannot hurt us: no prompt, the guns do it
       const w = C.worlds[cf.world], W0 = { gun: w.gun, shield: w.shield, owner: w.owner };
       const snap = [cf.att, cf.def].map(o => K.cfFleets(cf, o).flatMap(f => f.ships.map(s => ({ s, o: f.owner, hp0: s.hp }))));
       const A0 = sideSum(cf, cf.att), D0 = sideSum(cf, cf.def);
@@ -1339,12 +1354,14 @@ async function endTurnUI() {
       // talk before you shoot: when our ships meet theirs, the parley comes first (parley.js)
       let v = null, res = null;
       if (myMobile && PA.canParley(cf, me)) { const pr = await parleyUI(cf); res = pr.res || null; v = pr.v || null; }
-      if (res) { await battleResult(cf, res, snap, W0); await pendingUI(); if (C.over) break; continue; }
+      if (res) { SL.battle(res.surrendered ? 'surrender' : res.terms ? 'terms' : 'parley', cf, res); await battleResult(cf, res, snap, W0); await pendingUI(); if (C.over) break; continue; }
+      let how = null;
       if (v === 'prompt') v = await battlePrompt(cf, A0, D0);
-      else if (!v) v = !myMobile ? 'auto' : (await sureWin(cf)) ? 'auto' : await battlePrompt(cf, A0, D0);
+      else if (!v) v = !myMobile ? (how = 'platforms', 'auto') : (await sureWin(cf)) ? (how = 'sure') : await battlePrompt(cf, A0, D0);
       if (v === 'withdraw') { res = { attWin: cf.att !== me, world: cf.world, att: cf.att, def: cf.def, atts: cf.atts, defs: cf.defs, withdrew: true, space: cf.space }; K.afterBattle(res); }
-      else if (v === 'fight') res = await fightBattle(cf);
+      else if (v === 'fight') { const t0 = Date.now(); res = await fightBattle(cf); SL.ev('fightSecs', { s: Math.round((Date.now() - t0) / 1000) }); }
       else res = K.autoResolve(cf);
+      SL.battle(how || (v === 'withdraw' ? 'withdraw' : v === 'fight' ? 'fought' : 'auto'), cf, res);
       await battleResult(cf, res, snap, W0); await pendingUI();
       if (C.over) break;
     }
@@ -1376,7 +1393,7 @@ async function endTurnUI() {
     checkOver(); autosave(); /* every week starts with a save of where the war stands */
   } catch (e) { console.error(e); }
   $('sturn').classList.add('hide');
-  V.busy = false;
+  V.busy = false; if (C.on && !C.over) SL.turnStart(C.turn);
 }
 // Total War's forecast: what auto-resolve expects
 function forecast(r) { return r > 2.2 ? ['Decisive victory', 'good'] : r > 1.4 ? ['Clear victory', 'good'] : r > 1.05 ? ['Close victory', 'gold'] : r > .8 ? ['Close defeat', 'warnc'] : r > .5 ? ['Clear defeat', 'bad'] : ['Crushing defeat', 'bad']; }
@@ -1444,7 +1461,7 @@ async function parleyUI(cf) {
     if (hail === 'demand' && !used.strike) B.push(['strike', 'Strike our colours', 'bad', 'Give up the fight: every ship of ours in this battle goes over to them, and our commanders are taken.']);
     B.push(['auto', 'Auto-resolve', '', `Fight it out on auto-resolve: ${pct(q)} to win.`]);
     B.push(['fight', 'Open fire ▸', 'go', 'No more words: to the battle screen.']);
-    const v = await modal(html, B, { cls: 'event parley', esc: 'fight', enter: 'fight' });
+    const v = await modal(html, B, { cls: 'event parley', esc: 'fight', enter: 'fight' }); SL.parley(v);
     if (v === 'x') continue;
     const roll = Math.random();
     if (v === 'fight' || v === 'auto') { ownChallenge(); return { v: v === 'fight' ? 'prompt' : 'auto' }; }
