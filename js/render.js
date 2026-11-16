@@ -18,6 +18,7 @@ import { TAU, PI, rand, clamp, hyp, hex, angDiff } from './util.js';
 import { grav } from './physics.js';
 import { disabled, mainAmmo, needsService, groupList, defaultRally, worldUnderAttack, nukesOf } from './sim.js';
 import { generate, HI } from './planetgen.js';
+import { MAPS } from './planetwar.js';
 import { AU } from './solar.js';
 import { FOV, SE, CE, ELEV, AZ, setView, camDist, camOffset, screenAng, toWorld, projectTo, onScr, footprint } from './cam.js';
 export { toWorld, project } from './cam.js';
@@ -207,6 +208,7 @@ function starC(count, maxSize, alpha, spikes = false) {
 // Each material carries a `uniforms` map shaped like the old ShaderMaterial's ({ name: { value } }), so the rest of
 // the renderer sets them exactly as before. Texture slots hold a 1×1 placeholder until a map arrives.
 // the shader block keeps its TSL names (clamp, mix, length …) to itself
+const PROV_MAX = 32; // provinces a planet-war map may have (the owner colour table's size)
 const { planetMat, cloudMat, sunMat, atmoMat, ringMat, bgMat, batchMat, orbitMat, dustMat, SH } = (() => {
 const PH = (() => { const t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1); t.magFilter = t.minFilter = THREE.LinearFilter; t.needsUpdate = true; return t; })();
 // a texture uniform that may be sampled at several places in one shader: setting .value updates every sample
@@ -264,6 +266,7 @@ const planetMat = (atmo, o = {}) => {
     texel: uniform(new THREE.Vector2(1 / 512, 1 / 256)), bumpK: uniform(BUMP), gas: uniform(GAS ? 1 : 0), hasAtmo: uniform(AIR),
     sunPos: uniform(new THREE.Vector3()), atmo: uniform(new THREE.Color().setRGB(...atmo.map(v => v / 255), THREE.SRGBColorSpace)), ecl: uniform(0), eclCol: uniform(new THREE.Color(.22, .22, .25)),
     C: uniform(new THREE.Vector3()), pr: uniform(1), ringN: uniform(new THREE.Vector3(0, 1, 0)), ringR: uniform(new THREE.Vector2(1.35, 2.3)), ringK: uniform(1), ringMap: texU() };
+  if (o.prov) Object.assign(U, { seats: TSL.uniformArray(Array.from({ length: PROV_MAX }, () => new THREE.Vector3(0, 1, 0))), nProv: uniform(0), owners: TSL.uniformArray(Array.from({ length: PROV_MAX }, () => new THREE.Vector4(0, 0, 0, 0))), hover: uniform(-1), sel: uniform(-1), ovl: uniform(1), lineW: uniform(1.2) });
   const vN = worldN();
   const vT = varying(Fn(() => { const n = normalGeometry, t = vec3(n.z, 0, n.x.mul(-1)); return normalize(modelWorldMatrix.mul(vec4(select(length(t).greaterThan(1e-4), t, vec3(0, 0, 1)), 0)).xyz); })());
   const frag = Fn(() => {
@@ -343,6 +346,21 @@ const planetMat = (atmo, o = {}) => {
       col.addAssign(U.aurCol.mul(au.mul(GAS ? .22 : .42).add(band.mul(GAS ? .02 : .05))).mul(one.sub(day)));
     }
     col.assign(mix(col, col.mul(U.eclCol), U.ecl)); // in its parent's shadow: dark, or copper-red through a parent's air
+    if (o.prov) { // the planet-war map: province borders, owner tints, hover and selection. A province is the nearest seat on the
+      // sphere, the same rule provMap() uses, evaluated here per pixel: the margin between the nearest seat and the next is a
+      // smooth field, so the border is an anti-aliased hairline of constant screen width wherever that margin is a pixel or two wide
+      const P = normalize(positionGeometry).toVar(), best = float(-2).toVar(), second = float(-2).toVar(), id = float(-1).toVar(), id2 = float(-1).toVar();
+      for (let k = 0; k < PROV_MAX; k++) { const dk = dot(P, U.seats.element(k)).add(step(float(k + .5), U.nProv).sub(1).mul(9)); // seats past nProv fall out of the running
+        const better = step(best, dk); second.assign(mix(max(second, dk), best, better)); id2.assign(mix(id2, id, better)); id.assign(mix(id, float(k), better)); best.assign(max(best, dk)); }
+      const landK = step(t.a, .5).mul(U.ovl).toVar(), m = best.sub(second).toVar(), fw = fwidth(m).max(1e-6).mul(U.lineW).toVar();
+      const own = U.owners.element(id.max(0).min(PROV_MAX - 1).toInt()).toVar(); // rgb and, in w, whether anyone owns it
+      const isSel = step(abs(id.sub(U.sel)), .5).toVar(), isHov = step(abs(id.sub(U.hover)), .5).toVar(), edgeSel = max(isSel, step(abs(id2.sub(U.sel)), .5)).toVar();
+      const tint = mix(col, col.mul(.5).add(own.rgb.mul(lum(col).mul(1.2).add(.22))), own.w.mul(.3)); col.assign(mix(col, tint, landK)); // the owner's colour, about a quarter, the ground still showing through
+      col.addAssign(col.mul(.18).add(.03).mul(isHov).mul(landK)); // hover: a soft lift
+      const line = one.sub(smoothstep(fw.mul(float(.6).add(edgeSel.mul(.5))), fw.mul(float(1.6).add(edgeSel.mul(.8))), m)).toVar(), lineC = mix(vec3(.95, .86, .62), vec3(1, 1, 1), edgeSel); // a gold hairline, white and heavier round the selected province
+      col.assign(mix(col, lineC.mul(float(.75).add(day.mul(.45))), line.mul(float(.55).add(edgeSel.mul(.45))).mul(landK)));
+      col.addAssign(vec3(1, .97, .9).mul(one.sub(smoothstep(0, fw.mul(9), m))).mul(isSel).mul(.2).mul(landK)); // a rim glow just inside the selected province's edge
+    }
     return vec4(col, 1);
   })();
   const m = mkMat(frag); m.uniforms = U; return m;
@@ -712,6 +730,33 @@ function genDone(r) {
   for (const v of bodyVis) if (v.b.id === r.id) applySurface(v);
   if (!PORT[r.id]) setTimeout(() => portrait(r.id), 0);
 }
+// ---------------------------------------------------------------- the planet-war globe (P2, for planetwarview.js)
+// A world's painted surface as the map screen draws it: the campaign's own planet shader (relief, air, city lights,
+// weather) plus the province overlay. `prov` is provMap()'s Uint8Array (rows top-down, 255 = sea) or a ready R8
+// texture; owners, hover and selection are uniforms, so changing them rebuilds nothing.
+export function surfaceOf(id) { const t = GEN.have[id]; return t ? { W: t.W, H: t.H, day: t.map, night: t.night, hgt: t.hgt, clouds: t.clouds } : null; }
+// `seats` are the provinces' [lat, lon] in order (MAPS[world].provs by default, so the ids match provMap's); `prov`, the
+// id texture, is accepted for the brief's API but not needed: the shader evaluates the same nearest-seat rule, which
+// gives smooth borders instead of the texel stair-steps a 512-wide map would draw.
+export function planetMapMaterial({ world, day, night, hgt, seats, nProv, W, H }) {
+  const b = BODIES.find(o => o.id === world), pal = b && b.pal || {}, atmo = pal.atmo || [180, 180, 190];
+  const m = planetMat(atmo, { air: !!pal.atmo && !(b && b.gas), gas: !!(b && b.gas), prov: true, aurora: AURORA[world], storms: STORMS[world], lightning: world === 'jupiter' || world === 'saturn' });
+  const U = m.uniforms; U.map.value = day; U.night.value = night || null; U.hasNight.value = night ? 1 : 0; U.hmap.value = hgt || null; U.hasH.value = hgt ? 1 : 0; U.texel.value.set(1 / W, 2 / W);
+  const list = seats || (MAPS[world] ? MAPS[world].provs.map(p => [p.lat, p.lon]) : []), n = Math.min(PROV_MAX, nProv || list.length);
+  for (let i = 0; i < PROV_MAX; i++) { const q = list[i]; if (q && i < n) U.seats.array[i].copy(seatDir(q[0], q[1])); else U.seats.array[i].set(0, 1, 0); U.owners.array[i].set(0, 0, 0, 0); }
+  U.nProv.value = n;
+  return {
+    material: m, nProv: n,
+    setOwner(i, rgb) { if (i < 0 || i >= PROV_MAX) return; const v = U.owners.array[i]; if (!rgb) v.set(0, 0, 0, 0); else { const c = Array.isArray(rgb) ? rgb : new THREE.Color(rgb).toArray(); v.set(c[0] > 1 ? c[0] / 255 : c[0], c[1] > 1 ? c[1] / 255 : c[1], c[2] > 1 ? c[2] / 255 : c[2], 1); } },
+    setHover(i) { U.hover.value = i == null ? -1 : i; }, setSelected(i) { U.sel.value = i == null ? -1 : i; }, setOverlay(on) { U.ovl.value = on ? 1 : 0; },
+    setSun(p) { U.sunPos.value.copy(p); }, setLineWidth(px) { U.lineW.value = px; }, uniforms: U,
+    setSeats(list) { const n = Math.min(PROV_MAX, list.length); list.forEach((q, i) => { if (i < n) U.seats.array[i].copy(seatDir(q[0], q[1])); }); U.nProv.value = n; this.nProv = n; },
+    dispose() { m.dispose(); },
+  };
+}
+// where (lat, lon) lies on the unit sphere as SphereGeometry maps planetgen's equirectangular map: u = (lon + 180) / 360
+// runs round from −x through +z, v = 1 at the north pole
+export function seatDir(lat, lon) { const la = lat * PI / 180, ph = (lon + 180) * PI / 180; return new THREE.Vector3(-Math.cos(ph) * Math.cos(la), Math.sin(la), Math.sin(ph) * Math.cos(la)); }
 // a world's portrait for the battle prompt: its own painted surface on a lit sphere, rendered once off screen
 const PORT = {};
 // WebGPU reads pixels back asynchronously: the first ask starts the render and answers null; the picture is ready
