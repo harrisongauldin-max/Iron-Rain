@@ -7,9 +7,10 @@ Scenarios, SEEDS runs each (default 6):
   equal-0   team 0 attacks an equal fleet (team 0 runs on the player's morale rules)
   equal-1   team 1 attacks an equal fleet (team 1 runs on the enemy's morale rules, which can rout)
   ratio-1.5 team 0 attacks with 1.5x the ships
-The task board's target (U2) is an equal attack winning about half the time and a 1.5:1 attack
-winning at least 4 of 6. The test fails if the 1.5:1 attack wins fewer than 4 of 6, or if no equal
-attack wins at all (where the sim stood before U2). It prints the equal results against the target.
+The task board's target (U2): an equal attack wins about half the time, and a 1.5:1 attack wins at
+least 4 of 6. The test fails if the 1.5:1 attack wins fewer than 4 of 6, or if the equal attacks
+together win fewer than a quarter or more than three quarters of their runs (3 to 9 of 12 at 6 seeds:
+about half, allowing for the noise of 12 runs). Before U2 an equal attack won none.
 A win: the attacker holds the field (it did not rout) and lost less of its fleet than the defender,
 or the defender routed.
 Usage: python3 tests/attack_balance.py [SCENARIO ...]     JOBS=2 runs in parallel; prints one JSON line a run."""
@@ -101,6 +102,6 @@ async def main():
         if bad: fails.append(f'{sc}: errors {[r.get("error") or r["err"] for r in bad][:2]}')
     if eqn:
         print(f'equal attacks won {eq} of {eqn}; the U2 target is about half')
-        if eq == 0: fails.append('no equal attack won')
+        if not eqn / 4 <= eq <= eqn * 3 / 4: fails.append(f'equal attacks won {eq} of {eqn}, want about half ({round(eqn / 4)}-{round(eqn * 3 / 4)})')
     print('FAIL' if fails else 'PASS', fails); sys.exit(1 if fails else 0)
 asyncio.run(main())
