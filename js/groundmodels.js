@@ -21,6 +21,7 @@ import * as THREE from 'three';
 import { MeshStandardNodeMaterial } from 'three/webgpu';
 import { attribute, mix, max, min, vec2, vec3, float, instanceColor, positionWorld, normalWorld, transformNormalToView, texture, fract, floor, abs, pow, select, dFdx, dFdy, log2, length, clamp, normalize, sign, uniform, Fn, dot } from 'three/tsl';
 import { cityPlan } from './ground.js';
+import { FACTIONS } from './data.js';
 import { mergeGeometries } from '../vendor/three/utils/BufferGeometryUtils.js';
 
 const PI = Math.PI;
@@ -886,9 +887,94 @@ export function cityMaterial(world) {
   return m;
 }
 
+// ---------------------------------------------------------------- pieces for the planet map (claude/planet-maps.md, P1)
+// What stands on the globe in the war for a planet: an army, the five kinds of settlement (the `kind` of a province in
+// planetwar.js MAPS), and three markers. Each is one geometry, 1 unit tall, origin at the centre of its base, +Y up; the
+// view scales it and stands it on the surface. They are read from far out (40–80 px with the whole globe in view), so
+// each is a silhouette first: a banner, a spire on a walled hill, a cluster of towers by a landing pad, a lighthouse on
+// a mole, a pit-head, a keep on a crag, a ring and a falling arrow, a gun behind gabions, crossed razors over a burst.
+// The owner's colour comes only through mapPieceMaterial: parts painted M.own with tm = 1 take it (banners, roofs, flags).
+const M = { rock: '#5d5346', stone: '#b9ad98', stoneL: '#e6dfd0', stoneD: '#7b7163', pave: '#8f8778', own: '#ffffff', dark: '#2b2d33', steel: '#9aa0a8', wood: '#6b5a44', lit: '#ffe9b0', fire: '#ff8a3c', blade: '#e6edf4' };
+// stand the piece on y = 0 and scale it to one unit tall
+const unit = F => { const g = F.build(), b = g.boundingBox, h = b.max.y - b.min.y; g.translate(0, -b.min.y, 0); g.scale(1 / h, 1 / h, 1 / h); g.computeBoundingBox(); g.computeBoundingSphere(); return g; };
+const torus = (R, t, y, seg = 24) => { const g = new THREE.TorusGeometry(R, t, 6, seg); g.rotateX(PI / 2); g.translate(0, y, 0); return g; };
+const flag = (F, x, y, z, hgt, w = 1.1) => { F.cyl(.05, .06, hgt, 6, x, y + hgt / 2, z, M.steel); F.box(w, w * .6, .06, x + w / 2 + .04, y + hgt - w * .32, z, M.own, 1); }; // a pole and the owner's flag
+function mapArmy() { const F = new Fig(); // a legion standard: stepped plinth, pole, the owner's banner on a crossbar, a gilt eagle
+  F.cyl(2.2, 2.5, .5, 8, 0, .25, 0, M.stoneD); F.cyl(1.95, 1.95, .14, 8, 0, .57, 0, M.own, 1); F.cyl(1.6, 1.9, .5, 8, 0, .89, 0, M.stone);
+  F.cyl(.14, .17, 7.7, 8, 0, 4.99, 0, C.gilt); F.cyl(.3, .3, .2, 8, 0, 3.0, 0, C.giltD); F.cyl(.3, .3, .2, 8, 0, 4.4, 0, C.giltD);
+  F.cyl(.1, .1, 3.7, 6, 0, 8.3, 0, C.giltD, 0, 0, PI / 2); F.both(s => F.sph(.17, 8, 6, s * 1.85, 8.3, 0, C.giltL));              // crossbar and its finials
+  F.box(3.3, 3.2, .12, 0, 6.6, 0, M.own, 1); F.box(3.3, .2, .18, 0, 4.95, 0, C.gilt); F.both(s => F.box(.9, .7, .12, s * 1.2, 4.55, 0, M.own, 1)); // the banner, its fringe bar, two tails
+  F.both(s => F.cyl(.72, .72, .06, 14, 0, 6.7, s * .08, C.giltL, 0, PI / 2));                                                    // a gilt disc on each face
+  F.sph(.42, 10, 7, 0, 9.05, 0, C.gilt, 0, 1.25, 1); F.sph(.2, 8, 6, 0, 9.62, .22, C.giltL); F.both(s => F.box(1.6, .14, .55, s * .9, 9.42, 0, C.giltL, 0, 0, 0, s * .5)); // the eagle: body, head, wings raised
+  return unit(F); }
+function mapCapital() { const F = new Fig(); // a walled hill city with a spire
+  F.cyl(4.2, 5.2, 1.0, 10, 0, .5, 0, M.rock); F.cyl(3.5, 4.2, .8, 10, 0, 1.4, 0, M.rock);                                          // the hill
+  F.cyl(3.3, 3.4, 1.0, 8, 0, 2.3, 0, M.stone); F.cyl(3.0, 3.0, .1, 8, 0, 2.86, 0, M.stoneD);                                       // the curtain wall
+  for (let k = 0; k < 8; k++) { const a = k * PI / 4, x = Math.sin(a) * 3.3, z = Math.cos(a) * 3.3; F.cyl(.42, .48, 1.7, 8, x, 2.65, z, M.stoneL); F.cyl(0, .52, .75, 8, x, 3.87, z, M.own, 1); } // wall towers, roofed in the owner's colour
+  F.box(.9, .9, .4, Math.sin(PI / 8) * 3.2, 2.25, Math.cos(PI / 8) * 3.2, M.dark, 0, PI / 8);                                      // the gate
+  F.cyl(2.3, 2.5, .9, 8, 0, 3.25, 0, M.stoneL);                                                                                   // the upper city
+  for (let k = 0; k < 5; k++) { const a = k * 1.26 + .4, x = Math.cos(a) * 1.65, z = Math.sin(a) * 1.65, hh = .5 + (k % 3) * .22; F.box(.7, hh, .7, x, 3.7 + hh / 2, z, M.stone, 0, a); F.box(.78, .1, .78, x, 3.75 + hh, z, M.own, 1, a); }
+  F.sph(.62, 10, 6, -1.0, 3.7, -.5, C.gilt, 0, .85, 1);                                                                           // a gilt dome
+  F.cyl(.85, 1.05, 2.6, 8, 0, 5.0, 0, M.stoneL); F.cyl(1.0, 1.0, .16, 8, 0, 6.35, 0, C.gilt); F.cyl(.55, .75, 2.4, 8, 0, 7.6, 0, M.stoneL); F.cyl(.72, .72, .14, 8, 0, 8.85, 0, C.gilt); // the spire in two gilt-ruled stages
+  F.cyl(0, .55, 2.1, 8, 0, 9.95, 0, C.gilt); F.sph(.2, 8, 6, 0, 11.1, 0, M.lit, 0, 1, 1, 1.0);                                     // its cap and beacon
+  return unit(F); }
+function mapCity() { const F = new Fig(); // a great city: capitalled towers, a dome, and a landing pad with a shuttle on it
+  F.cyl(4.8, 5.0, .35, 14, 0, .175, 0, M.pave);
+  for (const [x, z, h, r] of [[0, 0, 7.4, .8], [1.7, .9, 5.3, .6], [-1.6, 1.3, 4.5, .6], [.9, -1.9, 5.9, .65], [2.9, -.6, 3.7, .55]]) {
+    F.cyl(r * 1.2, r * 1.28, .3, 10, x, .5, z, M.stone); F.cyl(r * .9, r, h, 10, x, .65 + h / 2, z, M.stoneL); F.cyl(r * 1.25, r * .92, .35, 10, x, .82 + h, z, C.gilt); F.cyl(r * 1.3, r * 1.3, .2, 10, x, 1.1 + h, z, M.stoneL); F.cyl(0, r * 1.2, .75, 10, x, 1.57 + h, z, M.own, 1); }
+  F.cyl(1.0, 1.05, .8, 12, .3, .75, 2.7, M.stoneL); F.sph(1.0, 12, 6, .3, 1.15, 2.7, C.gilt, 0, .7, 1); F.cyl(.06, .1, .6, 6, .3, 2.1, 2.7, C.giltL);        // the dome
+  F.cyl(1.6, 1.7, .3, 14, -2.5, .5, -1.7, M.dark); F.add(torus(1.25, .07, .68, 20).translate(-2.5, 0, -1.7), M.lit, 0, 1.0);                               // the spaceport: a pad, its lit ring,
+  F.loft([[-.8, .04, .04], [-.35, .26, .2], [.35, .24, .18], [.85, .03, .03]], 8, -2.5, .98, -1.7, M.steel, 0, 0, [1, 0, .5]); F.box(.5, .05, 1.5, -2.6, .95, -1.65, M.steel, 0, -.46); // a shuttle on it,
+  F.cyl(.12, .17, 2.3, 8, -.9, 1.5, -3.2, M.stone); F.cyl(.3, .22, .35, 8, -.9, 2.8, -3.2, M.lit, 0, 0, 0, 0, false, .9);                                   // and a control tower
+  return unit(F); }
+function mapPort() { const F = new Fig(); // a harbour town: houses behind a quay, a mole, a lighthouse at its end, a ship alongside
+  F.cyl(4.2, 4.4, .35, 12, 0, .175, 0, M.pave); F.box(5.6, .45, 1.0, 0, .225, 3.4, M.stoneD); F.box(.7, .45, 3.4, 3.0, .225, 5.4, M.stoneD); F.box(2.6, .45, .7, 2.05, .225, 6.9, M.stoneD); // town ground, quay, mole and its hook
+  for (const [x, z, w, h] of [[-2.2, .4, 1.3, 1.0], [-.6, -.9, 1.2, 1.3], [.9, .3, 1.1, .9], [2.2, -.8, 1.2, 1.1], [-1.9, -1.9, 1.1, .8], [.6, -2.4, 1.3, 1.0]]) { F.box(w, h, w, x, .35 + h / 2, z, M.stoneL); F.cyl(0, w * .76, h * .55, 4, x, .35 + h + h * .275, z, M.own, 1, 0, 0, PI / 4); }
+  F.rbox(2.6, .9, .9, .08, 2, -1.7, .8, 2.3, M.stone); F.box(2.7, .1, 1.0, -1.7, 1.3, 2.3, M.own, 1);                              // a warehouse on the quay
+  F.box(.14, 2.2, .14, .9, 1.55, 2.6, M.steel); F.limb([.9, 2.6, 2.6], [.9, 2.9, 4.5], .06, .05, 6, M.steel);                      // a crane
+  F.loft([[-1.5, .05, .1], [-1.05, .4, .34], [.7, .42, .34], [1.6, .04, .08]], 8, -.8, .4, 4.4, M.dark, 0, 0, [1, 0, 0]); F.box(.8, .5, .5, -1.3, .95, 4.4, M.stoneL); F.cyl(.14, .14, .5, 8, -1.3, 1.4, 4.4, M.own, 1); // a ship: hull, deckhouse, funnel
+  F.cyl(.6, .7, .5, 10, .9, .7, 6.9, M.stoneD); F.cyl(.32, .5, 4.6, 10, .9, 3.25, 6.9, M.stoneL); F.cyl(.44, .47, .8, 10, .9, 2.9, 6.9, M.own, 1);            // the lighthouse, banded in the owner's colour
+  F.cyl(.56, .56, .14, 10, .9, 5.62, 6.9, M.stoneD); F.cyl(.3, .3, .6, 10, .9, 5.99, 6.9, M.lit, 0, 0, 0, 0, false, 1.0); F.cyl(0, .42, .55, 10, .9, 6.56, 6.9, C.gilt); // gallery, lamp, cap
+  return unit(F); }
+function mapTowns() { const F = new Fig(); // mining towns: a few low buildings, a pit-head with its wheel, a tank and a spoil heap
+  F.cyl(3.6, 3.8, .25, 10, 0, .125, 0, M.pave);
+  for (const [x, z, w, h] of [[-1.7, .7, 1.3, .9], [.1, 1.6, 1.1, .7], [1.6, .5, 1.0, 1.1], [-.6, -1.3, 1.5, .8]]) { F.rbox(w, h, w, .06, 2, x, .25 + h / 2, z, M.stoneL); F.box(w * 1.08, .1, w * 1.08, x, .3 + h, z, M.own, 1); }
+  const hx = 1.5, hz = -1.6; F.both(s => F.limb([hx + s * .65, .25, hz], [hx, 4.3, hz], .09, .07, 6, M.steel)); F.limb([hx, .25, hz - 1.6], [hx, 4.0, hz], .08, .06, 6, M.steel); F.box(1.0, .08, .08, hx, 2.3, hz, M.steel); // the headframe
+  F.cyl(.55, .55, .12, 12, hx, 4.4, hz, M.steel, 0, PI / 2); F.sph(.12, 6, 5, hx, 5.02, hz, M.lit, 0, 1, 1, 1.0); F.rbox(1.0, .8, .9, .05, 2, hx, .65, hz - 1.7, M.stone); // its wheel, a lamp, the winding house
+  F.cyl(.55, .55, 1.2, 10, -2.2, .85, -.9, M.steel); F.sph(.55, 10, 5, -2.2, 1.45, -.9, M.steel, 0, .4, 1); F.sph(.9, 8, 5, 2.6, .25, -.6 + 2.2, M.rock, 0, .55, 1.2); // a tank, a spoil heap
+  return unit(F); }
+function mapForts() { const F = new Fig(); // a hill fort: a six-sided wall with towers on a crag, a keep, the owner's flag
+  F.cyl(3.0, 4.6, 1.6, 9, 0, .8, 0, M.rock); F.cyl(2.5, 3.0, .9, 9, 0, 2.05, 0, M.rock);
+  F.cyl(2.5, 2.6, 1.1, 6, 0, 3.05, 0, M.stone);
+  for (let k = 0; k < 6; k++) { const a = k * PI / 3, x = Math.sin(a) * 2.5, z = Math.cos(a) * 2.5; F.cyl(.45, .52, 1.8, 6, x, 3.4, z, M.stoneD); F.cyl(.56, .56, .22, 6, x, 4.41, z, M.stoneL); }
+  F.rbox(1.5, 2.1, 1.5, .08, 2, 0, 4.65, 0, M.stoneL); F.cyl(1.2, 1.2, .25, 4, 0, 5.82, 0, M.stoneD, 0, 0, 0, PI / 4); F.box(1.6, .12, 1.6, 0, 3.66, 0, M.own, 1); // the keep, its parapet, the yard in the owner's colour
+  F.limb([.3, 5.0, .7], [.3, 5.5, 2.0], .13, .1, 8, M.dark);                                                                       // a gun on the keep
+  flag(F, 0, 5.9, 0, 2.2, 1.3);
+  return unit(F); }
+function mapLanding() { const F = new Fig(); // a drop zone: a lit ring in the owner's colour, four ticks pointing in, an arrow coming down on a mast
+  F.add(torus(3, .22, .22, 20), M.own, 1, .9); F.add(torus(1.9, .1, .12, 18), M.lit, 0, 1.0);
+  for (let k = 0; k < 4; k++) { const a = k * PI / 2 + PI / 4; F.box(.26, .12, 1.0, Math.sin(a) * 2.45, .12, Math.cos(a) * 2.45, M.own, 1, a, 0, 0, .9); }
+  F.cyl(.07, .1, 2.5, 6, 0, 1.25, 0, M.steel); F.cyl(1.05, 0, 1.6, 6, 0, 3.3, 0, M.own, 1, 0, 0, 0, false, .9); F.cyl(.34, .34, 1.5, 6, 0, 4.85, 0, M.own, 1, 0, 0, 0, false, .9);
+  return unit(F); }
+function mapSiege() { const F = new Fig(); // a siege: a heavy gun laid on the walls from behind a curve of gabions, the besieger's mantlet and flag
+  for (let k = 0; k < 5; k++) { const a = (k - 2) * .42; F.cyl(.5, .56, .9, 8, Math.sin(a) * 2.9, .45, Math.cos(a) * 2.9, M.wood); }
+  F.rbox(1.4, .5, 2.3, .06, 2, 0, .65, -.3, M.dark); F.both(s => F.cyl(.62, .62, .26, 10, s * .86, .62, -.3, M.steel, 0, 0, PI / 2));  // carriage and wheels
+  F.limb([0, 1.0, -1.0], [0, 3.0, 1.9], .36, .25, 10, M.steel); F.limb([0, 2.86, 1.7], [0, 3.07, 2.0], .31, .31, 10, M.dark); F.sph(.2, 6, 5, 0, 3.1, 2.04, M.fire, 0, 1, 1, 1.0); // the barrel, its muzzle band, a lit bore
+  F.box(2.3, 1.3, .14, 0, 1.25, 1.1, M.own, 1, 0, -.3);                                                                            // the mantlet
+  flag(F, -1.5, .2, -1.3, 3.6, 1.2);
+  return unit(F); }
+function mapBattle() { const F = new Fig(); // a battle: two razors crossed over a burst
+  for (let k = 0; k < 8; k++) { const a = k * PI / 4 + PI / 8, L = k % 2 ? 2.1 : 3.1; F.limb([Math.cos(a) * .5, .4, Math.sin(a) * .5], [Math.cos(a) * L, .55, Math.sin(a) * L], .42, .02, 4, M.fire, 0, 1.0); }
+  F.sph(.95, 8, 6, 0, .5, 0, '#ffd28a', 0, .6, 1, 1.0);
+  F.both(s => { const a = [s * 1.9, .9, 0], d = [-s * 3.5, 5.9, 0], Ln = Math.hypot(...d);
+    F.loft([[0, .22, .07], [Ln * .8, .16, .055], [Ln, .01, .01]], 4, a[0], a[1], a[2], M.blade, 0, .55, d);                       // the blade, drawn to a point
+    F.limb([a[0] + s * .5, a[1] - .84, 0], a, .09, .09, 6, C.giltD); F.sph(.2, 8, 6, a[0], a[1], a[2], C.gilt, 0, 1, 1.8); F.sph(.14, 6, 5, a[0] + s * .53, a[1] - .9, 0, C.giltL); }); // hilt, guard, pommel
+  return unit(F); }
+
 // ---------------------------------------------------------------- public
 const BUILD = { inf: legionnaire, rail: railman, obs: obsidian, gold: peerless, lead: legate, shell: starshell, pod: gravpod, aa: sarissa, corpse, corpse_obs: corpseObs, corpse_gold: corpseGold, corpse_shell: corpseShell, stork,
-  rip: ripwing, riplead: ripwingLead, thunder: thunderwing, wasp, drachen, titan, hover: hovertank, spider: spidertank, bike: gravbike, drop: entryPod, standard };
+  rip: ripwing, riplead: ripwingLead, thunder: thunderwing, wasp, drachen, titan, hover: hovertank, spider: spidertank, bike: gravbike, drop: entryPod, standard,
+  army: mapArmy, capital: mapCapital, city: mapCity, port: mapPort, towns: mapTowns, forts: mapForts, landing: mapLanding, siege: mapSiege, battle: mapBattle };
 const CACHE = {};
 export function figureGeo(kind) { return CACHE[kind] || (CACHE[kind] = BUILD[kind]()); }
 export const corpseGeo = () => figureGeo('corpse');
@@ -897,7 +983,8 @@ export const CORPSE_KINDS = ['corpse', 'corpse_obs', 'corpse_gold', 'corpse_shel
 export const corpseOf = kind => kind === 'obs' ? 'corpse_obs' : kind === 'gold' || kind === 'lead' ? 'corpse_gold' : kind === 'shell' ? 'corpse_shell' : 'corpse';
 export const storkGeo = () => figureGeo('stork');
 export const triCount = kind => figureGeo(kind).userData.tris;
-export const BUDGET = { inf: 5500, rail: 5500, obs: 5000, gold: 5500, lead: 6000, shell: 6000, pod: 6000, aa: 6000, corpse: 500, corpse_obs: 700, corpse_gold: 700, corpse_shell: 800, stork: 15000, rip: 4000, riplead: 4500, thunder: 8000, wasp: 4000, drachen: 20000, titan: 24000, hover: 6000, spider: 8000, bike: 3000, drop: 2000, standard: 2000 };
+export const BUDGET = { inf: 5500, rail: 5500, obs: 5000, gold: 5500, lead: 6000, shell: 6000, pod: 6000, aa: 6000, corpse: 500, corpse_obs: 700, corpse_gold: 700, corpse_shell: 800, stork: 15000, rip: 4000, riplead: 4500, thunder: 8000, wasp: 4000, drachen: 20000, titan: 24000, hover: 6000, spider: 8000, bike: 3000, drop: 2000, standard: 2000,
+  army: 2000, capital: 2000, city: 2000, port: 2000, towns: 2000, forts: 2000, landing: 600, siege: 600, battle: 600 }; // the last nine are the planet-map pieces
 // kinds that exist as models but have no unit type in ground.js yet (section B of the unit list)
 export const PLANNED = ['rip', 'riplead', 'thunder', 'wasp', 'drachen', 'titan', 'hover', 'spider', 'bike'];
 
@@ -918,6 +1005,24 @@ export function figureMaterial(kind) {
   const lit = tinted.mul(em).mul(1.8).add(tinted.mul(FILL)); // the glow where em is set, and the fill everywhere
   m.emissiveNode = L.glow ? lit.add(vec3(...L.glow)) : lit;
   return m;
+}
+// the planet-map pieces. MAP_KINDS lists them; mapPieceGeo(kind) is the cached geometry (1 unit tall, origin at the base).
+// mapPieceMaterial(kind, faction): faction is a key of FACTIONS ('rising', 'core', 'rim'), null for neutral, or any colour
+// ('#rrggbb', a number or a THREE.Color) for a side that flies another (the alt palettes). One material per look and owner
+// is made and kept, so a province that changes hands swaps materials on the same mesh; treat them as shared, do not edit one.
+// The pieces carry a good share of their own paint as light, the markers more, so they read on the night side of the globe.
+export const MAP_KINDS = ['army', 'capital', 'city', 'port', 'towns', 'forts', 'landing', 'siege', 'battle'];
+const MAP_MARK = { landing: 1, siege: 1, battle: 1 }, MAP_NEUTRAL = '#9aa0a6', MPM = {};
+export const mapPieceGeo = kind => MAP_KINDS.includes(kind) ? figureGeo(kind) : null;
+export function mapPieceMaterial(kind, faction = null) {
+  const col = new THREE.Color(faction == null ? MAP_NEUTRAL : FACTIONS[faction] ? FACTIONS[faction].col.main : faction), key = (MAP_MARK[kind] ? 'm' : 'p') + col.getHexString();
+  if (MPM[key]) return MPM[key];
+  const m = new MeshStandardNodeMaterial({ roughness: .7, metalness: .1 });
+  const paint = attribute('color', 'vec3'), tm = attribute('tm', 'float'), em = attribute('em', 'float');
+  const tinted = mix(paint, paint.mul(vec3(col.r, col.g, col.b)), tm);
+  m.colorNode = tinted; m.emissiveNode = tinted.mul(em).mul(1.8).add(tinted.mul(MAP_MARK[kind] ? .8 : .45));
+  m.userData.owner = '#' + col.getHexString();
+  return MPM[key] = m;
 }
 // the far figure: three boxes in the model's own size and average paint, with its team block (36 triangles), drawn
 // beyond the near range and casting no shadow, so a legion at full strength costs the GPU a fraction of the full models
