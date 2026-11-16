@@ -45,7 +45,7 @@ function makeDOM() {
   <div class="gb-brief hide" id="gbBrief"></div>
   <div class="gb-plan hide" id="gbPlan"></div>
   <div class="gb-end hide" id="gbEnd"></div>
-  <div class="gb-help">Left-drag select · Right-click move or attack · Right-click a wall: breach it (StarShells, RailRifles) · Right-drag to set a line · Double right-click: run · W A S D pan · Q E turn · wheel zoom · middle-drag orbit · Space pause · R run · F hold fire · H halt · C follow</div>`;
+  <div class="gb-help">Left-drag select · Right-click move or attack · Right-click a wall: breach it (StarShells, RailRifles) · Right-drag to set a line · Double right-click: run · W A S D pan · Q E turn · wheel zoom · middle-drag orbit · Space pause · R run · F hold fire · H halt · G back to the legate · C follow</div>`;
   document.body.appendChild(root);
   return root;
 }
@@ -509,6 +509,7 @@ function hud(force) {
       <div class="row"><span>Men</span><b>${u.men.toLocaleString()} / ${u.men0.toLocaleString()}</b></div>
       <div class="row"><span>Morale</span><b class="${u.morale > 50 ? 'good' : u.morale > 28 ? 'gold' : 'bad'}">${Math.round(u.morale)}</b></div>
       <div class="row"><span>State</span><b>${STATE[u.state] || u.state}${u.state === 'move' && u.firing ? ' · firing' : ''}${u.run ? ' · at the run' : ''}${!u.fire ? ' · holding fire' : ''}</b></div>
+      ${u.team === G.human ? `<div class="row"><span>Orders</span><b>${u.pc ? 'yours · G hands it back' : 'the legate’s plan'}</b></div>` : ''}
       <div class="row"><span>${esc(w.name)}</span><b>${w.range} m · AP ${w.ap}</b></div><div class="row"><span>Fire on the move</span><b>${T.fly || u.type === 'starshell' || T.art ? 'full' : Math.round(GR.MOVE_FIRE.walk * 100) + '% walking · ' + Math.round(GR.MOVE_FIRE.run * 100) + '% running'}</b></div>${u.wpn2 ? `<div class="row"><span>${esc(u.wpn2.name)}</span><b>${u.wpn2.range} m · ${u.ammo2} left</b></div>` : ''}
       <div class="row"><span>Armour</span><b>${['', 'cloth', 'duroArmor', 'duroArmor', 'duroArmor', 'plate', 'pulseArmor', 'pulseArmor', 'starShell'][T.armor] || T.armor}${T.shield ? ' · pulseShield ' + Math.round(u.sh / Math.max(1, u.men * T.shield) * 100) + '%' : ''}</b></div>
       <div class="row"><span>Ammunition</span><b>${T.ammo >= 999 ? '—' : Math.round(clamp(u.ammo / T.ammo, 0, 1) * 100) + '%'}</b></div>
@@ -559,6 +560,7 @@ function showBrief() {
   el.classList.remove('hide'); V.modal = false;
   el.innerHTML = `<div class="kicker">${esc(V.meta.date || '')} · ${esc(G.map.B.lore)}</div><h2>The Iron Rain on ${esc(G.map.B.city)}</h2>
     <p>Choose up to <b>${GR.MAXZ} drop zones</b> on the plain: click the ground. The battle is fought at legion scale: ten men for every troop in the campaign. The first wave, <b>${men.toLocaleString()}</b>, falls on them${sp.att.cmdr ? ` with <b>${esc(sp.att.cmdr)}</b>` : ''}: the <b>starShells</b> in their own ablative shells from the spitTubes, the <b>Peerless</b> in pulseArmor braking on their gravBoots, the rest of the legions in <b>drop pods</b>. The <b>${st.toLocaleString()}</b> legionnaires in the <b>Storks</b> follow ${G.storkT} seconds later; a Stork lands on its own zone only while your men hold it, and turns to the nearest beachhead that does if not.</p>
+    <p>Once down, every cohort follows <b>the legate's plan</b> (gather, advance in lines, storm the sites) until you give it an order. From then on it is yours; <b>G</b> hands it back.</p>
     <p>The <b>drop plan</b> on the right says which cohort falls where: pick cohorts there, then click a zone. Until you do, every zone gets an even share.</p>
     <p>The red rings are the <b>Sarissa batteries</b>: the nearer the guns you drop, the more of the Rain dies in the sky. Kill them, and the Storks come down safe.</p>
     <p><b>${gar.toLocaleString()}</b> of the garrison stand to arms in ${esc(G.map.B.city)}${V.meta.garrison ? ` (of ${V.meta.garrison.toLocaleString()}; the rest are pinned by the siege)` : ''}. Hold ${GR.NEED()} of its ${G.map.sites.length} sites for ${GR.HOLD_WIN} seconds, or break the garrison, before ${mmss(G.maxT)} runs out.</p>
@@ -629,15 +631,15 @@ function bindInput() {
       // the aircraft: fighters attack what was clicked, in the air or on the ground; bombers bomb what was clicked, a stretch of
       // wall included; on open ground both patrol over the point (a fighter cannot hover, a bomber needs a target)
       const air = sel.filter(u => u.T.air); if (air.length) { sel.splice(0, sel.length, ...sel.filter(u => !u.T.air));
-        for (const u of air) { if (foe && !(u.T.bombs && foe.T.air)) GR.order(u, { type: 'attack', t: foe }); else if (u.T.bombs && wid >= 0) { const w = G.map.walls[wid]; GR.order(u, { type: 'bomb', x: (w.x0 + w.x1) / 2, y: (w.y0 + w.y1) / 2 }); } else GR.order(u, { type: 'move', x: d.line ? (d.g0.x + d.g1.x) / 2 : d.g0.x, y: d.line ? (d.g0.z + d.g1.z) / 2 : d.g0.z }); }
+        for (const u of air) { if (foe && !(u.T.bombs && foe.T.air)) GR.command(u, { type: 'attack', t: foe }); else if (u.T.bombs && wid >= 0) { const w = G.map.walls[wid]; GR.command(u, { type: 'bomb', x: (w.x0 + w.x1) / 2, y: (w.y0 + w.y1) / 2 }); } else GR.command(u, { type: 'move', x: d.line ? (d.g0.x + d.g1.x) / 2 : d.g0.x, y: d.line ? (d.g0.z + d.g1.z) / 2 : d.g0.z }); }
         if (!sel.length) { sfx('ack'); hud(true); return; } }
       if (foe && foe.T.air) { toast('Men on the ground cannot chase aircraft: those with the guns for it fire as it passes'); return; }
-      if (foe) { for (const u of sel) GR.order(u, { type: 'attack', t: foe, run: dbl || u.run }); sfx('ack'); hud(true); return; }
+      if (foe) { for (const u of sel) GR.command(u, { type: 'attack', t: foe, run: dbl || u.run }); sfx('ack'); hud(true); return; }
       const siege = wid >= 0 ? sel.filter(GR.canBreach) : [];
-      if (siege.length) { for (const u of siege) GR.order(u, { type: 'breach', w: wid, run: dbl || undefined }); const rest = sel.filter(u => !siege.includes(u)); if (rest.length) GR.groupMove(rest, d.g0.x, d.g0.z, null, dbl ? true : undefined);
+      if (siege.length) { for (const u of siege) GR.command(u, { type: 'breach', w: wid, run: dbl || undefined }); const rest = sel.filter(u => !siege.includes(u)); if (rest.length) GR.commandGroup(rest, d.g0.x, d.g0.z, null, dbl ? true : undefined);
         toast(siege.length === 1 ? `${siege[0].name}: on the wall` : `${siege.length} units open fire on the wall`); sfx('ack'); hud(true); return; }
-      if (d.line) { const w = hyp(d.g1.x - d.g0.x, d.g1.z - d.g0.z); GR.groupMove(sel, (d.g0.x + d.g1.x) / 2, (d.g0.z + d.g1.z) / 2, lineFace(d), dbl || undefined, w); }
-      else GR.groupMove(sel, d.g0.x, d.g0.z, null, dbl ? true : undefined);
+      if (d.line) { const w = hyp(d.g1.x - d.g0.x, d.g1.z - d.g0.z); GR.commandGroup(sel, (d.g0.x + d.g1.x) / 2, (d.g0.z + d.g1.z) / 2, lineFace(d), dbl || undefined, w); }
+      else GR.commandGroup(sel, d.g0.x, d.g0.z, null, dbl ? true : undefined);
       sfx('ack'); hud(true); }
   });
   ov.addEventListener('wheel', e => { if (!V.on) return; e.preventDefault(); V.cam.dist = clamp(V.cam.dist * Math.pow(1.0015, e.deltaY), 35, 9000); }, { passive: false });
@@ -649,7 +651,8 @@ function bindInput() {
     if (k === ' ') { e.preventDefault(); if (G.phase === 'battle') G.paused = !G.paused; hud(true); }
     else if (k === 'r') { const on = !V.sel.every(u => u.run); for (const u of V.sel) u.run = on; hud(true); }
     else if (k === 'f') { const on = !V.sel.every(u => !u.fire); for (const u of V.sel) u.fire = !on; hud(true); }
-    else if (k === 'h') { for (const u of V.sel) GR.order(u, { type: 'halt' }); hud(true); }
+    else if (k === 'h') { for (const u of V.sel) GR.command(u, { type: 'halt' }); hud(true); }
+    else if (k === 'g') { const L = V.sel.filter(u => u.pc); if (L.length) { GR.release(L); toast(`${L.length > 1 ? L.length + ' cohorts go' : L[0].name + ' goes'} back to the legate's plan`); } hud(true); }
     else if (k === 'c') { const u = V.sel[0]; if (V.cam.follow || !u) V.cam.follow = null; else follow(u); hud(true); }
     else if (k === 'escape') { V.sel = []; hud(true); }
     else if (k === 'a' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); V.sel = mine(); hud(true); }
@@ -674,7 +677,7 @@ function bindInput() {
     else if (g === 'spd') { V.speedI = (V.speedI + 1) % 3; G.speed = [1, 2, 4][V.speedI]; hud(true); }
     else if (g === 'run') { const on = !V.sel.every(u => u.run); for (const u of V.sel) u.run = on; hud(true); }
     else if (g === 'fire') { const on = !V.sel.every(u => !u.fire); for (const u of V.sel) u.fire = !on; hud(true); }
-    else if (g === 'halt') { for (const u of V.sel) GR.order(u, { type: 'halt' }); hud(true); }
+    else if (g === 'halt') { for (const u of V.sel) GR.command(u, { type: 'halt' }); hud(true); }
     else if (g === 'quit') { if (G.over || G.phase !== 'battle') return; // a second click within three seconds confirms (an artifact's frame may block confirm())
       if (V.quitT && performance.now() - V.quitT < 3000) { V.quitT = 0; b.textContent = 'Abandon'; GR.finish(1, 'The assault is abandoned: the legions on the ground are left to the garrison.'); }
       else { V.quitT = performance.now(); b.textContent = 'Click again to abandon'; setTimeout(() => { if (V.quitT && performance.now() - V.quitT >= 2900) { V.quitT = 0; b.textContent = 'Abandon'; } }, 3000); } }

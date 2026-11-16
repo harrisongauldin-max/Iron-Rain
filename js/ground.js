@@ -677,6 +677,12 @@ export function order(u, o) {
   if (o.type === 'breach') { if (!canBreach(u)) { u.order = null; return; } u.target = null; if (o.run != null) u.run = o.run; u.path = null; }
   if (o.type === 'halt') { u.order = null; u.path = null; u.target = null; u.vx = u.vy = 0; u.hold = true; }
 }
+// The player's orders (ground battles chat). A cohort the player has never ordered follows the legate's plan (the
+// side's AI commander, run for the player's side on the units still in its hands); once the player orders it, it is
+// his (u.pc) until he hands it back with release().
+export function command(u, o) { if (u.gone || u.state === 'rout' || u.state === 'fall') return; u.pc = true; order(u, o); }
+export function commandGroup(us, ...a) { for (const u of us) if (!u.gone && u.state !== 'rout' && u.state !== 'fall') u.pc = true; groupMove(us, ...a); }
+export function release(us) { for (const u of us) { if (!u.pc) continue; u.pc = false; u.hold = false; if (!u.T.air) { u.order = null; u.path = null; } } }
 // a group move keeps its shape: each unit's offset from the group's centre is turned to the new facing
 export function groupMove(us, x, y, face, run, width) {
   us = us.filter(u => !u.gone && u.state !== 'rout' && u.state !== 'fall'); if (!us.length) return;
@@ -715,7 +721,7 @@ function tick(dt) {
   separate(dt);
   cAcc += dt; if (cAcc >= CSTEP) { combat(cAcc); cAcc = 0; }
   mAcc += dt; if (mAcc >= .5) { morale(mAcc); objectives(mAcc); mAcc = 0; }
-  for (const t of [0, 1]) { aiAcc[t] += dt; if (aiAcc[t] >= 2) { aiAcc[t] = 0; if (G.human !== t) ai(t); else autoUnits(t); if (t === 1) airThink(); } }
+  for (const t of [0, 1]) { aiAcc[t] += dt; if (aiAcc[t] >= 2) { aiAcc[t] = 0; if (G.human !== t) ai(t); else { autoUnits(t); ai(t, true); } if (t === 1) airThink(); } }
   checkEnd();
 }
 
@@ -1024,8 +1030,8 @@ const steady = (u, bx, by) => {
 };
 const strOf = L => L.reduce((a, u) => a + u.men * u.eq * (u.T.mel + u.wpn.dmg * u.wpn.rof * 10) / 10, 0); // fighting worth, not just heads
 const within = (L, x, y, r) => L.filter(u => hyp(u.x - x, u.y - y) < r);
-function ai(t) {
-  const mine = G.units.filter(u => u.team === t && fighting(u) && !u.T.air), foes = G.units.filter(u => u.team !== t && fighting(u) && !u.T.air); // the aircraft are airThink's (ground battles chat)
+function ai(t, auto) { // auto: the player's side, run for the units the player has not taken in hand (ground battles chat, R1)
+  const mine = G.units.filter(u => u.team === t && fighting(u) && !u.T.air && !(auto && u.pc)), foes = G.units.filter(u => u.team !== t && fighting(u) && !u.T.air); // the aircraft are airThink's (ground battles chat)
   if (!mine.length) return;
   G.aistat = G.aistat || {}; const st = k => { G.aistat[k] = (G.aistat[k] || 0) + 1; }; G.aist = st;
   return t === 1 ? defend(mine, foes) : attack(mine, foes);
@@ -1234,10 +1240,10 @@ function attack(mine, foes) {
     goTo(u, p.x, p.y, { a: face, run: hyp(u.x - p.x, u.y - p.y) > 400 });
   }
 }
-// the player's own units still look after themselves a little: a halted unit turns to face what shoots it,
-// and melee units the player left idle go for an enemy that walks up to them
+// the units the player has taken in hand still look after themselves a little: a halted unit turns to face what shoots
+// it, and melee units the player left idle go for an enemy that walks up to them
 function autoUnits(t) {
-  for (const u of G.units) { if (u.team !== t || !fighting(u) || u.melee || u.order || u.T.air) continue;
+  for (const u of G.units) { if (u.team !== t || !u.pc || !fighting(u) || u.melee || u.order || u.T.air) continue;
     const near = nearest(u, enemiesOf(t).filter(v => !v.T.air)); if (!near) continue; const d = Math.sqrt(dist2(u, near));
     if (d < u.wpn.range && !u.firing && u.fire) { u.a += clamp(angDiff(u.a, Math.atan2(near.y - u.y, near.x - u.x)), -.6, .6); }
     if (u.T.mel >= 8 && d < 120 && !u.hold) order(u, { type: 'attack', t: near, run: true }); }
