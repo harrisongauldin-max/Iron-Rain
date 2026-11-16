@@ -30,6 +30,7 @@ import * as SNS from './sensors.js';
 import * as CQ from './conquest.js';
 import * as QS from './quests.js';
 import { music, sfx } from './audio.js';
+import { projectTo } from './cam.js';
 const FF_X = 12;
 
 const $ = id => document.getElementById(id);
@@ -102,7 +103,8 @@ const strength = t => S.ships.reduce((a, s) => a + (s.team === t && !s.dead && !
 // called every frame while a campaign battle runs
 export function battleTick(dt) {
   if (!B) return;
-  if (B.deploy && !S.paused) { B.deploy = false; OPS.begin(); updBar(); }
+  if (B.deploy && !S.paused) { B.deploy = false; OPS.begin(); updBar(); frameFleets(); }
+  if (!B.deploy && B.camAuto && (B.camT = (B.camT || 0) - dt) <= 0) { B.camT = .5; keepFleetsInView(); }
   music(B.endT != null ? .2 : TC.T.contact ? 1 : .35);
   if (S.selection.length && S.selection.some(s => s.ally)) { const a = S.selection.find(s => s.ally); S.selection = S.selection.filter(s => !s.ally); if (!S.selection.length) S.inspect = a; } /* allied hulls take no orders from us */
   if ((B.cardT = (B.cardT || 0) - dt) <= 0) { B.cardT = .2; abilUI(); } /* the order card follows the selection, paused or not */
@@ -468,6 +470,25 @@ function frameField() {
   const t = B.space || !b || !b.r ? (foes.length ? centroid(foes) : c) : b, r = t === b ? b.r : 0;
   S.cam.x = (c.x + t.x) / 2; S.cam.y = (c.y + t.y) / 2; S.follow = null;
   const d = Math.hypot(c.x - t.x, c.y - t.y) + r * 2 + 3000; S.cam.z = Math.max(.0035, Math.min(.09, Math.min(S.W, S.H) / (d * 1.3)));
+}
+// U1: when the battle begins, both fleets' centres go on screen, clear of the bars top and bottom. Until the lines meet
+// the camera keeps them there, unless the player has moved it or is following a ship
+const CAM_BOX = [.1, .14, .9, .8];   // left, top, right, bottom, as fractions of the screen
+const camP = {};
+function fleetCentres() { const out = []; for (const t of [0, 1]) { const L = mobile(t).filter(s => !s.offField && !s.def.fighter && !s.def.shell); if (L.length) out.push(centroid(L)); } return out; }
+function inBox(P) { for (const c of P) { projectTo(camP, c.x, c.y); if (!camP.ok || camP.x < S.W * CAM_BOX[0] || camP.x > S.W * CAM_BOX[2] || camP.y < S.H * CAM_BOX[1] || camP.y > S.H * CAM_BOX[3]) return false; } return true; }
+export function frameFleets() {
+  const P = fleetCentres(); if (!P.length) return;
+  let x = 0, y = 0; for (const c of P) { x += c.x; y += c.y; } x /= P.length; y /= P.length;
+  const d = P.length > 1 ? Math.hypot(P[0].x - P[1].x, P[0].y - P[1].y) : 0;
+  S.follow = null; S.cam.x = x; S.cam.y = y; S.cam.z = Math.max(.0006, Math.min(.06, Math.min(S.W, S.H) / (d * 1.2 + 6000)));
+  for (let i = 0; i < 24 && !inBox(P); i++) S.cam.z *= .85;
+  B.camAuto = true; B.camSet = { x: S.cam.x, y: S.cam.y, z: S.cam.z };
+}
+function keepFleetsInView() {
+  const c = S.cam, k = B.camSet;
+  if (S.follow || TC.T.contact || !k || Math.abs(c.x - k.x) > 1 || Math.abs(c.y - k.y) > 1 || Math.abs(c.z / k.z - 1) > 1e-3) { B.camAuto = false; return; } /* the player has the camera now */
+  if (!inBox(fleetCentres())) frameFleets();
 }
 function holdOff(r) { for (const x of r.ships) x.offField = true; const set = new Set(r.ships); S.ships = S.ships.filter(s => !set.has(s)); S.selection = S.selection.filter(s => !set.has(s)); B.res.push(r); }
 function arrive(r) {
