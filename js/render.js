@@ -751,8 +751,21 @@ function applySurface(v) {
   if (U.texel) U.texel.value.set(1 / t.W, 2 / t.W); if (U.hmap) { U.hmap.value = t.hgt; U.hasH.value = t.hgt ? 1 : 0; } if (U.clouds) { U.clouds.value = t.clouds; U.hasClouds.value = t.clouds ? 1 : 0; }
   if (t.clouds) { if (!v.clouds) { v.clouds = new THREE.Mesh(GEO.sphere, cloudMat({ storms: v.b.id === 'earth' ? STORMS.earthClouds : null, lightning: v.b.id === 'earth' || v.b.id === 'venus' })); v.clouds.scale.setScalar(1.012); v.clouds.renderOrder = 2; v.g.add(v.clouds); } v.clouds.material.uniforms.map.value = t.clouds; }
   // the ground itself (model builder's hook): the mesh raised by the height field, small bodies lumpy; gas giants and the Sun stay round
-  if (!v.b.gas && v.b.kind !== 'star' && (t.hgtArr || (v.b.km || 1e4) < 300)) { if (!t.geo) t.geo = planetGeo(t.hgtArr, t.W, t.H, { km: v.b.km || 1e4, amp: t.clouds ? .009 : .013, seg: t.W >= 1536 ? 256 : t.W >= 1024 ? 192 : 128, seed: [...v.b.id].reduce((a, c) => a + c.charCodeAt(0), 0) }); if (v.mesh.geometry !== t.geo) v.mesh.geometry = t.geo; }
-  v.mesh.visible = true;
+  if (!v.b.gas && v.b.kind !== 'star' && (t.hgtArr || (v.b.km || 1e4) < 300)) { if (!t.geo) { t.geoOpts = { km: v.b.km || 1e4, amp: t.clouds ? .009 : .013, seed: [...v.b.id].reduce((a, c) => a + c.charCodeAt(0), 0) }; t.geo = planetGeo(t.hgtArr, t.W, t.H, { ...t.geoOpts, seg: t.W >= 1536 ? 256 : t.W >= 1024 ? 192 : 128 }); } if (v.mesh.geometry !== t.geo) v.mesh.geometry = t.geo; }
+  v.mesh.visible = true; v.lod = -1;
+}
+// a world's spheres at the detail its disc needs: the full 256-segment sphere (65k triangles, and the same again for the
+// cloud deck and the air) only when the disc is big on the screen; 96 segments under 160 px, 40 under 40 px. On the
+// campaign map this takes the worlds from ~900k triangles a frame to under 100k. Height-mapped grounds get their own
+// coarser copies, built once each.
+const LOD_PX = [40, 160];
+function lodFor(v, pr) {
+  const lv = pr < LOD_PX[0] ? 0 : pr < LOD_PX[1] ? 1 : 2; if (v.lod === lv) return; v.lod = lv;
+  const sph = lv === 2 ? GEO.sphere : lv === 1 ? (GEO.sphereMid || (GEO.sphereMid = new THREE.SphereGeometry(1, 96, 48))) : (GEO.sphereLo || (GEO.sphereLo = new THREE.SphereGeometry(1, 40, 20)));
+  const t = GEN.have[v.b.id], hi = t && t.geo && v.b.kind !== 'star' && !v.b.gas ? t.geo : null;
+  let g = sph; if (hi) { if (lv === 2) g = hi; else { const k = lv === 1 ? 'geoMid' : 'geoLo'; g = t[k] || (t[k] = planetGeo(t.hgtArr, t.W, t.H, { ...t.geoOpts, seg: lv === 1 ? 96 : 40 })); } }
+  if (v.mesh.geometry !== g) v.mesh.geometry = g;
+  if (v.clouds && v.clouds.geometry !== sph) v.clouds.geometry = sph; if (v.atmo && v.atmo.geometry !== sph) v.atmo.geometry = sph;
 }
 // the outline of a world as the camera really sees it: the sphere's horizon circle (a sphere under perspective is
 // wider than r·k at its centre and sits off its projected centre) sampled and projected to the screen, so an overlay
@@ -1113,7 +1126,7 @@ function sceneFrame() {
     if (v.corona) { v.corona.position.set(x, 0, y); const cs = Math.max(b.r * 14, 300 / z); v.corona.scale.set(cs, cs, 1); v.corona.material.opacity = .4; }
     glintFor(v, x, y, b.r * z, z, onScr(b.x, b.y, 40));
     if (!vis) continue;
-    v.g.position.set(x, 0, y); v.g.scale.setScalar(b.r); v.g.rotation.set(v.tilt, 0, 0); v.mesh.rotation.y = v.face + S.time * v.spin;
+    lodFor(v, b.r * z * DPR); v.g.position.set(x, 0, y); v.g.scale.setScalar(b.r); v.g.rotation.set(v.tilt, 0, 0); v.mesh.rotation.y = v.face + S.time * v.spin;
     const EU = v.mesh.material.uniforms; if (EU.ecl) { const pb = b.kind === 'moon' ? BODIES[b.parent] : null; if (pb) { EU.ecl.value = eclipseK(b.x, b.y, pb.x, pb.y, pb.r, { x: sunP.x + O.x, z: sunP.z + O.y }); if (EU.ecl.value > 0) EU.eclCol.value.setRGB(...(pb.pal && pb.pal.atmo && !pb.gas ? [.45, .14, .08] : [.2, .2, .24])); } else EU.ecl.value = 0; }
     if (v.clouds) { v.clouds.rotation.y = v.face + 1.3 + S.time * (v.spin + v.cspin); v.clouds.material.uniforms.sunPos.value.copy(sunP); v.mesh.material.uniforms.cloudOff.value = -(1.3 + S.time * v.cspin) / TAU; }
     if (v.extra) v.extra.rotation.y = v.face + S.time * v.spin;
@@ -1291,7 +1304,7 @@ function renderOrrery(L) {
     glintFor(v, x, y, P.r * z, z, onScr(P.x, P.y, 40));
     if (!vis) continue;
     const b = v.b, par = P.parent ? L.pos[P.parent] : null, rot = par ? Math.atan2(par.x - P.x, par.y - P.y) + .35 + moonSpin() : spinPhase(b, L, bodyVis.indexOf(v)); // a moon keeps (roughly) one face to its parent
-    v.g.position.set(x, 0, y); v.g.scale.setScalar(P.r); v.g.rotation.set(v.tilt, 0, 0); v.mesh.rotation.y = v.face + rot;
+    lodFor(v, P.r * z * DPR); v.g.position.set(x, 0, y); v.g.scale.setScalar(P.r); v.g.rotation.set(v.tilt, 0, 0); v.mesh.rotation.y = v.face + rot;
     if (v.clouds) { v.clouds.rotation.y = v.face + 1.3 + rot + performance.now() / 1000 * v.cspin * 3; v.clouds.material.uniforms.sunPos.value.copy(sunP); v.mesh.material.uniforms.cloudOff.value = -(1.3 + performance.now() / 1000 * v.cspin * 3) / TAU; }
     const EU = v.mesh.material.uniforms; if (EU.ecl) { if (par) { const k = eclipseK(P.x, P.y, par.x, par.y, par.r, { x: sp.x, z: sp.y }), pv = bodyVis.find(q => q.b.id === P.parent); EU.ecl.value = k; if (k > 0) EU.eclCol.value.setRGB(...(pv && pv.b.pal && pv.b.pal.atmo && !pv.b.gas ? [.45, .14, .08] : [.2, .2, .24])); } else EU.ecl.value = 0; }
     if (v.extra) v.extra.rotation.y = v.face;

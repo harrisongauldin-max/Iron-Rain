@@ -6,7 +6,7 @@ import { NH, CH, MAP, BIOME, G, heightAt } from './ground.js';
 import { S } from './state.js';
 import { Fn, float, vec2, vec3, vec4, uniform, uniformArray, attribute, varying, positionGeometry, positionWorld, normalWorld, cameraPosition, cameraViewMatrix, cameraProjectionMatrix, uv,
   mx_noise_float, mx_fractal_noise_float, mx_worley_noise_float, smoothstep, mix, dot, cross, sqrt, normalize, length, fract, floor, max, min, clamp, pow, abs, select, sin, cos, step, exp, hash,
-  transformNormalToView, texture } from 'three/tsl';
+  transformNormalToView, texture, If } from 'three/tsl';
 
 const one = float(1), lum = c => dot(c, vec3(.3, .55, .15));
 const col3 = h => { const c = new THREE.Color(h); return vec3(c.r, c.g, c.b); };
@@ -25,7 +25,7 @@ function trample(x, y, r, heavy) { const sc = TROD_N / MAP, cx = x * sc, cy = y 
 const trodden = p => { const v = trodT.sample(p.xz.div(MAP)).r, heavy = step(900, v), t0 = v.sub(heavy.mul(1000)), age = T.sub(t0); return vec2(clamp(one.sub(age.div(180)), 0, 1).mul(step(0, age)).mul(step(.5, v)), heavy); };
 const CHAR = { phobos: [1, 0, 0, 0], deimos: [1, 0, 0, 0], luna: [.35, 0, 0, 0], mercury: [.5, .4, 0, 0], mars: [.25, .6, 0, 0], venus: [0, 0, 0, 0], earth: [0, 0, 0, 0], titan: [0, .5, 0, 0],
   europa: [0, 0, 1, 0], ganymede: [.3, 0, .8, 0], callisto: [.6, 0, .4, 0], triton: [.1, 0, .8, 0], rhea: [.5, 0, .5, 0], io: [.2, 0, 0, 1], _ice: [.2, 0, .7, 0] }; // the Sun and the cloud cover, shared by the dome and the ground (the dome sets them)
-let dome = null;
+let dome = null, sunShadow = null, frameN = 0;
 // the clouds, as the dome paints them and as the ground wears their shadows: one noise, in world metres, drifting with the clock
 const cloudN = q => mx_fractal_noise_float(vec3(q.x.mul(.00075), q.y.mul(.00075), T.mul(.006)), 4, 2.1, .5, 1).mul(.5).add(.5);
 const cloudCover = n => smoothstep(one.sub(coverU), one.sub(coverU).add(.32), n);
@@ -33,8 +33,11 @@ const cloudCover = n => smoothstep(one.sub(coverU), one.sub(coverU).add(.32), n)
 const cloudShadow = p => { const lean = sunDirU.xz.div(max(sunDirU.y, .2)).mul(float(2600).sub(p.y)); return cloudCover(cloudN(p.xz.add(lean).add(T.mul(9)))).mul(step(.01, coverU)); };
 // shell impacts: the last 24, as (x, z, radius, time); the ground wears a scorch at each for a minute
 const SCORCH_N = 24, scorchA = uniformArray(Array.from({ length: SCORCH_N }, () => new THREE.Vector4(0, 0, 0, -1e9)), 'vec4'); let scorchI = 0;
-const scorchMask = p => { let k = float(0); for (let i = 0; i < SCORCH_N; i++) { const e = scorchA.element(i), d = length(p.xz.sub(e.xy)), age = T.sub(e.w), fade = one.sub(smoothstep(30, 75, age)).mul(step(0, age)).mul(step(.5, e.z));
-  const rag = mx_noise_float(vec3(p.x.mul(.6), p.z.mul(.6), e.w)).mul(.35).add(one), m = smoothstep(e.z.mul(1.05), e.z.mul(.3), d.mul(rag)); k = max(k, m.mul(fade)); } return k; };
+// one ragged-edge noise serves every slot (it used to be one per slot: 24 noises a pixel), and a slot nothing has hit is
+// skipped by a branch on its uniform, which costs the GPU nothing
+const scorchMask = p => { const k = float(0).toVar(), rag = mx_noise_float(vec3(p.x.mul(.6), p.z.mul(.6), 2.5)).mul(.35).add(one).toVar();
+  for (let i = 0; i < SCORCH_N; i++) { const e = scorchA.element(i); If(e.z.greaterThan(.5), () => { const d = length(p.xz.sub(e.xy)), age = T.sub(e.w), fade = one.sub(smoothstep(30, 75, age)).mul(step(0, age));
+    const m = smoothstep(e.z.mul(1.05), e.z.mul(.3), d.mul(rag)); k.assign(max(k, m.mul(fade))); }); } return k; };
 
 // ---------------------------------------------------------------- the ground
 // Vertex colours carry only the broad shape: the biome's height ramp, slope shading and a little grain. What grows,
@@ -100,7 +103,7 @@ export function terrainMaterial(M, B) {
     // rubble and cover: a little darker and rougher
     c.mulAssign(one.sub(mk.w.mul(.12)));
     // the world's own character, near the camera: craters, dunes, pressure ridges in the ice, sulphur
-    { const chr = charU, q = p.xz, inWater = M.seaH >= 0 ? smoothstep(-1, 1, p.y.sub(M.seaH)) : one, land = one.sub(mk.y).mul(inWater).mul(near);
+    If(near.greaterThan(0).and(charU.x.add(charU.y).add(charU.z).add(charU.w).greaterThan(0)), () => { const chr = charU, q = p.xz, inWater = M.seaH >= 0 ? smoothstep(-1, 1, p.y.sub(M.seaH)) : one, land = one.sub(mk.y).mul(inWater).mul(near).toVar();
       // craters: cellular rings at two scales, a dark floor inside a raised bright rim
       const w1 = mx_worley_noise_float(vec3(q.mul(.018), 7.3)), w2 = mx_worley_noise_float(vec3(q.mul(.06).add(3.1), 2.2));
       const cr = (w, r) => { const rim = smoothstep(r - .06, r, w).mul(one.sub(smoothstep(r, r + .05, w))), floor_ = one.sub(smoothstep(r - .25, r - .06, w)); return rim.mul(.45).sub(floor_.mul(.22)); };
@@ -110,24 +113,24 @@ export function terrainMaterial(M, B) {
       const ripple = sin(q.x.mul(.9).add(q.y.mul(.4)).add(bend.mul(3))).mul(.5).add(.5).mul(one.sub(smoothstep(80, 500, length(p.sub(cameraPosition)))));
       c.mulAssign(one.add(dune.sub(.5).mul(.5).add(ripple.sub(.5).mul(.22)).mul(chr.y).mul(land).mul(one.sub(mk.x))));
       // pressure ridges: ridged noise picks out thin lines, dark blue-grey, at two scales, with a pale lip beside each
-      const rg = (sc, sd) => one.sub(abs(mx_noise_float(vec3(q.mul(sc), sd)))), l1 = smoothstep(.94, 1, rg(.035, 4.4)), l2 = smoothstep(.955, 1, rg(.12, 8.8)), lip1 = smoothstep(.84, .94, rg(.035, 4.4)).mul(one.sub(l1));
+      const rg = (sc, sd) => one.sub(abs(mx_noise_float(vec3(q.mul(sc), sd)))), r1 = rg(.035, 4.4).toVar(), l1 = smoothstep(.94, 1, r1), l2 = smoothstep(.955, 1, rg(.12, 8.8)), lip1 = smoothstep(.84, .94, r1).mul(one.sub(l1));
       const crack = l1.add(l2.mul(.6)).mul(chr.z).mul(land); // the lineae: dark, a little rust in them, with a pale lip of fresh ice either side
       c.assign(mix(c, c.mul(vec3(.5, .42, .4)), min(crack.mul(.9), .9))); c.mulAssign(one.add(lip1.mul(chr.z).mul(.14).mul(land)));
       // sulphur: yellow and orange patches with a dark ring, where the ground is thinnest
-      const sul = smoothstep(.5, .8, mx_fractal_noise_float(vec3(q.mul(.01), 5.5), 3, 2, .5, 1).mul(.5).add(.5)), sulC = mix(vec3(.9, .75, .2), vec3(.85, .4, .12), mx_noise_float(vec3(q.mul(.04), 9)).mul(.5).add(.5));
-      c.assign(mix(c, sulC, sul.mul(chr.w).mul(.75).mul(land))); c.mulAssign(one.sub(smoothstep(.35, .5, mx_fractal_noise_float(vec3(q.mul(.01), 5.5), 3, 2, .5, 1).mul(.5).add(.5)).mul(one.sub(sul)).mul(chr.w).mul(.25).mul(land))); }
+      const sulN = mx_fractal_noise_float(vec3(q.mul(.01), 5.5), 3, 2, .5, 1).mul(.5).add(.5).toVar(), sul = smoothstep(.5, .8, sulN).toVar(), sulC = mix(vec3(.9, .75, .2), vec3(.85, .4, .12), mx_noise_float(vec3(q.mul(.04), 9)).mul(.5).add(.5));
+      c.assign(mix(c, sulC, sul.mul(chr.w).mul(.75).mul(land))); c.mulAssign(one.sub(smoothstep(.35, .5, sulN).mul(one.sub(sul)).mul(chr.w).mul(.25).mul(land))); });
     // the seabed in the shallows: a caustic web of light, two cellular patterns drifting over each other
-    if (M.seaH >= 0) { const under = smoothstep(.4, -1.2, p.y.sub(M.seaH)).mul(smoothstep(-16, -3, p.y.sub(M.seaH))).mul(near);
-      const w1 = mx_worley_noise_float(vec3(p.x.mul(.22).add(T.mul(.35)), p.z.mul(.22).sub(T.mul(.2)), T.mul(.3))), w2 = mx_worley_noise_float(vec3(p.x.mul(.31).sub(T.mul(.25)), p.z.mul(.31).add(T.mul(.3)), T.mul(.22).add(5)));
-      const caus = smoothstep(.45, .85, w1).mul(smoothstep(.4, .85, w2)).mul(2.2).add(smoothstep(.6, .95, w1).mul(.6));
-      c.mulAssign(one.add(caus.mul(under).mul(.55))); }
+    if (M.seaH >= 0) { const under = smoothstep(.4, -1.2, p.y.sub(M.seaH)).mul(smoothstep(-16, -3, p.y.sub(M.seaH))).mul(near).toVar();
+      If(under.greaterThan(.002), () => { const w1 = mx_worley_noise_float(vec3(p.x.mul(.22).add(T.mul(.35)), p.z.mul(.22).sub(T.mul(.2)), T.mul(.3))), w2 = mx_worley_noise_float(vec3(p.x.mul(.31).sub(T.mul(.25)), p.z.mul(.31).add(T.mul(.3)), T.mul(.22).add(5)));
+        const caus = smoothstep(.45, .85, w1).mul(smoothstep(.4, .85, w2)).mul(2.2).add(smoothstep(.6, .95, w1).mul(.6));
+        c.mulAssign(one.add(caus.mul(under).mul(.55))); }); }
     // shell scorches: blackened ground with an ash-pale rim, fading over a minute
     const sk = scorchMask(p).toVar(); c.assign(mix(c, mix(c.mul(.22), vec3(.1, .09, .08), .6), sk.mul(.9)));
     c.mulAssign(one.add(smoothstep(.02, .12, sk).mul(one.sub(smoothstep(.12, .3, sk))).mul(.35)));
     // trodden ground: where formations have walked the grass is flattened and the soil shows; where they have driven it is cut up and dark; snow goes grey
-    { const tr = trodden(p), k = tr.x.mul(one.sub(mk.y)).mul(near), deep = tr.y;
+    If(near.greaterThan(0), () => { const tr = trodden(p), k = tr.x.mul(one.sub(mk.y)).mul(near).toVar(), deep = tr.y.toVar();
       c.assign(mix(c, mix(c.mul(vec3(.72, .64, .55)), c.mul(vec3(.5, .44, .4)), deep), k.mul(float(.8).add(deep.mul(.2)))));
-      c.mulAssign(one.add(mx_noise_float(vec3(p.x.mul(.5), p.z.mul(.5), 3)).mul(.1).mul(k).mul(deep))); } // ruts
+      c.mulAssign(one.add(mx_noise_float(vec3(p.x.mul(.5), p.z.mul(.5), 3)).mul(.1).mul(k).mul(deep))); }); // ruts
     // the clouds' shadows crossing the ground
     c.mulAssign(one.sub(cloudShadow(p).mul(.42)));
     c.mulAssign(one.sub(wetU.mul(.28).mul(one.sub(mk.x.mul(.5))))); // rain darkens the ground, bare soil and pavement most
@@ -144,9 +147,10 @@ export function terrainMaterial(M, B) {
   m.normalNode = Fn(() => {
     const p = positionWorld.toVar(), d = length(p.sub(cameraPosition)), near = one.sub(smoothstep(700, 2600, d)).toVar(), e = float(.9);
     const hgt = q => clump(q).mul(1.6).add(mx_noise_float(q.mul(.42)).mul(.5));
-    const h0 = hgt(p), hx = hgt(p.add(vec3(e, 0, 0))), hz = hgt(p.add(vec3(0, 0, e)));
-    const k = near.mul(.9).mul(one.add(one.sub(clamp(normalWorld.y, 0, 1)).mul(2)));
-    const Nw = normalize(normalWorld.add(vec3(h0.sub(hx).mul(k), 0, h0.sub(hz).mul(k))));
+    const Nw = normalWorld.toVar();
+    If(near.greaterThan(0), () => { const h0 = hgt(p), hx = hgt(p.add(vec3(e, 0, 0))), hz = hgt(p.add(vec3(0, 0, e))); // twelve noises, only where the bump shows
+      const k = near.mul(.9).mul(one.add(one.sub(clamp(normalWorld.y, 0, 1)).mul(2)));
+      Nw.assign(normalize(normalWorld.add(vec3(h0.sub(hx).mul(k), 0, h0.sub(hz).mul(k))))); });
     return transformNormalToView(Nw);
   })();
   m.roughnessNode = Fn(() => { const mk2 = attribute('mask', 'vec4'), p = positionWorld, pud = smoothstep(.55, .85, mx_noise_float(vec3(p.x.mul(.05), p.z.mul(.05), 2.5)).mul(.5).add(.5)); // puddles gather in the hollows of the noise
@@ -185,8 +189,9 @@ export function waterMaterial(M, B) {
   m.roughnessNode = Fn(() => float(.07).add(smoothstep(3.5, .2, dep).mul(.5)))();
   m.normalNode = Fn(() => {
     const p = positionWorld, d = length(p.sub(cameraPosition)), near = one.sub(smoothstep(1200, 6000, d)), e = float(.7);
-    const h0 = wave(p), hx = wave(p.add(vec3(e, 0, 0))), hz = wave(p.add(vec3(0, 0, e))), k = near.mul(.5);
-    return transformNormalToView(normalize(vec3(h0.sub(hx).mul(k), 1, h0.sub(hz).mul(k))));
+    const N = vec3(0, 1, 0).toVar();
+    If(near.greaterThan(0), () => { const h0 = wave(p), hx = wave(p.add(vec3(e, 0, 0))), hz = wave(p.add(vec3(0, 0, e))), k = near.mul(.5); N.assign(normalize(vec3(h0.sub(hx).mul(k), 1, h0.sub(hz).mul(k)))); });
+    return transformNormalToView(N);
   })();
   return m;
 }
@@ -209,6 +214,7 @@ export function skyDome(sc, B, world, sunLight) {
   const ca2 = (a, b) => dot(a, b);
   const zen = new THREE.Color(K.zen), hor = fog.clone().lerp(sky, .35).multiplyScalar(K.stars >= .8 ? .3 : 1), sunC = new THREE.Color(B.sun); // an airless horizon is nearly as black as its zenith
   const dir = sunLight.position.clone().sub(sunLight.target.position).normalize(); sunDirU.value.copy(dir); coverU.value = K.cover; for (const e of scorchA.array) e.set(0, 0, 0, -1e9);
+  if (sunLight.shadow) { sunLight.shadow.autoUpdate = false; sunLight.shadow.needsUpdate = true; sunShadow = sunLight.shadow; frameN = 0; } // the shadow map (the whole city, millions of triangles) is redrawn every other frame: the Sun stands still, only the figures move
   charU.value.fromArray(CHAR[world] || (B === BIOME._ice ? CHAR._ice : [0, 0, 0, 0]));
   const geo = new THREE.SphereGeometry(26000, 48, 24), m = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, depthWrite: false, fog: false });
   const zenV = vec3(zen.r, zen.g, zen.b), horV = vec3(hor.r, hor.g, hor.b), sunV = vec3(sunC.r, sunC.g, sunC.b), starK = float(K.stars), cover = K.cover;
@@ -435,9 +441,9 @@ function lightningTick(dt, camera) {
   g.instanceCount = n; for (const kk of ['iP', 'iS']) { const a = g.attributes[kk]; a.clearUpdateRanges(); a.addUpdateRange(0, n * a.itemSize); a.needsUpdate = true; }
 }
 // per frame: the clock, the dome follows the camera, dust and scorches, weather, the tracers' light
-export function tick(dt, camera) { T.value += dt; if (dome) dome.position.copy(camera.position); const step = G.paused ? 0 : dt * (G.speed || 1); dustTick(dt, camera); weatherTick(dt, camera); lightsTick(dt, step); shaftsTick(camera); shimmerTick(dt, step); lightningTick(dt, camera);
+export function tick(dt, camera) { T.value += dt; if (dome) dome.position.copy(camera.position); if (sunShadow) { frameN++; if (frameN % 2 === 0 || S.gx && S.gx.shadowEvery === 1) sunShadow.needsUpdate = true; } const step = G.paused ? 0 : dt * (G.speed || 1); dustTick(dt, camera); weatherTick(dt, camera); lightsTick(dt, step); shaftsTick(camera); shimmerTick(dt, step); lightningTick(dt, camera);
   if (trodDirty) { trodTex.needsUpdate = true; trodDirty = false; } }
-export function dispose() { dome = null; puffMesh = null; puffs = null; wxMesh = null; wx = null; litMesh = null; lights = []; shaftMesh = null; shimMesh = null; shims = []; boltMesh = null; bolt = null; wetU.value = 0; flashU.value = 0; trodArr.fill(0); trodTex.needsUpdate = true; }
+export function dispose() { dome = null; sunShadow = null; puffMesh = null; puffs = null; wxMesh = null; wx = null; litMesh = null; lights = []; shaftMesh = null; shimMesh = null; shims = []; boltMesh = null; bolt = null; wetU.value = 0; flashU.value = 0; trodArr.fill(0); trodTex.needsUpdate = true; }
 export const _dbg = () => ({ scorch: scorchA.array.map(v => v.toArray()), live: puffs ? puffs.filter(p => p.life > 0).length : -1, n: puffMesh ? puffMesh.geometry.instanceCount : -1, T: T.value, mesh: !!puffMesh, dome: !!dome, units: G.units ? G.units.filter(u => !u.gone && Math.hypot(u.vx, u.vy) > .6).length : -1 });
 export const _forceWeather = kind => { _FORCE = kind; }; let _FORCE = null;
 export const _probe = { trample, bolt: () => { nextBolt = 0; } };
