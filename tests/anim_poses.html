@@ -40,7 +40,8 @@ function frame(now) {
     if (lab.only && (lab.only[0] !== k || lab.only[1] !== c)) return;
     const sp = { idle: 0, walk: u.T.walk, run: u.T.run, fire: 0, hit: 0, melee: 0, back: u.T.walk * .6, turn: 0, fly: 14 }[c];
     if (c === 'fly' && k !== 'gold' && k !== 'lead') return;
-    u.a = c === 'turn' ? Math.PI / 2 + Math.sin(t * .8) * 1.4 : Math.PI / 2;
+    // turn: faces a new way every 3 s (a quarter turn, then back), turning over a second, as a cohort does on an order
+    u.a = c === 'turn' ? Math.PI / 2 + (Math.floor(t / 3) % 2 ? 1 - Math.min(1, (t % 3)) : Math.min(1, (t % 3))) * Math.PI / 2 * (Math.floor(t / 6) % 2 ? -1 : 1) : Math.PI / 2;
     const dir = c === 'back' ? -1 : 1; u.vx = Math.cos(u.a) * sp * dir; u.vy = Math.sin(u.a) * sp * dir;
     u.x = x; u.y = z; if (u.men == null) u.men = 60;
     // firing: the target swings from his left to his right and back, near and far, so the aim shows; hit: a man lost every 1.5 s

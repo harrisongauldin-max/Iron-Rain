@@ -57,6 +57,8 @@ const GRAY = {
     if (c[1] < .12 && Math.abs(c[0]) > .05) return side ? 11 : 12;
     if (c[1] < .53 && Math.abs(c[0]) > .05) return side ? 2 : 4;
     if (c[1] < .97 && Math.abs(c[0]) > .05) return side ? 1 : 3;
+    if (Math.abs(c[0] - .16) < .02 && s[0] < .08 && c[1] > 1.04 && c[1] < 1.3) return 7; // the rifle's stock and grip, carried in the right hand
+    if (Math.abs(c[0]) < .14 && s[1] > .2 && s[2] < .1) return 5; // webbing straps down the chest front stay on the chest
     if (Math.abs(c[0]) > .05 && c[2] > .03 && c[1] > 1.04 && c[1] < 1.46) return 7; // both arms and the rifle: one group
     if (c[1] > 1.6 && Math.abs(c[0]) < .15) return 6;
     return c[1] < 1.04 ? 0 : 5;
@@ -145,7 +147,7 @@ export function tagBones(geo, kind) {
 // A5 head nod, cape, banner, —   A6 right arm pitch, swing, thrust, elbow  A7 left arm pitch, swing, thrust, elbow
 // A8 hip abduction R, L (+ = foot out to the right), —, —
 // Angles about X are positive backward (a limb hanging down swings its end back; a foot dips its toe).
-const NV = 9, PER_ROW = 64;
+const NV = 10, PER_ROW = 64;
 const v3 = a => vec3(a[0], a[1], a[2]);
 const rX = (p, c, s) => vec3(p.x, p.y.mul(c).sub(p.z.mul(s)), p.y.mul(s).add(p.z.mul(c)));
 const rY = (p, c, s) => vec3(p.x.mul(c).add(p.z.mul(s)), p.y, p.z.mul(c).sub(p.x.mul(s)));
@@ -161,7 +163,7 @@ export function animMesh(im, kind) {
   const SR = v3(R.shR), SL = v3(R.shL), ER = v3(R.elR), EL = v3(R.elL), CP = v3(R.cape), BP = v3(R.banner), PV = vec3(0, R.hipR[1], 0);
   const m = im.material;
   m.positionNode = Fn(() => {
-    const b = attribute('bone', 'float'), [a0, a1, a2, a3, a4, a5, a6, a7, a8] = A;
+    const b = attribute('bone', 'float'), [a0, a1, a2, a3, a4, a5, a6, a7, a8, a9] = A;
     const p = positionGeometry.toVar(), n = normalGeometry.toVar();
     const rot = (cond, piv, fn, c, s) => { p.assign(select(cond, fn(p.sub(piv), c, s).add(piv), p)); n.assign(select(cond, fn(n, c, s), n)); };
     const is = v => b.equal(v);
@@ -187,10 +189,13 @@ export function animMesh(im, kind) {
     // the pelvis carries it all: turned, tilted, shifted over the stance foot, at the height the legs allow
     // (the legs lean in against the sideways shift so the planted foot stays put, and the tilt is the pelvis's and the
     // body's above it, not the legs')
-    const all = b.greaterThan(-1), legs = legR.or(legL), body = is(0).or(up), lb = a3.x.mul(-1 / R.leg);
-    rot(legs, select(legR, HR, HL), rZ, cos(lb), sin(lb));
-    rot(legs, PV, rY, cos(a8.z), sin(a8.z));                            // the legs keep the step's heading: the pelvis's swing (and a turn to aim) turns in the hip sockets, not under the planted feet
-    rot(all, PV, rY, cos(a2.z), sin(a2.z)); rot(body, PV, rZ, cos(a2.w), sin(a2.w)); p.assign(p.add(vec3(a3.x, a3.y, 0)));
+    const all = b.greaterThan(-1), legs = legR.or(legL), body = is(0).or(up);
+    // each leg turns in its own hip socket to keep its heading (the step's way, against the pelvis's swing, and a planted
+    // foot's against the body turning above it), and leans so its foot stays where the body's turn left it (a9)
+    const Hs = select(legR, HR, HL), ly = select(legR, a8.z, a8.w); rot(legs, Hs, rY, cos(ly), sin(ly));
+    const lw = Hs.y.sub(p.y).mul(1 / R.leg).clamp(0, 1).toVar(); p.assign(select(legs, p.add(vec3(select(legR, a9.x, a9.z).mul(lw), 0, select(legR, a9.y, a9.w).mul(lw))), p));
+    rot(all, PV, rY, cos(a2.z), sin(a2.z)); rot(body, PV, rZ, cos(a2.w), sin(a2.w));
+    p.assign(p.add(vec3(a3.x.mul(select(legs, lw.oneMinus(), 1)), a3.y, 0))); // the pelvis shifts over the stance foot; the legs lean, the feet stay
     rot(all, vec3(0, 0, 0), rX, cos(a3.z), sin(a3.z));                // a fall, about the feet
     const cy = cos(a0.w), sy = sin(a0.w);
     normalLocal.assign(rY(n, cy, sy));
@@ -250,6 +255,7 @@ function legH(R, sd, F, K, P) {
 // ---------------------------------------------------------------- per-unit clocks
 const U = new Map();   // per unit: stride phase, gait, turn, melee and fire blends, flight, losses, ground slope
 const POSE = new Map(); // per unit, per figure: the last pose written (near figures only), for shots
+const FIG = new Map();  // per unit, per figure: its heading last frame and each foot's twist against the body (feet stay put while the body turns)
 function unitClock(u, t, kind, scale) {
   let s = U.get(u.id); if (!s) { s = { ph: Math.random(), g: 0, a: u.a, turn: 0, fire: 0, fly: 0, mel: 0, run: 0, t, hits: [], hn: 0, men: null, gx: 0, gy: 0 }; U.set(u.id, s); }
   const dt = Math.max(0, Math.min(.1, t - s.t)); s.t = t; if (dt <= 0) return s;
@@ -268,7 +274,7 @@ function unitClock(u, t, kind, scale) {
   // flexed (heel strike) to extended (toe-off), so the cycle rate is v·β / (leg · (sin F_hs − sin F_to)) at full stride
   const k = s.run, beta = lerp(.6, .4, k), reach = reachOf(R, k) * scale;
   const f = v > .3 ? v * beta / Math.max(.15, reach * Math.max(.35, s.g)) : .7;
-  s.ph += f * dt * (along < -.3 ? -1 : 1);       // walking backward plays the stride backward
+  s.f = f; s.ph += f * dt * (along < -.3 ? -1 : 1);       // walking backward plays the stride backward
   s.mel += ((u.melee ? 1 : 0) - s.mel) * (1 - Math.exp(-dt * 6));
   // men lost since the last look: a flinch runs through the ranks, from the side the blow came
   if (s.men != null && u.men < s.men) { const foe = u.melee && u.melee.x != null ? u.melee : u.aim && u.aim.x != null ? u.aim : null;
@@ -295,24 +301,42 @@ export function animFigure(im, i, x, y, z, yaw, u, kind, n, h, scale, t, mv = 0)
   const fv = typeof mv === 'number' ? mv : mv[4], vf = typeof mv === 'number' ? mv : mv[5], vr = typeof mv === 'number' ? 0 : mv[6];
   const s = unitClock(u, t, kind, scale), R = D.rig, st = R.style, q = Q; q.fill(0);
   const T = u.T || {}, walk = T.walk || 3;
-  // how much the figure walks: the unit's gait, or the figure's own shuffle into its place
-  const g = clamp(Math.max(s.g, (1 - s.fly) * clamp((fv - .4) / walk, 0, 1) * .9), 0, 1), idle = 1 - g, k = s.run;
+  // turning on the spot: a planted foot keeps its heading while the body turns above it (the hips take the twist); once
+  // a foot is twisted far enough he steps, lifting each foot in turn and setting it down square to his new facing
+  let FU = FIG.get(u.id); if (!FU) FIG.set(u.id, FU = new Map()); let fs = FU.get(n);
+  if (!fs || t - fs.t > .5 || t < fs.t) FU.set(n, fs = { t, yaw, oR: 0, oL: 0, tw: 0, xp: 0, dR: true, dL: true });
+  const fdt = Math.min(.1, t - fs.t); let dy = yaw - fs.yaw; dy -= TAU * Math.round(dy / TAU); fs.t = t; fs.yaw = yaw;
+  const fTw = Math.max(Math.abs(fs.oR), Math.abs(fs.oL)), still = s.fly < .5 && fv < .8;
+  fs.need = still && (fTw > .3 || fs.need && fTw > .04); // start stepping at 0.3 rad of twist, stop once square again
+  fs.yr = (fs.yr || 0) + (Math.abs(dy) / Math.max(fdt, 1e-3) - (fs.yr || 0)) * (1 - Math.exp(-fdt * 8));
+  fs.tw += ((fs.need ? 1 : 0) - fs.tw) * (1 - Math.exp(-fdt * 7)); fs.xp += fdt * fs.tw * (1.1 + 1.3 * Math.min(1.6, fs.yr)); // quicker steps than a march, quicker still in a fast turn
+  const tw = fs.tw;
+  // how much the figure walks: the unit's gait, or the figure's own shuffle into its place, or stepping round
+  const g = clamp(Math.max(s.g, (1 - s.fly) * clamp((fv - .4) / walk, 0, 1) * .9, .6 * tw), 0, 1), idle = 1 - g, k = s.run;
   // its own stride: Grays keep step within a few percent, the others each their own pace and size
-  const own = st === 'gray' ? .02 : .07, c = s.ph * (1 + own * (h - .5)) + (st === 'gray' ? (h - .5) * .06 : h);
+  const own = st === 'gray' ? .02 : .07, c = s.ph * (1 + own * (h - .5)) + (st === 'gray' ? (h - .5) * .06 : h) + fs.xp;
   let amp = (1 + (hash(h, 3) - .5) * .1) * g; // stride size, ±5% from one man to the next
   // which way he is going, in his own frame: forward, or crabbing sideways as the outer files do when the line wheels.
   // People turn the hips toward their way and keep the chest on the enemy; what is left over is taken in side steps.
-  let hipTurn = 0, tr = 0;
-  if (fv > .5 && g > .05 && s.fly < .5) { const th = Math.atan2(vr, Math.max(-.2, vf)), lim = .9; hipTurn = clamp(th, -lim, lim) * Math.min(1, fv / 1.5); const rest = th - hipTurn; tr = Math.tan(clamp(rest, -1.2, 1.2)) * Math.min(1, g); amp *= Math.max(.25, Math.abs(Math.cos(rest))); }
+  let hipTurn = 0, tr = 0, cr = 1;
+  if (fv > .5 && g > .05 && s.fly < .5) { const th = Math.atan2(vr, Math.max(-.2, vf)), lim = .9; hipTurn = clamp(th, -lim, lim) * Math.min(1, fv / 1.5); const rest = th - hipTurn; tr = Math.tan(clamp(rest, -1.2, 1.2)) * Math.min(1, g); cr = Math.max(.25, Math.abs(Math.cos(rest))); amp *= cr; }
+  // each man's stride sweeps his planted foot back at his own speed, not the unit's: a man still catching up to his place,
+  // or turning on the spot, steps in place for the part of the stride his own speed doesn't cover
+  let sweepV = (s.f || .7) * reachOf(R, k) * scale * Math.max(amp, 1e-3) / lerp(.6, .4, k); const fS = fv * cr; // (the part of his speed the stride carries; a crab step takes the rest sideways)
+  if (g > .05 && s.fly < .5 && fS > sweepV) { const up = Math.min(1.4, fS / sweepV); amp *= up; sweepV *= up; } // catching up: a longer stride
+  const mt = g > .05 && s.fly < .5 ? 1 - clamp(fS / (.8 * sweepV), 0, 1) : 0; // (a man's own ±5% stride is left alone)
   const heavy = st === 'shell' ? 1.9 : st === 'obs' ? 1.45 : 1;
   // ---- legs: from the gait cycle, blended to a stance
   leg(c, k, LR, R, 'R'); leg(c + .5, k, LL, R, 'L');
   // the stance, standing: weight on one foot for a few seconds, then the other; the free knee relaxed
   const wP = 7 + 5 * h, w = Math.sin(TAU * (t / wP + h)) , ws = Math.sign(w) * Math.pow(Math.abs(w), .35); // a held shift with a quick change
   const brace = .1 * s.fire;
-  const Fr = lerp(.1 * Math.max(0, -ws) + .03, LR[0] * amp + (1 - amp) * .03, g), Fl = lerp(.1 * Math.max(0, ws) + .03, LL[0] * amp + (1 - amp) * .03, g);
+  if (mt > 0) { const kb = 1 + .5 * mt * tw; LR[1] *= kb; LL[1] *= kb; LR[2] *= 1 - mt; LL[2] *= 1 - mt; } // a clear lift when stepping round
+  let Fr = lerp(.1 * Math.max(0, -ws) + .03, LR[0] * amp + (1 - amp) * .03, g), Fl = lerp(.1 * Math.max(0, ws) + .03, LL[0] * amp + (1 - amp) * .03, g);
   const Kr = lerp(.05 + .34 * Math.max(0, -ws) + brace, LR[1] * amp + (1 - amp) * .08, g), Kl = lerp(.05 + .34 * Math.max(0, ws) + brace, LL[1] * amp + (1 - amp) * .08, g);
   let Pr = lerp(-.04 * Math.max(0, -ws), LR[2] * amp, g), Pl = lerp(-.04 * Math.max(0, ws), LL[2] * amp, g);
+  // stepping in place: the hip flexes just enough that the ankle stays straight under it however the knee bends
+  if (mt > 0) { const fz = (sd, K) => Math.atan2(R['Ls' + sd] * Math.sin(K), R['Lt' + sd] + R['Ls' + sd] * Math.cos(K)); Fr = lerp(Fr, fz('R', Kr), mt); Fl = lerp(Fl, fz('L', Kl), mt); }
   // side steps: each foot swings out and plants beside its own hip (the feet never cross), as the sagittal sweep does
   // the foot's sideways place keeps a fixed ratio to its fore-aft place (tan of the crab angle), so it moves with the
   // ankle's even stance sweep and stays planted on the diagonal; the swing carries it back out in the same proportion
@@ -332,6 +356,10 @@ export function animFigure(im, i, x, y, z, yaw, u, kind, n, h, scale, t, mv = 0)
   // the pelvis sits as high as the lowest planted foot allows (on flat ground, the standing leg); a leg whose ground is
   // higher than that bends to fit (knee and hip together, as in a squat), so no foot sinks and no planted foot floats
   const Y = downR && downL ? Math.min(nR, nL) : downR ? nR : downL ? nL : Math.max(nR, nL);
+  // a foot on the ground (within a couple of centimetres, whatever the stride clock says) holds its heading as the body
+  // turns, up to a hip's reach; a lifted one swings round to square with the body
+  const sq = 1 - Math.exp(-fdt * 10), oLim = .9, onR = Y - nR < .02 * R.leg, onL = Y - nL < .02 * R.leg;
+  fs.oR = onR ? clamp(fs.oR - dy, -oLim, oLim) : fs.oR * (1 - sq); fs.oL = onL ? clamp(fs.oL - dy, -oLim, oLim) : fs.oL * (1 - sq);
   // bend by dk at the knee and re-solve the hip so the ankle stays exactly over the same ground (a planted foot holds)
   const keepF = (sd, F, K, dk) => { const z = ankZ(R, sd, F, K); let f = F + dk / 2; for (let it = 0; it < 4; it++) { const e = ankZ(R, sd, f, K + dk) - z, d = R['Lt' + sd] * Math.cos(f) + R['Ls' + sd] * Math.cos(f - K - dk); f -= e / Math.max(.2, d); } return f; };
   const fit = (sd, F, K, P, ab) => { const hAt = dk => need(sd, keepF(sd, F, K, dk), K + dk, P, ab) - Y; let dk = 0;
@@ -414,7 +442,9 @@ export function animFigure(im, i, x, y, z, yaw, u, kind, n, h, scale, t, mv = 0)
   q[16] = twist; q[17] = lean; q[18] = bend; q[19] = headYaw;
   q[20] = nod; q[21] = cape; q[22] = banner; q[23] = 0;
   q[24] = rp; q[25] = ry; q[26] = rz; q[27] = re; q[28] = lp; q[29] = ly; q[30] = lz; q[31] = le;
-  q[34] = (hipTurn - pYaw) * g; // legs keep the step's heading; standing, they follow the pelvis
+  q[34] = (hipTurn - pYaw) * g + fs.oR; q[35] = (hipTurn - pYaw) * g + fs.oL; // each leg keeps its step's heading and its foot's twist
+  // what the body turned under a held foot moved the hip round the pelvis's centre: the leg leans by that much at the foot
+  for (const [sd, o, j] of [['R', fs.oR - pYaw * g, 36], ['L', fs.oL - pYaw * g, 38]]) { const hx = R['hip' + sd][0], hz = R['hip' + sd][2], c = Math.cos(o), sn = Math.sin(o); q[j] = hx * (c - 1) + hz * sn; q[j + 1] = hz * (c - 1) - hx * sn; }
   write(D, i, q);
   // keep the pose, so a shot can leave this figure's own barrel and land on a figure (shotEnds)
   let PU = POSE.get(u.id); if (!PU) POSE.set(u.id, PU = new Map()); let pe = PU.get(n); if (!pe) PU.set(n, pe = { q: new Float32Array(NV * 4), kind, t: 0 });
@@ -427,7 +457,7 @@ export function animFigure(im, i, x, y, z, yaw, u, kind, n, h, scale, t, mv = 0)
 }
 function write(D, i, q) { const o = i * NV * 4, a = D.data; for (let k = 0; k < NV * 4; k++) a[o + k] = q[k]; }
 export function animEnd(meshes) { for (const k in meshes) { const D = meshes[k].userData.anim; if (D) D.tex.needsUpdate = true; } }
-export function animReset() { U.clear(); DY.length = 0; POSE.clear(); }
+export function animReset() { U.clear(); DY.length = 0; POSE.clear(); FIG.clear(); }
 // for tests: the gait's leg angles, the pelvis height rule, and the rest geometry
 export const gaitProbe = { leg, legH, reachOf, RIG };
 
