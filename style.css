@@ -1587,7 +1587,7 @@ body.strat #sndp{top:64px;right:12px;z-index:45;max-height:calc(100vh - 84px)}
 
 /* ---------------------------------------------------------------- U4: ability windows and costs */
 #bcmd .btn.ab .abt{display:flex;flex-direction:column;align-items:flex-start;gap:1px;line-height:1.1}
-#bcmd .btn.ab .abw{font:9px/1.15 var(--sans,inherit);letter-spacing:.02em;text-transform:none;color:var(--dim);max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#bcmd .btn.ab .abw{font:9px/1.15 var(--sans,inherit);letter-spacing:.02em;text-transform:none;color:var(--dim);max-width:175px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #bcmd .btn.ab .abw i{display:block;font-style:normal;color:#c79a8a;opacity:.85}
 #bcmd .btn.ab.live{border-color:var(--gold-hi);box-shadow:0 0 0 1px rgba(232,200,126,.5),0 0 14px rgba(232,200,126,.35);animation:abLive 1.6s ease-in-out infinite}
 #bcmd .btn.ab.live .abw{color:var(--gold-hi)}

@@ -269,9 +269,9 @@ function ordersThatMattered() {
   const out = [];
   for (const o of B.orders || []) {
     const [d0, t0] = win(o.t - 25, o.t), [d1, t1] = win(o.t, o.t + 25);
-    if (d1 + t1 < 40 && d0 + t0 < 40) continue; /* nothing much was happening */
+    if (d1 + t1 < 40 || o.t + 25 > S.time) continue; /* nothing much happened after it, or the battle ended first */
     const r0 = (d0 + 30) / (t0 + 30), r1 = (d1 + 30) / (t1 + 30), k = r1 / r0;
-    out.push({ t: Math.round(o.t - (B.t0 ?? 0)), what: o.what, who: o.who, k: +k.toFixed(2), dealt: Math.round(d1), taken: Math.round(t1) });
+    out.push({ t: Math.round(o.t - (B.t0 ?? 0)), what: o.what, who: o.who, k: +k.toFixed(2), r0: +r0.toFixed(1), r1: +r1.toFixed(1), dealt: Math.round(d1), taken: Math.round(t1) });
   }
   if (B.approach) { const f = L.find(e => e[1] + e[2] > 0); if (f) { const [d, t] = win(f[0], f[0] + 25); out.push({ t: 0, what: 'Approach: ' + (approaches().find(a => a[0] === B.approach) || [, B.approach])[1], who: '', k: +((d + 30) / (t + 30)).toFixed(2), dealt: Math.round(d), taken: Math.round(t), first: true }); } }
   return out.filter(o => Math.abs(Math.log(o.k)) > .25).sort((a, b) => Math.abs(Math.log(b.k)) - Math.abs(Math.log(a.k))).slice(0, 5).sort((a, b) => a.t - b.t);
