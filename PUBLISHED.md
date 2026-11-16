@@ -4,6 +4,7 @@ Each publish of `main` to the claude.ai artifact (slug `fc8b77cf-d69b-4cca-9154-
 
 | Artifact version | Date | Commit | What changed |
 |---|---|---|---|
+| 1794854510-8395 | 2026-11-16 | 60e2db0 | `js/groundanim.js`: ground figures — turning on the spot steps round with planted feet holding their heading (feet skate 0.1–0.25 m over a quarter turn, was 0.3–0.7); legs turn in their own hip sockets and lean to keep a held foot put; each man's stride matches his own speed (steady walk slide 0.007–0.055 m/s, crab steps 0.02–0.03 m/s, starts 0.4–0.6 m); Gray straps and rifle stock re-bound after art pass 2. |
 | 1794854446-fbd2 | 2026-11-16 | d59357c | `js/parley.js`: A1, lower surrender odds — Steady commanders yield at .38 (was .75) and Patient at .5 (was 1). `js/politics.js`: A3, a Rim that moves — when one rival is winning, the third power joins the war on the winner (allying with the loser) at most once per 30 weeks, and once a power falls the survivor may start the last war on the winner. |
 | 1794854254-d7d0 | 2026-11-16 | 27bd0ca | `js/battle.js`: U1, the battle camera opens on the fleets. Begin frames both fleets' centres clear of the bars wherever the deploy view was left, and keeps them in view until the lines meet unless the player takes the camera. New `tests/battle_camera.py`. |
 | 1794854149-7812 | 2026-11-16 | 9056d00 | `js/ground.js`, `js/groundview.js`: R1 — the legions act without orders. Cohorts the player hasn't ordered follow the legate's plan (the side's AI commander); an order makes a cohort the player's, G hands it back. |
