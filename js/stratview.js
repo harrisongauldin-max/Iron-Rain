@@ -29,6 +29,7 @@ import { OPTS, saveOpts } from './ui.js';
 import { toggleGfx, gfxOpen } from './gfxmenu.js';
 import { toggleSound, soundOpen } from './audiomenu.js';
 import * as SL from './sessionlog.js';
+import * as IB from './inbox.js';
 import { DEFS } from './data.js';
 import * as SV from './save.js';
 import * as PA from './parley.js';
@@ -476,9 +477,9 @@ const NEEDW = { idle: ['fleet idle', 'fleets idle'], slots: ['world can build', 
   rain: ['Iron Rain ready', 'Iron Rains ready'], threat: ['enemy inbound', 'enemies inbound'] };
 const SCREENS = [['faction', '⚜', 'Faction', 'F', 'Your power: the throne, taxes, regions and victory'], ['diplo', '☍', 'Diplomacy', 'P', 'War, peace and alliances with the other powers'], ['tech', '⚗', 'Research', 'T', 'Technology and traditions'],
   ['court', '♛', 'Court', 'C', 'The Houses, laws and your agents'], ['classes', '⚒', 'Ship classes', 'Y', 'Design how your hulls are fitted out'], ['list', '☰', 'Fleets & worlds', 'L', 'Every fleet, world and commander you hold'],
-  ['ledger', '⌇', 'Ledger', 'H', 'The war in numbers, and the Chronicle'], ['rivals', '☠', 'Rivals', 'V', 'Enemy commanders who have beaten us or got away'], ['feed', '✉', 'Dispatches', 'R', 'Every report, not just this week\'s']];
+  ['ledger', '⌇', 'Ledger', 'H', 'The war in numbers, and the Chronicle'], ['rivals', '☠', 'Rivals', 'V', 'Enemy commanders who have beaten us or got away'], ['feed', '✉', 'Inbox', 'R', 'Every dispatch in three tiers: decide now, this week, and for the record']];
 function drawRail() {
-  const pend = { tech: TE.pendingChoice(C.player).length > 0, court: !!(C.motion && C.motion[C.player]) || AG.agentsOf(C.player).some(a => a.state === 'idle') };
+  const pend = { feed: IB.counts().now > 0, tech: TE.pendingChoice(C.player).length > 0, court: !!(C.motion && C.motion[C.player]) || AG.agentsOf(C.player).some(a => a.state === 'idle') };
   $('srail').innerHTML = `<div class="rh">Screens</div>` + SCREENS.map(([a, ic, l, k, t]) => `<button class="rbtn ${pend[a] ? 'pend' : ''} ${(a === 'list' && V.list) || (a === 'feed' && V.feedOpen) ? 'on' : ''}" data-a="${a}" data-tip="${tipA(`<div class='th'>${l}</div><div class='tdim'>${t}</div><div class='tgold'>Hotkey ${k}</div>`)}"><i>${ic}</i><span>${l}</span><kbd>${k}</kbd></button>`).join('');
 }
 function drawEnd() {
@@ -534,11 +535,32 @@ function drawObj() {
   if (sits.length) h += `<div class="oh">Situations</div>` + sits.map(x => `<div class="sitrow" data-tip="${tipA(`<div class='th'>${x.name}</div><div class='tdim'>${x.desc}</div><div class='tbad'>At 100% it breaks.</div>`)}"><span>${x.name}</span><div class="bar cap"><i style="width:${Math.round(x.prog)}%"></i></div><b>${Math.round(x.prog)}%</b></div>`).join('');
   el.innerHTML = h;
 }
-// ---------------------------------------------------------------- the dispatch feed (top right)
+// ---------------------------------------------------------------- the dispatch inbox (top right; inbox.js sorts it)
+const IB_T = { now: ['Decide now', 'Threats and openings at our worlds and fleets this week'], week: ['This week', 'The rest of this week\u2019s news that concerns us'], record: ['For the record', 'Routine reports, and everything from earlier weeks'] };
+function ibRow(l, tier, open) {
+  const i = C.log.indexOf(l), tip = esc(l.msg) + (l.at ? `<div class='tdim'>Click to go there</div>` : '');
+  return `<div class="frow ib-${tier} ${l.cls}" ${l.at ? `data-go="${l.at}"` : ''} ${open ? '' : `data-tip="${tipA(tip)}"`}><span class="lt">W${((l.turn - 1) % 52) + 1}</span><span class="fm">${esc(l.msg)}</span>${tier === 'now' ? `<button class="ibok" data-ibok="${i}" data-tip="${tipA('Handled: move it to This week')}">✓</button>` : ''}</div>`;
+}
 function drawFeed() {
-  const el = $('sfeed'), open = !!V.feedOpen, rows = (open ? C.log.slice(0, 60) : C.log.filter(l => l.turn >= C.turn - 1).slice(0, 3));
-  el.classList.toggle('open', open);
-  el.innerHTML = `<div class="fh" data-a="feed"><span>Dispatches${!open && C.log.filter(l => l.turn >= C.turn - 1).length > 3 ? ` <i>${C.log.filter(l => l.turn >= C.turn - 1).length - 3} more</i>` : ''}</span><em>${open ? 'Fold ▴' : 'All ▾'}</em></div>` + rows.map(l => `<div class="frow ${l.cls}" ${l.at ? `data-go="${l.at}"` : ''} ${open ? '' : `data-tip="${tipA(esc(l.msg) + (l.at ? `<div class='tdim'>Click to go there</div>` : ''))}"`}><span class="lt">W${((l.turn - 1) % 52) + 1}</span>${esc(l.msg)}</div>`).join('');
+  const el = $('sfeed'), open = !!V.feedOpen, B = IB.sort(open ? 60 : 0), nN = B.now.length, nW = B.week.length;
+  el.classList.toggle('open', open); el.classList.toggle('urgent', nN > 0);
+  const chips = `<span class="ibc">${nN ? `<b class="now">${nN} to decide</b>` : ''}${nW ? `<b>${nW} this week</b>` : ''}${!nN && !nW ? '<i>Nothing new</i>' : ''}</span>`;
+  let h = `<div class="fh" data-a="feed"><span>Inbox</span>${chips}<em>${open ? 'Fold ▴' : 'All ▾'}</em></div>`;
+  if (!open) {
+    const rows = [...B.now.slice(0, 3).map(l => [l, 'now'])]; for (const l of B.week) { if (rows.length >= 4) break; rows.push([l, 'week']); }
+    h += rows.map(([l, t]) => ibRow(l, t, false)).join('');
+    const more = nN + nW - rows.length; if (more > 0) h += `<div class="ibmore" data-a="feed">${more} more ▾</div>`;
+  } else {
+    V.ibFold = V.ibFold || { record: false };
+    for (const t of ['now', 'week', 'record']) {
+      const L = B[t], fold = !!V.ibFold[t];
+      h += `<div class="ibh ib-${t}" data-ibf="${t}" data-tip="${tipA(IB_T[t][1])}"><span>${IB_T[t][0]}</span><i>${L.length}${t === 'record' && L.length >= 60 ? '+' : ''}</i><em>${fold ? '▸' : '▾'}</em></div>`;
+      if (fold) continue;
+      if (!L.length) { h += `<div class="ibnone">${t === 'now' ? 'Nothing needs an answer this week.' : t === 'week' ? 'Nothing else this week.' : 'Nothing yet.'}</div>`; continue; }
+      h += L.map(l => ibRow(l, t, true)).join('');
+    }
+  }
+  el.innerHTML = h;
 }
 function toggleFeed() { V.feedOpen = !V.feedOpen; refresh(); }
 
@@ -812,7 +834,7 @@ function drawList() {
 
 // ---------------------------------------------------------------- clicks
 function onClick(e) {
-  const b = e.target.closest('[data-hl],[data-hlp],[data-hla],[data-dgive],[data-deal],[data-dclear],[data-propose],[data-law],[data-motion],[data-lg],[data-lm],[data-lf],[data-ctab],[data-honour],[data-marry],[data-recruit],[data-amis],[data-atgt],[data-attach],[data-arecall],[data-peace],[data-ally],[data-ransom],[data-release],[data-exec],[data-ttab],[data-tpick],[data-focus],[data-trad],[data-fit],[data-desig],[data-tax],[data-gov],[data-ungov],[data-govpick],[data-pickc],[data-siege],[data-promo],[data-war],[data-a],[data-bcancel],[data-scancel],[data-bld],[data-ship],[data-dz],[data-rcls],[data-tr],[data-selfl],[data-selw],[data-merge],[data-card],[data-go],[data-m],[data-need],[data-tab],[data-raid],[data-levy],[data-rising]'); if (!b || b.disabled) return;
+  const b = e.target.closest('[data-hl],[data-hlp],[data-hla],[data-dgive],[data-deal],[data-dclear],[data-propose],[data-law],[data-motion],[data-lg],[data-lm],[data-lf],[data-ctab],[data-honour],[data-marry],[data-recruit],[data-amis],[data-atgt],[data-attach],[data-arecall],[data-peace],[data-ally],[data-ransom],[data-release],[data-exec],[data-ttab],[data-tpick],[data-focus],[data-trad],[data-fit],[data-desig],[data-tax],[data-gov],[data-ungov],[data-govpick],[data-pickc],[data-siege],[data-promo],[data-war],[data-a],[data-bcancel],[data-scancel],[data-bld],[data-ship],[data-dz],[data-rcls],[data-tr],[data-selfl],[data-selw],[data-merge],[data-card],[data-ibok],[data-ibf],[data-go],[data-m],[data-need],[data-tab],[data-raid],[data-levy],[data-rising]'); if (!b || b.disabled) return;
   const d = b.dataset, me = C.player, s = V.sel; hideTip(); SL.click(d);
   if (d.m === 'nowithdraw') { toastS('You withdrew from this enemy here last week: this time you must fight', 'bad'); return; }
   if (d.m === 'noassault') { toastS('An assault from orbit needs leechCraft hulls in orbit', 'bad'); return; }
@@ -866,6 +888,8 @@ function onClick(e) {
   if (d.a === 'vhome') return homeView();
   if (d.a === 'vinner') return zoomTo('inner');
   if (d.a === 'vall') { S.cam.x = 0; S.cam.y = 0; S.cam.z = S.H * .45 / (42 * AU); return; }
+  if (d.ibok !== undefined) { IB.done(C.log[+d.ibok]); return refresh(); }
+  if (d.ibf) { V.ibFold = V.ibFold || {}; V.ibFold[d.ibf] = !V.ibFold[d.ibf]; return refresh(); }
   if (d.go) { if (modalOpen()) closeModal('ok'); V.sel = { w: d.go }; const P = LAY.pos[d.go]; S.cam.x = P.x; S.cam.y = P.y; if (S.cam.z < 1e-4) zoomTo(d.go); return refresh(); }
   if (d.selw) return select({ w: d.selw }, true);
   if (d.selfl) { const f = C.fleets.find(f => f.id === +d.selfl); return select(f ? { fl: f } : null, true); }

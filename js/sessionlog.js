@@ -6,7 +6,7 @@ import { OPTS, saveOpts } from './ui.js';
 const KEY = 'ironrain.sessionlog', MAX_EV = 4000;
 // the campaign's screens and actions: whatever is still unused at export is listed under neverUsed
 export const SCREENS = ['faction', 'diplo', 'tech', 'court', 'classes', 'ledger', 'rivals', 'feed', 'list', 'menu', 'legend', 'saves', 'gfx', 'snd'];
-export const ACTIONS = ['recruit', 'refit', 'split', 'raid', 'picket', 'levy', 'raise', 'scrap', 'hangars', 'desig', 'rain', 'rising', 'assault', 'half', 'dark', 'vall', 'vhome', 'vinner', 'objmin', 'imin', 'crelieve', 'cpick', 'bmenu'];
+export const ACTIONS = ['recruit', 'refit', 'split', 'raid', 'picket', 'levy', 'raise', 'scrap', 'hangars', 'desig', 'rain', 'rising', 'assault', 'half', 'dark', 'vall', 'vhome', 'vinner', 'objmin', 'imin', 'crelieve', 'cpick', 'bmenu', 'ibok'];
 const MODAL_SCREENS = new Set(['faction', 'diplo', 'tech', 'court', 'classes', 'ledger', 'rivals', 'menu', 'legend', 'saves']);
 const KEY_SCREEN = { f: 'faction', p: 'diplo', t: 'tech', c: 'court', y: 'classes', h: 'ledger', v: 'rivals', l: 'list', r: 'feed' };
 
@@ -45,6 +45,7 @@ function startPoll() { if (poll) return; poll = setInterval(() => { if (!isOn())
 export function click(d) {
   const l = log(); if (!l || !d) return;
   if (d.a) { if (SCREENS.includes(d.a)) return screen(d.a); bump(l.actions, d.a); return ev('act', { a: d.a }); }
+  if (d.ibok !== undefined) { bump(l.actions, 'ibok'); return ev('act', { a: 'ibok' }); }
   for (const k of ['tab', 'ctab', 'ttab', 'dtab', 'ltab']) if (d[k] !== undefined) { bump(l.tabs, k + ':' + d[k]); return ev('tab', { k, v: d[k] }); }
 }
 export function key(k) {
