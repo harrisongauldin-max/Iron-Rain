@@ -107,7 +107,7 @@ function eventTick() {
   lateTick();
   for (const f of ['rep', 'soc', 'rim']) {
     if (!C.fac[f].alive || rnd() > .14) continue;
-    const ok = Object.keys(EVENTS).filter(k => { const E = EVENTS[k], L = C.evLast[f + k]; return !(E.once && L) && !(L && C.turn - L < (E.cd || 20)); });
+    const ok = Object.keys(EVENTS).filter(k => { const E = EVENTS[k], L = C.evLast[f + k]; return !(E.once && L) && !(L && C.turn - L < (E.cd || 20)) && !(E.late && !fallenPowers().length); }); // the late cards wait for a power to fall
     for (const k of ok.sort(() => rnd() - .5)) {
       const t = EVENTS[k].when(f); if (t == null) continue;
       C.evLast[f + k] = C.turn; logCard(f, k);

@@ -116,8 +116,8 @@ export function open(spec, opts = {}) {
   if (!PW.hasMap(spec.world)) return Promise.resolve(null);
   init();
   return new Promise(resolve => {
-    const war = PW.newWar(spec), M = PW.MAPS[spec.world];
-    Object.assign(V, { resolve, spec, opts, war, M, human: opts.human || 'att', on: true, phase: 'plan', plan: new Map(), reserve: 0, selP: -1, selA: null, hover: -1, logSeen: 0, fc: null, fcT: 0, moves: [], weekLog: [] });
+    const war = opts.war || PW.newWar(spec), M = PW.MAPS[spec.world]; // opts.war: the campaign's own war (M3-UI), shown as it stands; its weeks are the campaign's
+    Object.assign(V, { resolve, spec, opts, war, M, human: opts.human || 'att', on: true, phase: opts.war ? 'war' : 'plan', plan: new Map(), reserve: 0, selP: -1, selA: null, hover: -1, logSeen: 0, fc: null, fcT: 0, moves: [], weekLog: [] });
     V.root.classList.remove('hide'); V.root.querySelector('#pwEnd').classList.add('hide');
     V.root.querySelector('#pwName').textContent = opts.title || M.name;
     V.root.querySelector('#pwK').textContent = opts.preview ? 'Planet map · preview' : 'The war for';
@@ -125,7 +125,8 @@ export function open(spec, opts = {}) {
     resize(); buildScene();
     const cap = M.provs.find(p => p.id === M.capital); look(8, 4, 3.4, true); // Helios, the main continent, in view
     V.planC = new Map(); V.withC = new Set();
-    if (V.human === 'def') { // the enemy's Rain comes down at once, where its legate would put it
+    if (opts.war) { flushLog(war.week); battles(null); } // the week's battles still to fight, if any
+    else if (V.human === 'def') { // the enemy's Rain comes down at once, where its legate would put it
       PW.land(war, PW.suggestPlan(spec).map(x => ({ ...x, cmdrs: [] })), Math.random, { defer: true }); flushLog(0); battles('landing'); }
     refresh(true);
     V.R.setAnimationLoop(frame);
@@ -328,7 +329,7 @@ async function fightBattle(prov) {
 }
 // ---------------------------------------------------------------- the week
 function endWeek() {
-  if (V.phase !== 'war' || V.war.over) return;
+  if (V.phase !== 'war' || V.war.over || V.opts.war) return;
   const before = new Map(V.war.armies.map(a => [a.id, a.prov])), ai = {}; ai[V.human === 'att' ? 'def' : 'att'] = PW.standIn;
   PW.weekMoves(V.war, { ai });
   // the pieces glide from where their stacks stood
@@ -342,7 +343,7 @@ function flushLog(week) { const L = V.war.log; if (V.logSeen < L.length) { const
 // ---------------------------------------------------------------- panels
 function refresh(full) {
   if (!V.scene) return; sync(); side(); info(); stats(); if (full) logPanel();
-  V.root.querySelector('#pwWeek').style.display = V.phase === 'war' ? '' : 'none';
+  V.root.querySelector('#pwWeek').style.display = V.phase === 'war' && !V.opts.war ? '' : 'none'; // in the campaign, End turn ends the week
   if (V.phase === 'plan') forecastSoon();
 }
 function stats() {
