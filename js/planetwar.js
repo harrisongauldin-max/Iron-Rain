@@ -380,3 +380,79 @@ export function forecast(spec, plan, n = 200) {
     if (war.over && war.over.won === 'att') won++; weeks += war.over ? war.over.week : 40; lost += war.land0 - menOf(war, 'att'); }
   return { win: won / n, weeks: weeks / n, lost: Math.round(lost / n) };
 }
+
+// ================================================================ THE AI'S COMMANDER (AI chat; task M3-AI)
+// aiPlanet(war, side) → orders like standIn's: [[armyId, toProv, men?], ...]. The campaign calls it for every side the
+// computer plays (camp.js planetAI). It draws up a handful of plans for the week and plays each out to the end of the
+// war a dozen times (the rest of the war with the stand-in on both sides, the same dice for every plan), and gives the
+// orders of the plan that wins most often. The plans:
+//   attacker: the stand-in's march · press: every stack takes the best fight it can win from where it stands (two
+//     boldnesses) · mass: the stacks close on the biggest one · the capital: everyone one step nearer Tyche · spread:
+//     the stacks not in a fight take the richest undefended provinces next door · hold
+//   defender: the stand-in's · strike: the posts next to a landing or an enemy stack hit it together while they can
+//     beat it, before more troops come down (two boldnesses), the capital's garrison sallying with what it can spare ·
+//     close up: the outer posts fall back one step toward the capital · hold
+// So it defends the capital when the war is lost elsewhere, hits landings while they are weak, and counterattacks
+// when a stack has outrun its support, because those are what win in the playing out.
+const AI_N = 12;
+const sideOf = s => s === 'att' ? 'def' : 'att';
+function aiPlans(war, side) {
+  const foe = sideOf(side), cap = M(war).capital, mine = war.armies.filter(a => a.side === side && a.men > 0 && !a.to), foeAt = id => sideMen(war, foe, id);
+  const plans = [standIn(war, side), []];
+  if (!mine.length) return plans;
+  const pw = (s, prov, men) => power(war, s, prov, men);
+  if (side === 'att') {
+    // press: each stack, biggest first, goes where it wins best (a walled city it can't storm this week is not a fight)
+    for (const th of [.5, .65]) { const sent = {}, out = [];
+      for (const a of mine.slice().sort((x, y) => y.men - x.men)) { if (foeAt(a.prov)) continue; let best = null, bs = 0;
+        for (const n of reach(war, a)) { const fd = foeAt(n), pr = war.provs[n], here = (sent[n] || 0) + sideMen(war, 'att', n) + a.men;
+          if (pr.own === 'att' && !fd) continue;
+          if (fd && pr.own === 'def' && pr.walls && here < fd * 2.2 && (pr.siege || 0) < 2) continue;
+          const p = fd ? oddsOf(pw('att', n, here), pw('def', n, fd)) : 1; if (p < th) continue;
+          const sc = P(war, n).pop * (n === cap ? 3 : 1) * p; if (sc > bs) { bs = sc; best = n; } }
+        if (best) { out.push([a.id, best]); sent[best] = (sent[best] || 0) + a.men; } }
+      plans.push(out); }
+    // mass on the biggest stack; the capital; spread
+    const big = mine.slice().sort((x, y) => y.men - x.men)[0], dB = distFrom(war, big.prov), dC = distFrom(war, cap);
+    plans.push(mine.filter(a => a !== big).map(a => [a.id, reach(war, a).filter(n => dB[n] < dB[a.prov] && !bySea(war.world, a.prov, n)).sort((x, y) => dB[x] - dB[y])[0]]).filter(o => o[1]));
+    plans.push(mine.map(a => [a.id, reach(war, a).filter(n => dC[n] < dC[a.prov]).sort((x, y) => dC[x] - dC[y] || foeAt(x) - foeAt(y))[0]]).filter(o => o[1]));
+    { const took = new Set(); plans.push(mine.filter(a => !foeAt(a.prov)).map(a => { const n = reach(war, a).filter(n => war.provs[n].own === 'def' && !foeAt(n) && !took.has(n)).sort((x, y) => P(war, y).pop - P(war, x).pop)[0]; if (n) took.add(n); return [a.id, n]; }).filter(o => o[1])); }
+  } else {
+    // strike: the enemy stacks, the most beatable first; the posts next door that are free go in together
+    const part = (a, e) => { if (a.prov !== cap) return a.men; const other = neighbours(war.world, cap).filter(n => n !== e).reduce((m, n) => Math.max(m, pw('att', n, foeAt(n))), 0);
+      return Math.round(Math.max(0, Math.min(a.men * .7, a.men - other / Math.max(.01, native(war, cap, 'def') * war.defQ) * 1.05))); };
+    for (const th of [.55, .7]) { const sent = new Set(), out = [];
+      const stacks = Object.keys(war.provs).filter(id => foeAt(id)).sort((x, y) => pw('att', x, foeAt(x)) - pw('att', y, foeAt(y)));
+      for (const e of stacks) { const near = mine.filter(a => !sent.has(a) && !foeAt(a.prov) && reach(war, a).includes(e) && !bySea(war.world, a.prov, e));
+        const men = near.reduce((s, a) => s + part(a, e), 0) + sideMen(war, 'def', e); if (!men) continue;
+        const p = 1 - oddsOf(pw('att', e, foeAt(e)), pw('def', e, men)); if (p < th) continue;
+        for (const a of near) { const m = part(a, e); if (m <= 0) continue; out.push(m < a.men ? [a.id, e, m] : [a.id, e]); sent.add(a); } }
+      plans.push(out); }
+    const dC = distFrom(war, cap);
+    plans.push(mine.filter(a => a.prov !== cap && !foeAt(a.prov)).map(a => [a.id, reach(war, a).filter(n => war.provs[n].own === 'def' && !foeAt(n) && dC[n] < dC[a.prov] && !bySea(war.world, a.prov, n)).sort((x, y) => dC[x] - dC[y])[0]]).filter(o => o[1]));
+  }
+  // the same plan drawn up twice is played out once
+  const seen = new Set(); return plans.filter(p => { const k = JSON.stringify(p); if (seen.has(k)) return false; seen.add(k); return true; });
+}
+// Harrison, 17 Nov: aiPlanet attacks now, and defends only once the Ground chat has re-tuned TUNE.def and the forecast
+// against it. The forecast, the legate's plan and the AI's Rain decision play the war out with the stand-in on both
+// sides; against aiPlanet defending, the legate's plan on Mercury is about 25%, not the 76% the forecast shows. Until
+// then the computer's garrisons keep the stand-in. Set AI_PLANET.defend (or pass { defend: true }) to turn it on.
+export const AI_PLANET = { defend: false };
+export function aiPlanet(war, side, { defend = AI_PLANET.defend } = {}) {
+  if (war.over) return [];
+  if (side === 'def' && !defend) return standIn(war, side);
+  const plans = aiPlans(war, side); if (plans.length === 1) return plans[0];
+  // called while the week's moves are given (weekMoves has counted the week): the other side has already ordered if any
+  // of its armies is on the march, so in the playing out it stands by its orders this week
+  const foe = sideOf(side), foeOrdered = war.armies.some(a => a.side === foe && a.to), s0 = JSON.stringify(war), seed = (war.week * 104729 + war.armies.length * 31 + 17) >>> 0;
+  let best = plans[0], bs = -1;
+  for (const plan of plans) { let sc = 0;
+    for (let k = 1; k <= AI_N; k++) { let s = (seed + k * 7919) >>> 0; const r = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+      const x = JSON.parse(s0); x.week--; const ai = { [side]: () => plan, [foe]: foeOrdered ? () => [] : standIn };
+      weekMoves(x, { ai, orbit: x.orbit }); for (const b of x.pending.slice()) resolve(x, b.prov, r); weekEnd(x);
+      while (!x.over && x.week < 40) weekTick(x, { ai: { att: standIn, def: standIn }, rnd: r, orbit: x.orbit });
+      const won = x.over ? x.over.won === side : side === 'def'; sc += (won ? 1 : 0) - (x.over ? x.over.week : 40) * .002; } // between plans as good, the shorter war (decision 5)
+    if (sc > bs + 1e-9) { bs = sc; best = plan; } }
+  return best;
+}

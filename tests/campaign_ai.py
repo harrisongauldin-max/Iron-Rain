@@ -69,7 +69,7 @@ RUN_JS = """async([MODE,TURNS,PARLEY,FALL])=>{const K=window.__CAMP.K, C=window.
       for (const id in C.worlds) { const w=C.worlds[id]; if (w.owner!==f||!w.lv.yard) continue; if (!room) continue; out.yardTot++; if (!w.sq.length && R.he>1500) out.yardIdle++; }
       if (nW(f)<=2 && F.some(o=>o!==f&&C.fac[o].alive&&K.relOf(f,o)==='war'&&(C.weary[o]||0)<55)) out.linger++; }
   }
-  const S=C.aiStats||{}; out.feint=S.feint||0; out.evade=S.evade||0; out.rally=S.rally||0; out.allied=S.allied||0; out.balJoin=S.balJoin||0; out.finalWar=S.finalWar||0; out.recall=S.recall||0; out.echelon=S.echelon||0; out.rallyLate=S.rallyLate||0; out.player=C.player; out.withdraw=S.withdraw||0; out.declined=S.declined||0; out.demandP=+(out.demandP||0).toFixed(2); out.closeShare=out.battles?+(out.close/out.battles).toFixed(3):0; out.ops=S.ops||C.opsLog||0; out.multi=S.multi||C.opsMulti||0; out.opFleets=S.ops?+(S.fleets/S.ops).toFixed(2):null;
+  const S=C.aiStats||{}; out.feint=S.feint||0; out.evade=S.evade||0; out.rally=S.rally||0; out.allied=S.allied||0; out.balJoin=S.balJoin||0; out.finalWar=S.finalWar||0; out.planetWars=(C.planetWars||[]).map(w=>w.world+':'+(w.by||'')+'>'+(w.won||(w.over&&w.over.won)||'?')).join(' '); out.recall=S.recall||0; out.echelon=S.echelon||0; out.rallyLate=S.rallyLate||0; out.player=C.player; out.withdraw=S.withdraw||0; out.declined=S.declined||0; out.demandP=+(out.demandP||0).toFixed(2); out.closeShare=out.battles?+(out.close/out.battles).toFixed(3):0; out.ops=S.ops||C.opsLog||0; out.multi=S.multi||C.opsMulti||0; out.opFleets=S.ops?+(S.fleets/S.ops).toFixed(2):null;
   out.inc={}; for (const f of F) out.inc[f]=C.fac[f].alive?Math.round(K.income(f).he):null;
   out.cut=S.cut||0; out.turn=C.turn; out.over=C.over||null;
   out.own={}; for (const id in C.worlds) out.own[C.worlds[id].owner]=(out.own[C.worlds[id].owner]||0)+1;
@@ -115,7 +115,7 @@ async def main():
         res = await asyncio.gather(*[one(p, a.mode, a.turns) for _ in range(a.runs)])
     for r, e in res:
         runs.append(r); errs += e
-        print(json.dumps({k: r.get(k) for k in ["turn", "own", "rel", "wars", "fell", 'ops', 'multi', 'idle', 'streak', 'streakAt', 'linger', 'peaceNearDead', 'fell', 'hoard', 'manMin', 'battles', 'close', 'enc', 'enc2080', 'parleys', 'demands', 'surr', 'demandP', 'allied', 'balJoin', 'finalWar', 'player', 'forced', 'recall', 'echelon', 'rallyLate', 'encK']}))
+        print(json.dumps({k: r.get(k) for k in ["turn", "own", "rel", "wars", "fell", 'ops', 'multi', 'idle', 'streak', 'streakAt', 'linger', 'peaceNearDead', 'fell', 'hoard', 'manMin', 'battles', 'close', 'enc', 'enc2080', 'parleys', 'demands', 'surr', 'demandP', 'allied', 'balJoin', 'finalWar', 'player', 'forced', 'recall', 'echelon', 'rallyLate', 'planetWars', 'encK']}))
     S = summarise(runs); S['mode'] = a.mode; S['turns'] = a.turns
     print('SUMMARY', json.dumps(S))
     os.makedirs(os.path.join(HERE, 'results'), exist_ok=True)

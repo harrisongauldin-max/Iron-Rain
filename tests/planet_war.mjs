@@ -52,7 +52,23 @@ for (const [name, shares] of Object.entries(PLANS)) {
   const fine = p0 === 1 && !war.pending.length && war.provs.ladon.own === 'att' && Math.abs(PW.menOf(war, 'att') - 2400) < 2 && sp.mode === 'drop' && sp.att.total === Math.round(3000 * 10 * war.attQ);
   console.log(`a deferred landing, settled from a fought result: ${fine ? 'ok' : 'WRONG'} (pending ${p0}, Ladon ${war.provs.ladon.own}, legions ${PW.menOf(war, 'att')})`);
   if (!fine) process.exitCode = 1; }
+// M3-AI (the AI chat): aiPlanet against the stand-in, on both sides, under every plan above. The same seeds for all
+// three pairings. On each side it must beat the stand-in by 10 points or more over all the plans, and do no worse in any
+// one plan than 60 wars' noise (8 points; Ladon and the highlands, 42% v 38% here, is 37.5% v 48% over 200 wars).
+// --aiseeds sets the wars a plan (60 by default: aiPlanet plays every week out a dozen times)
+let aiOk = true;
+if (PW.aiPlanet) { const aseeds = arg('aiseeds', 60), tot = { SS: 0, AS: 0, SA: 0 }; let n = 0;
+  console.log(`\naiPlanet against the stand-in (${aseeds} wars a plan; attacker's wins: stand-in v stand-in · aiPlanet attacking · aiPlanet defending)`);
+  for (const [name, shares] of Object.entries(PLANS)) { const r = {};
+    for (const [k, att, def] of [['SS', PW.standIn, PW.standIn], ['AS', PW.aiPlanet, PW.standIn], ['SA', PW.standIn, (w, sd) => PW.aiPlanet(w, sd, { defend: true })]]) { let won = 0, wk = 0; // defending: switched on here, though the campaign keeps it off for now (AI_PLANET.defend)
+      for (let s = 1; s <= aseeds; s++) { const rnd = rng(s * 7919 + 13), war = PW.newWar(spec); PW.land(war, shares.map(([prov, k]) => ({ prov, troops: Math.round(T * k) })), rnd);
+        while (!war.over && war.week < 40) PW.weekTick(war, { ai: { att, def }, rnd }); if (war.over && war.over.won === 'att') won++; wk += war.over ? war.over.week : 40; }
+      r[k] = won / aseeds; r[k + 'w'] = wk / aseeds; tot[k] += won / aseeds; }
+    n++; const fine = r.AS >= r.SS - .08 && r.SA <= r.SS + .08; if (!fine) aiOk = false;
+    console.log(`${name.padEnd(26)} ${(r.SS * 100).toFixed(0).padStart(3)}% · ${(r.AS * 100).toFixed(0).padStart(3)}% (${r.ASw.toFixed(1)} wk) · ${(r.SA * 100).toFixed(0).padStart(3)}% (${r.SAw.toFixed(1)} wk)  ${fine ? '' : '<- worse than the stand-in'}`); }
+  const up = (tot.AS - tot.SS) / n, down = (tot.SS - tot.SA) / n; if (up < .1 || down < .1) aiOk = false;
+  console.log(`aiPlanet attacking: +${(up * 100).toFixed(0)} points on average; defending: −${(down * 100).toFixed(0)} points for the attacker.  ${aiOk ? 'PASS' : 'FAIL'}`); }
 const ai = out[AI_PLAN].win, wins = Object.values(out).map(o => o.win), spread = Math.max(...wins) - Math.min(...wins), wk = out[AI_PLAN].weeks;
-const ok = ai >= .55 && ai <= .8 && spread >= .15 && wk >= 3 && wk <= 8;
+const ok = ai >= .55 && ai <= .8 && spread >= .15 && wk >= 3 && wk <= 8 && aiOk;
 console.log(`\n${AI_PLAN}: ${(ai * 100).toFixed(0)}% in ${wk.toFixed(1)} weeks; plans range ${(spread * 100).toFixed(0)} points.  ${ok ? 'PASS' : 'FAIL'}`);
 process.exit(ok && !process.exitCode ? 0 : 1);
