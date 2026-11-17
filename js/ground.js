@@ -91,11 +91,25 @@ export const G = { on: false };
 let R = Math.random;
 
 // ---------------------------------------------------------------- terrain
+// A province of a planet map (planetwar.js) fights on a field of its own: spec.site = { id, name, kind, terrain, field }.
+// The province that is the world's own field (Heliopolis on Mercury: site.field) keeps the world's city and its named
+// sites; the others get their own ground from the seed, a settlement sized to its kind, the terrain's relief and cover,
+// and plain descriptive names for the places to take (nothing invented passed off as canon).
+const SITE_K = { capital: 1, city: 1, port: .78, towns: .55, forts: .5 };
+const SITE_N = { capital: ['the Citadel', 'the North Gate', 'the South Gate', 'the Market', 'the Barracks'], city: ['the Centre', 'the Spaceport', 'the West Gate', 'the Market', 'the Barracks'],
+  port: ['the Harbour', 'the Docks', 'the Sea Gate', 'the Customs House', 'the Market'], towns: ['the Square', 'the Depot', 'the Pumphouse', 'the Crossroads', 'the Ridge'],
+  forts: ['the Keep', 'the Gatehouse', 'the Upper Battery', 'the Cistern', 'the Ridge'] };
+const TERR = { highland: { relief: 1.7, veg: .5, sea: false }, alpine: { relief: 1.4, veg: .3, sea: false }, desert: { relief: .65, veg: 0, sea: false }, jungle: { relief: 1, veg: 1.8, sea: true }, temperate: { relief: 1, veg: 1, sea: true } };
+function siteBiome(spec) {
+  const B0 = biomeOf(spec.world), S = spec.site; if (!S || S.field) return B0;
+  const T = TERR[S.terrain] || TERR.temperate, port = S.kind === 'port' || S.kind === 'city' || S.kind === 'capital';
+  return { ...B0, city: S.name, sites: SITE_N[S.kind] || SITE_N.towns, relief: B0.relief * T.relief, veg: clamp(B0.veg * T.veg, 0, .9), sea: port && T.sea ? B0.sea : null };
+}
 function buildMap(spec) {
-  const B = biomeOf(spec.world), seed = hashStr(spec.world + ':ground');
+  const B = siteBiome(spec), seed = hashStr(spec.world + (spec.site && !spec.site.field ? ':' + spec.site.id : '') + ':ground');
   const n1 = noise2(seed), n2 = noise2(seed + 7), n3 = noise2(seed + 13), r = rng(seed + 99);
   const H = new Float32Array((NH + 1) * (NH + 1)), cover = new Float32Array(NH * NH), urban = new Uint8Array(NH * NH), veg = new Uint8Array(NH * NH);
-  const city = { x: MAP * (.5 + (r() - .5) * .15), y: MAP * .7, r: 520 * SC };
+  const city = { x: MAP * (.5 + (r() - .5) * .15), y: MAP * .7, r: 520 * SC * (spec.site && !spec.site.field ? SITE_K[spec.site.kind] || .6 : 1) };
   // the city sits on a shoulder of high ground, the drop lands on the plains below it
   for (let j = 0; j <= NH; j++) for (let i = 0; i <= NH; i++) {
     const x = i * CH, y = j * CH, u = x / (900 * SC), v = y / (900 * SC);
@@ -149,8 +163,9 @@ function buildMap(spec) {
       walls.push({ id: walls.length, x0: city.x + Math.cos(a0) * R0, y0: city.y + Math.sin(a0) * R0, x1: city.x + Math.cos(a1) * R0, y1: city.y + Math.sin(a1) * R0, h: 14 + spec.def.fort * 4, hp: WALL_HP(spec.def.fort), hp0: WALL_HP(spec.def.fort), down: false });
     }
   }
+  if (spec.def.breach > 0) for (const w of walls) if (r() < spec.def.breach * .5) { w.down = true; w.hp = 0; } // a siege on the planet map has already opened stretches of the wall
   const bld = buildingIndex(cityPlan(keep, CH, spec.world).plots, CH); // the buildings, as the view will draw them: units walk round them
-  return { B, H, cover, urban, veg, blocks: keep, sites, city, walls, wl: walls.slice(), seaH, relief, bld, far };
+  return { B, H, cover, urban, veg, blocks: keep, sites, city, walls, wl: walls.filter(w => !w.down), seaH, relief, bld, far };
 }
 export function heightAt(x, y) {
   const M = G.map; if (!M) return 0;
@@ -632,6 +647,24 @@ export function beginRain() {
   W.forEach(([k, m, o], i) => land(k, m, o, G.zones[o.zone] || G.zones[0], 4 + i * 1.6 + R() * 2, 0));
   const n = G.zones.map(z => W.filter(d => d[2].zone === z.id).length);
   log(`The Iron Rain falls on ${G.map.B.city}: ${W.length} cohorts${G.zones.length > 1 ? ` (${G.zones.map((z, i) => 'ABCD'[i] + ' ' + n[i]).join(', ')})` : ''}.`, 'gold');
+}
+// A field battle of a planet war (spec.mode 'field'): no drop. The attacker's army stands formed on the plain below the
+// settlement, all of it (no Storks to wait for), and the battle starts at once; the garrison stands at its posts as for a Rain.
+export function beginField() {
+  const city = G.map.city, cx = clamp(city.x, 1200, MAP - 1200), cy = clamp(city.y - city.r - 2300, 700, MAP * .45);
+  let x0 = cx, y0 = cy; for (let k = 0; k < 40 && (isWater(x0, y0) || isUrban(x0, y0)); k++) { x0 = clamp(cx + (R() - .5) * 2400, 500, MAP - 500); y0 = clamp(cy + (R() - .5) * 900, 500, MAP * .5); }
+  G.zones = [{ id: 0, n: ++zoneN, x: x0, y: y0 }]; G.phase = 'battle'; G.t = 0; G.storksDone = true;
+  const all = [...G.drop[0], ...G.drop[1]]; G.drop = [[], []];
+  const row = { legion: 0, starshell: 0, railmen: 1, obsidian: 2, peerless: 3 }, rows = [[], [], [], []];
+  for (const d of all) rows[row[d[0]] ?? 0].push(d);
+  rows.forEach((L, r) => L.forEach(([k, m, o], i) => {
+    const wide = Math.min(L.length, r === 0 ? 9 : 7), col = i % wide, rank = Math.floor(i / wide), side = r === 2 ? (i % 2 ? 1 : -1) : 0;
+    let x = x0 + (col - (wide - 1) / 2) * (r === 2 ? 0 : 150) + side * (700 + Math.floor(i / 2) * 130), y = y0 - [0, 260, 120, 420][r] - rank * 110;
+    if (o.leader) { x = x0; y = y0 - 560; }
+    x = clamp(x, 80, MAP - 80); y = clamp(y, 80, MAP - 80); for (let q = 0; q < 8 && isWater(x, y); q++) { x = clamp(x + (R() - .5) * 400, 80, MAP - 80); y = clamp(y - 150, 80, MAP - 80); }
+    const u = mkUnit(0, k, m, x, y, Math.atan2(city.y - y, city.x - x), Object.assign({}, o, { wave: 0 }));
+    u.zone = 0; u.how = 'march'; if (G.map.bld.any) { const p = G.map.bld.out(u.x, u.y, 4); u.x = p.x; u.y = p.y; } G.units.push(u); }));
+  log(`The legions form up before ${G.map.B.city}: ${all.length} cohorts.`, 'gold');
 }
 function land(k, m, o, z, t, wave) {
   const how = deliveryOf(k, wave), sc = SCATTER[how]; let x = z.x, y = z.y;
@@ -1260,7 +1293,7 @@ function bestStrike(u, foes, reach = 900) { // weak, isolated, or busy fighting 
 
 // ---------------------------------------------------------------- a whole battle, headless (tests and auto-resolve)
 export function runHeadless(spec, seed, maxT) {
-  setup(spec, { seed, human: -1 }); G.def0 = strengthOf(1); aiZones(); beginRain(); G.att0 = spec.att.total || 0;
+  setup(spec, { seed, human: -1 }); G.def0 = strengthOf(1); if (spec.mode === 'field') beginField(); else { aiZones(); beginRain(); } G.att0 = spec.att.total || 0;
   const T = maxT || G.maxT; while (!G.over && G.t < T + 1) step(1);
   if (!G.over) finish(1, 'Time runs out');
   return result();
