@@ -170,10 +170,12 @@ export function settle(war, prov, r) {
 // ---------------------------------------------------------------- a war
 // spec: { world, by, def, troops (the drop, campaign troops), garrison, fort, gun, shield, barracks, loyalty (0..100) }
 let nextId = 1;
+// a war loaded from a save keeps its armies' ids: new armies are numbered after them (M3-C, the campaign keeps w.war)
+const ids = war => { for (const a of war.armies) if (a.id >= nextId) nextId = a.id + 1; };
 export function newWar(spec) {
   const m = MAPS[spec.world]; if (!m) return null;
   const war = { world: spec.world, by: spec.by, def: spec.def, week: 0, provs: {}, armies: [], log: [], battles: [], over: null, orbit: true,
-    attQ: 1, defQ: clamp((spec.loyalty ?? 50) + 30, 40, 130) / 80 * TUNE.def, // a loyal garrison fights harder, on its own ground
+    attQ: spec.attQ || 1, defQ: clamp((spec.loyalty ?? 50) + 30, 40, 130) / 80 * TUNE.def, // a loyal garrison fights harder, on its own ground
     barracks: spec.barracks || 0, recruit: spec.recruit ?? null, land0: 0, loyalty: spec.loyalty ?? 50, pending: [], cmdrLost: [], levied: 0 };
   const g = spec.garrison, guns = spec.gun || 0, fort = spec.fort || 0;
   for (const p of m.provs) war.provs[p.id] = { own: 'def', walls: p.walls ? Math.max(0, fort - (p.walls - 1)) + (p.kind === 'capital' ? 1 : 0) : 0, gun: Math.round(guns * (p.guns || 0) * 10) / 10, shield: p.shield ? spec.shield || 0 : 0, siege: 0, breach: 0 };
@@ -186,6 +188,7 @@ export const skyToll = (war, prov) => { const pr = war.provs[prov], p = P(war, p
 // The Rain: plan = [{ prov, troops, cmdrs? }]. Each landing loses its toll in the sky, then fights whatever stands
 // there. With { defer: true } the landing battles wait in war.pending, to be fought (settle) or auto-resolved (resolve).
 export function land(war, plan, rnd = Math.random, { defer = false } = {}) {
+  ids(war);
   const out = [];
   for (const { prov, troops, cmdrs } of plan) { if (!troops) continue; const rain = (cmdrs || []).some(c => c.t && c.t.includes('rain')), lost = Math.round(troops * skyToll(war, prov) * (rain ? .7 : 1));
     const a = { id: nextId++, side: 'att', prov, men: troops - lost, landed: war.week, cmdrs: (cmdrs || []).slice() }; war.armies.push(a); war.land0 += troops; out.push({ prov, troops, lost });
@@ -204,6 +207,7 @@ function merge(war, only) { // armies of one side in one province march as one, 
 // orders: (id, to, men?, cmdrIds?). men: split off that many and send them, the rest stay; cmdrIds: the commanders who
 // go with the part sent (by default they stay with the rest). Sending the whole army takes all its commanders.
 export function order(war, id, to, men, cmdrIds) {
+  ids(war);
   const a = war.armies.find(x => x.id === id); if (!a || !reach(war, a).includes(to)) return false;
   if (a.side === 'def' && sideMen(war, 'att', a.prov) > 0) return false; // a garrison with the enemy at its walls is pinned there
   if (men && men < a.men) { const go = (a.cmdrs || []).filter(c => (cmdrIds || []).includes(c.id)), b = { id: nextId++, side: a.side, prov: a.prov, men, post: a.post, cmdrs: go, hungry: a.hungry || 0 };
@@ -232,6 +236,7 @@ export function weekTick(war, { ai = {}, rnd = Math.random, orbit = true } = {})
 }
 export function resolve(war, prov, rnd = Math.random) { const r = fight(war, prov, rnd); war.pending = war.pending.filter(b => b.prov !== prov); return r; }
 export function weekMoves(war, { ai = {}, orbit = true } = {}) {
+  ids(war);
   if (war.over) return []; war.week++; war.orbit = orbit; war.battles = []; war.pending = [];
   for (const side of ['att', 'def']) if (ai[side]) for (const o of ai[side](war, side)) order(war, ...o);
   // movement: everyone moves at once; armies that pass each other on a road meet in the province they were bound for
@@ -250,6 +255,7 @@ export function weekMoves(war, { ai = {}, orbit = true } = {}) {
   return war.pending;
 }
 export function weekEnd(war) {
+  ids(war);
   if (war.over) return war.over;
   for (const b of war.pending.slice()) resolve(war, b.prov); // a battle left neither fought nor resolved is auto-resolved
   merge(war);
