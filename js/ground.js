@@ -402,7 +402,7 @@ export function setup(spec, opts = {}) {
   Object.assign(G, { army: null, on: true, spec, t: 0, phase: 'deploy', units: [], fx: [], feed: [], pods: [], zones: [], planAuto: true, zoneLast: null, over: null, speed: 1, paused: false, stats: [{ killed: 0, lost: 0 }, { killed: 0, lost: 0 }], storkT: 100, storksDone: false, holdT: 0, maxT: spec.maxT || 1800, leaderLost: [false, false], aaCover: [], human: opts.human == null ? 0 : opts.human, broke: [false, false] });
   cAcc = 0; aiAcc = [0, 0]; mAcc = 0; // each battle starts its clocks from zero
   G.map = buildMap(spec); buildNav(); G.bombs = [];
-  deployDefender(spec);
+  deployDefender(spec); G.def0 = strengthOf(1); G.att0 = spec.att.total || 0; // the strength each side starts with (result() counts what is left against it)
   return G;
 }
 // the attacker's units, built but not yet on the ground: they fall at the drop zones when the Rain begins
@@ -651,7 +651,7 @@ export function beginRain() {
 // A field battle of a planet war (spec.mode 'field'): no drop. The attacker's army stands formed on the plain below the
 // settlement, all of it (no Storks to wait for), and the battle starts at once; the garrison stands at its posts as for a Rain.
 export function beginField() {
-  const city = G.map.city, cx = clamp(city.x, 1200, MAP - 1200), cy = clamp(city.y - city.r - 2300, 700, MAP * .45);
+  const city = G.map.city, cx = clamp(city.x, 1200, MAP - 1200), cy = clamp(city.y - city.r - 1500, 700, MAP * .55); // formed up a kilometre and a half out
   let x0 = cx, y0 = cy; for (let k = 0; k < 40 && (isWater(x0, y0) || isUrban(x0, y0)); k++) { x0 = clamp(cx + (R() - .5) * 2400, 500, MAP - 500); y0 = clamp(cy + (R() - .5) * 900, 500, MAP * .5); }
   G.zones = [{ id: 0, n: ++zoneN, x: x0, y: y0 }]; G.phase = 'battle'; G.t = 0; G.storksDone = true;
   const all = [...G.drop[0], ...G.drop[1]]; G.drop = [[], []];
@@ -676,7 +676,7 @@ function land(k, m, o, z, t, wave) {
 }
 // a falling unit reaches the ground: what the sky took is gone
 function touchDown(u) {
-  const aa = aaAt(u.x, u.y), lost = aa * (SKY_K[u.how] ?? 1); // the heavy suits ride through more of it, the knights are hard to hit
+  const aa = G.spec.noSky ? 0 : aaAt(u.x, u.y), lost = aa * (SKY_K[u.how] ?? 1); // the heavy suits ride through more of it, the knights are hard to hit (a planet war has taken the sky's toll already: noSky)
   const dead = Math.round(u.men * clamp(lost * (.75 + R() * .5), 0, .9));
   u.men -= dead; u.men0 = Math.max(u.men, 1); u.sh = (u.T.shield || 0) * u.men; G.stats[0].lost += dead; G.skyLost = (G.skyLost || 0) + dead * u.eq;
   u.state = 'idle'; u.fall = null; u.width = defaultWidth(u);
@@ -946,12 +946,16 @@ function morale(dt) {
     let cap = u.m0 * (.45 + .55 * u.men / u.men0), drift = 0;
     drift -= fresh * 75; if (recent > .18) drift -= 1 * dt;
     if (u.flanked && G.t - u.flanked < 2) drift -= 4 * dt;
-    let near = 0, auraK = 0, outn = 0, fear = 0;
+    let near = 0, auraK = 0, outn = 0, fear = 0, runS = 0, steadyS = 0;
     for (const v of L) { const d = Math.sqrt(dist2(u, v)); if (d > 520) continue;
-      if (v.team === u.team) { if (v.state === 'rout' && v !== u && d < 350 && G.t - (v.routT || 0) < 20) near++; if (v.T.aura && v.state !== 'rout') auraK = Math.max(auraK, v.T.aura * (v.leader ? 1.6 : 1)); }
-      else if (fighting(v)) { if (d < 350) outn += v.men * v.eq; if (v.T.fear && d < 220) fear = Math.max(fear, v.T.fear * Math.min(1, v.men / 60)); } }
+      if (v.team === u.team) { if (v !== u && d < 350) { if (v.state === 'rout' && G.t - (v.routT || 0) < 20) { near++; runS += v.men * v.eq; } else if (v.state !== 'rout') steadyS += v.men * v.eq; }
+        if (v.T.aura && v.state !== 'rout') auraK = Math.max(auraK, v.T.aura * (v.leader ? 1.6 : 1)); }
+      else if (fighting(v)) { if (d < 350) outn += v.men * v.eq; if (v.T.fear && d < 220) fear = Math.max(fear, v.T.fear * Math.min(1, v.men / 60, v.men * v.eq / Math.max(1, .5 * u.men * u.eq))); } } // a big cohort fears a small band less (one of 2,000 against 300 Obsidians: half)
     // the terror of Obsidians, knights and starShells close at hand: lowColors feel it most, a Gold nearby steadies them
     if (fear) drift -= fear * (u.T.low ? .15 : .06) * (auraK ? .5 : 1) * dt;
+    // friends running past shake a unit: as many as two, counted against the steady strength around it (one cohort running
+    // through a formed army shakes it less than one of three on a beachhead)
+    if (near) near = Math.min(near, 3 * runS / Math.max(1, steadyS + u.men * u.eq));
     drift -= Math.min(2, near) * .6 * dt; cap += auraK;
     if (G.debug) G.debug.push({ t: G.t, id: u.id, team: u.team, type: u.type, m: u.morale, fresh, fear, near, drift, cap, melee: !!u.melee, st: u.state });
     if (u.melee) { const mine = L.filter(v => v.team === u.team && fighting(v) && Math.sqrt(dist2(u, v)) < 350).reduce((a, v) => a + v.men * v.eq, 0); if (outn > mine * 2) drift -= 3 * dt; }
@@ -970,7 +974,11 @@ function morale(dt) {
     u.morale = clamp(m, 0, 100); if (u.morale > cap) u.morale = Math.max(cap, u.morale - 2 * dt);
     if (u.morale < 12 || (u.men < u.men0 * .12 && u.men0 > 10)) { u.state = 'rout'; u.routT = G.t; u.routs++; u.melee = null; u.order = null; u.path = null; u.aim = null; u.faceTo = null; u.target = null; u.rallyT = G.t + 15; u.morale = Math.min(u.morale, 8);
       log(`${u.name} ${u.routs > 1 ? 'break again' : 'break and run'}!`, u.team === G.human ? 'bad' : 'good');
-      for (const v of L) if (v.team === u.team && v !== u && fighting(v) && dist2(u, v) < 400 * 400) v.morale -= 5; }
+      // the shock to the units around it: a cohort breaking beside a few others shakes them; one cohort of a big formed army
+      // breaking shakes the rest less (in proportion to its share of the strength there), so a whole army does not run
+      // from one rout (planet-map field battles stand 60 cohorts in one formation)
+      const by = L.filter(v => v.team === u.team && v !== u && fighting(v) && dist2(u, v) < 400 * 400), str = by.reduce((a, v) => a + v.men * v.eq, 0), k = clamp(3 * u.men0 * u.eq / Math.max(1, str), .2, 1);
+      for (const v of by) v.morale -= 5 * k; }
   }
 }
 

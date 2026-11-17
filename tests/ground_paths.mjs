@@ -20,7 +20,7 @@ const TRIPS = +arg('trips', 40), BATTLES = +arg('battles', 2), ONLY = arg('world
 // the rules as they are, with two switches for the trips: no commanders, and no end to the battle
 let src = readFileSync(join(ROOT, 'js/ground.js'), 'utf8');
 const swap = (a, b) => { if (!src.includes(a)) throw new Error('hook not found: ' + a); src = src.replace(a, b); };
-swap('if (G.human !== t) ai(t); else autoUnits(t);', 'if (G.__trip) {} else if (G.human !== t) ai(t); else autoUnits(t);');
+swap('if (G.human !== t) ai(t); else { autoUnits(t); ai(t, true); }', 'if (G.__trip) {} else if (G.human !== t) ai(t); else { autoUnits(t); ai(t, true); }'); // the dispatch line since R1
 swap('\n  checkEnd();\n}', '\n  if (!G.__trip) checkEnd();\n}');
 const dir = mkdtempSync(join(tmpdir(), 'gpath-')), file = join(dir, 'ground_paths.js'); writeFileSync(file, src);
 const GR = await import(pathToFileURL(file).href), { G } = GR;

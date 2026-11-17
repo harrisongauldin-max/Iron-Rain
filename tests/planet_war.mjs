@@ -35,7 +35,21 @@ for (const [name, shares] of Object.entries(PLANS)) {
   out[name] = { win: won / n, weeks: weeks / n, maxW, attLost: Math.round(lost / n) };
   console.log(`${name.padEnd(26)} attacker wins ${(won / n * 100).toFixed(0).padStart(3)}%  mean ${(weeks / n).toFixed(1)} weeks (max ${maxW})  troops lost ${Math.round(lost / n)}`);
 }
+// M2b: what the levies (decision 7) and a commander (decision 6) do to the AI's plan, and the fought-battle path
+{ let lev = 0, wonC = 0; const C = { id: 'c', name: 'A Praetor', ar: 1.12, t: ['tactician'] };
+  for (let s = 1; s <= seeds; s++) { const rnd = rng(s * 7919 + 13), war = PW.newWar(spec), sh = PLANS[AI_PLAN];
+    PW.land(war, sh.map(([prov, k], i) => ({ prov, troops: Math.round(T * k), cmdrs: i === 0 ? [C] : [] })), rnd);
+    while (!war.over && war.week < 40) PW.weekTick(war, { ai: { att: PW.standIn, def: PW.standIn }, rnd });
+    if (war.over && war.over.won === 'att') wonC++; lev += war.levied; }
+  console.log(`\nwith a commander (+12% strength) on the main landing: ${(wonC / seeds * 100).toFixed(0)}% (without: ${(out[AI_PLAN].win * 100).toFixed(0)}%); levies raised, mean ${Math.round(lev / seeds)} troops a war`);
+  // the steps of a week, with one battle settled from a (made-up) fought result: the verdict must land on the map
+  const war = PW.newWar(spec); PW.land(war, [{ prov: 'ladon', troops: 3000 }], rng(5), { defer: true });
+  const p0 = war.pending.length, sp = PW.battleSpec(war, 'ladon');
+  PW.settle(war, 'ladon', { won: true, att0: sp.att.total, attLeft: sp.att.total * .8, def0: sp.def.men, defLeft: sp.def.men * .1 });
+  const fine = p0 === 1 && !war.pending.length && war.provs.ladon.own === 'att' && Math.abs(PW.menOf(war, 'att') - 2400) < 2 && sp.mode === 'drop' && sp.att.total === Math.round(3000 * 10 * war.attQ);
+  console.log(`a deferred landing, settled from a fought result: ${fine ? 'ok' : 'WRONG'} (pending ${p0}, Ladon ${war.provs.ladon.own}, legions ${PW.menOf(war, 'att')})`);
+  if (!fine) process.exitCode = 1; }
 const ai = out[AI_PLAN].win, wins = Object.values(out).map(o => o.win), spread = Math.max(...wins) - Math.min(...wins), wk = out[AI_PLAN].weeks;
 const ok = ai >= .55 && ai <= .8 && spread >= .15 && wk >= 3 && wk <= 8;
 console.log(`\nthe AI's plan (${AI_PLAN}): ${(ai * 100).toFixed(0)}% in ${wk.toFixed(1)} weeks; plans range ${(spread * 100).toFixed(0)} points.  ${ok ? 'PASS' : 'FAIL'}`);
-process.exit(ok ? 0 : 1);
+process.exit(ok && !process.exitCode ? 0 : 1);

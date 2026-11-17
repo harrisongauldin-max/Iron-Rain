@@ -79,9 +79,15 @@ function buildPost() {
 function resize() { if (!V) return; const w = innerWidth, h = innerHeight; V.R.setSize(w, h, false); V.cv.style.width = w + 'px'; V.cv.style.height = h + 'px'; V.ov.width = w * (devicePixelRatio || 1); V.ov.height = h * (devicePixelRatio || 1); V.ov.style.width = w + 'px'; V.ov.style.height = h + 'px'; V.camera.aspect = w / h; V.camera.updateProjectionMatrix(); }
 
 // spec: built by camp.js groundSpec; meta: names for the screen
+// A battle can be opened while another waits in its brief (the planet map's preview, opened from a Rain's brief, fights
+// its province battles here): the waiting one is set aside, and set up again from its spec when the new one ends.
 export function fight(spec, meta = {}) {
   init();
-  return new Promise(resolve => {
+  if (V.on && V.resolve) { (V.stack = V.stack || []).push({ spec: V.spec, meta: V.meta, resolve: V.resolve }); V.resolve = null; teardown(); }
+  return new Promise(resolve => start(spec, meta, resolve));
+}
+function start(spec, meta, resolve) {
+  {
     GR.setup(spec, { human: 0 });
     V.resolve = resolve; V.meta = meta; V.spec = spec; V.sel = []; V.on = true; V.lastFig = new Map(); V.tr = []; V.fl = []; V.speedI = 0; G.speed = 1; G.paused = false; V.ended = false;
     V.colA = colOf(spec.att.f); V.colD = colOf(spec.def.f);
@@ -92,7 +98,7 @@ export function fight(spec, meta = {}) {
     V.root.querySelector('#gbName').textContent = `${G.map.B.city}, ${meta.world || ''}`;
     V.plSel = new Set(); showBrief(); planPanel(); hud(true);
     try { initAudio(); music(.6); setGroundWorld(meta.world); S.groundEar = earAt; } catch (e) { /* no audio */ }
-  });
+  }
 }
 function teardown() {
   V.on = false; V.root.classList.add('hide'); document.body.classList.remove('ground');
@@ -558,6 +564,7 @@ function planSend(id) { // the picked cohorts go to zone id
 }
 const zoneAtG = g => G.zones.reduce((b, z) => { const d = hyp(z.x - g.x, z.y - g.z); return d < 320 && (!b || d < b.d) ? { z, d } : b; }, null);
 function showBrief() {
+  if (V.spec.mode === 'field') return fieldBrief();
   const el = V.root.querySelector('#gbBrief'), sp = V.spec, men = G.drop[0].reduce((a, x) => a + x[1], 0), st = G.drop[1].reduce((a, x) => a + x[1], 0), gar = G.units.reduce((a, u) => a + u.men, 0);
   el.classList.remove('hide'); V.modal = false;
   el.innerHTML = `<div class="kicker">${esc(V.meta.date || '')} · ${esc(G.map.B.lore)}</div><h2>The Iron Rain on ${esc(G.map.B.city)}</h2>
@@ -571,6 +578,17 @@ function showBrief() {
     ${G.map.walls.length ? '<p>A <b>wall</b> rings the heart of the city, with eight gates. Your <b>StarShells</b> can bring a stretch of it down in a minute or two of fire, the <b>RailRifles</b> more slowly: select them, and the wall is traced in orange; right-click it.</p>' : ''}
     <div class="gb-bb"><button class="btn" data-g="autoz">Pick zones for me</button>${sp.planet && hasMap(sp.planet.world) ? '<button class="btn" data-g="planet" title="The same Rain as a war across the whole planet: a preview of the planet map. Nothing in it goes back to the campaign.">Planet map (preview)</button>' : ''}<button class="btn go" data-g="rain" id="gbRain">Drop the Rain ▸</button></div>`;
 }
+// a province battle of a planet war: both armies already on the ground (planetwar.js battleSpec)
+function fieldBrief() {
+  const el = V.root.querySelector('#gbBrief'), sp = V.spec, men = G.drop[0].reduce((a, x) => a + x[1], 0) + G.drop[1].reduce((a, x) => a + x[1], 0), gar = G.units.reduce((a, u) => a + u.men, 0), pl = sp.planet || {};
+  el.classList.remove('hide'); V.modal = false;
+  el.innerHTML = `<div class="kicker">${esc(V.meta.date || '')}${V.meta.world ? ' · ' + esc(V.meta.world) : ''}</div><h2>The battle for ${esc(G.map.B.city)}</h2>
+    <p>A battle of the war for the planet. <b>${men.toLocaleString()}</b> men${sp.att.cmdr ? ` under <b>${esc(sp.att.cmdr)}</b>` : ''} stand formed on the plain below ${esc(G.map.B.city)}; <b>${gar.toLocaleString()}</b>${sp.def.cmdr ? ` under <b>${esc(sp.def.cmdr)}</b>` : ''} hold it. Ten men on the field for every troop on the planet map.</p>
+    <p>Every cohort follows <b>the legate's plan</b> until you give it an order; <b>G</b> hands it back. Take ${GR.NEED()} of the ${G.map.sites.length} places in ${esc(G.map.B.city)} and hold them for ${GR.HOLD_WIN} seconds, or break the defenders, before ${mmss(G.maxT)} runs out.</p>
+    ${G.map.walls.length ? `<p>${esc(G.map.B.city)} is walled${sp.def.breach ? ', and the siege has already opened stretches of it' : ''}. <b>StarShells</b> and <b>RailRifles</b> can bring more down: select them and right-click the wall.</p>` : ''}
+    ${pl.odds != null ? `<p class="dim">Auto-resolved, this battle would go to the side coming to take it ${Math.round(pl.odds * 100)}% of the time.</p>` : ''}
+    <div class="gb-bb"><button class="btn go" data-g="rain" id="gbRain">Begin the battle ▸</button></div>`;
+}
 function showEnd() {
   const r = GR.result(), el = V.root.querySelector('#gbEnd'), won = r.won;
   el.classList.remove('hide'); V.modal = true;
@@ -578,7 +596,7 @@ function showEnd() {
     <div class="gb-stats"><div><i>Lost in the sky</i><b>${r.sky.toLocaleString()}</b></div><div><i>Your legions left</i><b>${r.attLeft.toLocaleString()}</b></div><div><i>Garrison killed</i><b>${r.killed[0].toLocaleString()}</b></div><div><i>Garrison left</i><b>${r.defLeft.toLocaleString()}</b></div></div>
     <p class="dim">${r.sites.map(s => `${esc(s.name)}: ${s.own === 0 ? 'yours' : 'theirs'}`).join(' · ')}</p>
     ${r.air0 && (r.air0[0] || r.air0[1]) ? `<p class="dim">In the air: you lost ${r.air0[0] - r.air[0]} of ${r.air0[0]} aircraft; the garrison lost ${r.air0[1] - r.air[1]} of ${r.air0[1]}.</p>` : ''}
-    <div class="gb-bb"><button class="btn go" data-g="done">Return to the campaign ▸</button></div>`;
+    <div class="gb-bb"><button class="btn go" data-g="done">${V.spec.planet ? 'Return to the planet map ▸' : 'Return to the campaign ▸'}</button></div>`;
 }
 
 // ---------------------------------------------------------------- input
@@ -620,13 +638,13 @@ function bindInput() {
     if (!V.on) return; const mx = e.clientX, my = e.clientY;
     if (e.button === 1) V.orbit = null;
     if (e.button === 0 && V.drag) { const d = V.drag; V.drag = null; if (V.modal) return;
-      if (G.phase === 'deploy') { if (!d.box) { const g = groundAt(mx, my); if (g) { const hit = zoneAtG(g);
+      if (G.phase === 'deploy' && G.spec.mode !== 'field') { if (!d.box) { const g = groundAt(mx, my); if (g) { const hit = zoneAtG(g);
           if (hit && V.plSel.size) planSend(hit.z.id); else if (!hit) { const er = GR.addZone(g.x, g.z); if (er) toast(er); else { sfx('click'); if (V.plSel.size) planSend(G.zoneLast); } } } planPanel(); } return; }
       if (d.box) { const x0 = Math.min(d.x0, d.x1), x1 = Math.max(d.x0, d.x1), y0 = Math.min(d.y0, d.y1), y1 = Math.max(d.y0, d.y1); const got = mine().filter(u => { const p = ppt(u, 2); return p && p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1; }); V.sel = d.shift ? [...new Set(V.sel.concat(got))] : got; if (got.length) sfx('sel'); }
       else { const u = unitAt(mx, my, 0); if (u) { if (d.shift) V.sel = V.sel.includes(u) ? V.sel.filter(x => x !== u) : V.sel.concat(u); else V.sel = [u]; sfx('sel'); } else if (!d.shift) V.sel = []; }
       hud(true); }
     if (e.button === 2 && V.rdrag) { const d = V.rdrag; V.rdrag = null; if (V.modal) return;
-      if (G.phase === 'deploy') { const hit = zoneAtG(d.g0); if (hit) { GR.removeZone(hit.z.id); sfx('click'); planPanel(); } return; }
+      if (G.phase === 'deploy' && G.spec.mode !== 'field') { const hit = zoneAtG(d.g0); if (hit) { GR.removeZone(hit.z.id); sfx('click'); planPanel(); } return; }
       if (G.phase !== 'battle') return; const sel = V.sel.filter(u => live(u) && u.state !== 'rout'); if (!sel.length) return;
       const now = performance.now(), dbl = now - (V.lastR || 0) < 320; V.lastR = now;
       const foe = !d.line && unitAt(mx, my, 1), wid = !d.line && G.map.wl.length ? GR.wallAt(d.g0.x, d.g0.z, 40) : -1;
@@ -675,6 +693,7 @@ function bindInput() {
     else if (g === 'planet') { sfx('click'); PMV.open(V.spec.planet, { human: 'att', preview: true }); }
     else if (g === 'plall') { if (V.plSel.size) V.plSel.clear(); else for (const w of [0, 1]) G.drop[w].forEach((d, i) => V.plSel.add(w + ':' + i)); planPanel(); }
     else if (g === 'plspread') { GR.planSpread(); V.plSel.clear(); sfx('click'); planPanel(); }
+    else if (g === 'rain' && G.spec.mode === 'field') { V.root.querySelector('#gbBrief').classList.add('hide'); GR.beginField(); planPanel(); GR.start(0); sfx('alarm'); const z = G.zones[0]; if (z) Object.assign(V.cam, { tx: z.x, tz: z.y - 600, dist: 2600, pitch: .5 }); hud(true); }
     else if (g === 'rain') { if (!G.zones.length) GR.aiZones(); V.root.querySelector('#gbBrief').classList.add('hide'); V.plSel.clear(); GR.beginRain(); planPanel(); GR.start(0); sfx('alarm'); const z = G.zones[0]; if (z) Object.assign(V.cam, { tx: z.x, tz: z.y, dist: 2000, pitch: .5 }); hud(true); }
     else if (g === 'pause') { if (G.phase === 'battle') G.paused = !G.paused; hud(true); }
     else if (g === 'spd') { V.speedI = (V.speedI + 1) % 3; G.speed = [1, 2, 4][V.speedI]; hud(true); }
@@ -684,7 +703,7 @@ function bindInput() {
     else if (g === 'quit') { if (G.over || G.phase !== 'battle') return; // a second click within three seconds confirms (an artifact's frame may block confirm())
       if (V.quitT && performance.now() - V.quitT < 3000) { V.quitT = 0; b.textContent = 'Abandon'; GR.finish(1, 'The assault is abandoned: the legions on the ground are left to the garrison.'); }
       else { V.quitT = performance.now(); b.textContent = 'Click again to abandon'; setTimeout(() => { if (V.quitT && performance.now() - V.quitT >= 2900) { V.quitT = 0; b.textContent = 'Abandon'; } }, 3000); } }
-    else if (g === 'done') { const r = GR.result(); teardown(); const res = V.resolve; V.resolve = null; res && res(r); }
+    else if (g === 'done') { const r = GR.result(); teardown(); const res = V.resolve; V.resolve = null; const back = V.stack && V.stack.pop(); if (back) start(back.spec, back.meta, back.resolve); res && res(r); }
   });
 }
 function follow(u) { if (u.away) return; V.cam.follow = u; toast(`Following ${u.name}: W A S D or C to let go`); }
