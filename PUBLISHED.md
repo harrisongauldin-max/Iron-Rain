@@ -4,6 +4,7 @@ Each publish of `main` to the claude.ai artifact (slug `fc8b77cf-d69b-4cca-9154-
 
 | Artifact version | Date | Commit | What changed |
 |---|---|---|---|
+| 1794873776-5ed6 | 2026-11-17 | 45a3c1b | `js/render.js`: P2 — `planetMapMaterial()` for the planet-war globe: province borders (nearest-seat rule, anti-aliased, constant width), owner tints, hover, selection, overlay toggle; `surfaceOf()`, `seatDir()`. Inactive until planetwarview.js uses it. Test page `tests/planetmap.html` (not published). |
 | 1794873327-c6a9 | 2026-11-16 | e0422b4 | `js/sim.js`: U2, the long guns lead. An attacking pack keeps its short-ranged ships behind its long-ranged ones, and broadside ships swing broadside on before entering the enemy's guns. Equal attacks won 6 of 12 in `tests/attack_balance.py` (were 2), 1.5:1 won 6 of 6. |
 | 1794873292-f94d | 2026-11-16 | a4aca0b | `js/groundmodels.js`: P1, the pieces for the planet map (`mapPieceGeo`, `mapPieceMaterial`, `MAP_KINDS`): army, capital, city, port, towns, forts, landing, siege, battle. Nothing draws them yet; the planet-map screen (M2) will. |
 | 1794872945-ab22 | 2026-11-16 | 0bb0e26 | `js/planetgen.js`: cities visible from orbit on Mercury, Venus, Earth and Mars — built-up masses with a tower core, block grid, sprawl along radial roads, spaceports, a quilt of fields, roads strung with towns; night lights follow the same mask, rural scatter toned down. |
