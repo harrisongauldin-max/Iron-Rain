@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Iron Rain — planet map globe (P2)</title>
+<style>html,body{margin:0;height:100%;background:#05060a;color:#ddd;font:13px system-ui;overflow:hidden}canvas{display:block;width:100%;height:100%}
+#hud{position:fixed;left:10px;top:8px;background:#0008;padding:6px 10px;border-radius:4px;line-height:1.5;max-width:520px}#hud b{color:#f2c14e}#hud kbd{background:#222;padding:0 4px;border-radius:3px}
+#lbl{position:fixed;pointer-events:none;background:#000a;color:#fff;padding:2px 6px;border-radius:3px;display:none}</style>
+<script type="importmap">{"imports":{"three":"../vendor/three/three.webgpu.js","three/webgpu":"../vendor/three/three.webgpu.js","three/tsl":"../vendor/three/three.tsl.js"}}</script>
+</head><body><canvas id="cv"></canvas>
+<div id="hud"><b>Planet map globe</b> — Mercury's painted surface with the province overlay (render.js <code>planetMapMaterial</code>, provinces from planetwar.js <code>provMap</code>).
+drag to orbit · wheel to zoom · hover a province · click to select · <kbd>O</kbd> overlay on/off · <kbd>W</kbd> hairline width · <kbd>1</kbd>–<kbd>3</kbd> give the selected province to the Republic / Society / Rim, <kbd>0</kbd> no one · <span id="st">painting…</span></div>
+<div id="lbl"></div>
+<script type="module">
+// A test page for P2 (claude/planet-maps.md): a sphere, Mercury's maps from planetgen, provMap's ids, and the globe
+// material. Open at /tests/planetmap.html on the dev server (#webgl forces the WebGL2 backend). window.__pm exposes
+// { pm, cam, setView(dist, lat, lon), ids } for screenshots.
+import * as THREE from 'three';
+import { generate, HI } from '../js/planetgen.js';
+import { MAPS, provMap } from '../js/planetwar.js';
+import { planetMapMaterial } from '../js/render.js';
+import { FACTIONS, NEUTRAL_C } from '../js/data.js';
+const world = new URLSearchParams(location.search).get('world') || 'mercury', W = +(new URLSearchParams(location.search).get('w')) || 1536;
+const cv = document.getElementById('cv'), st = document.getElementById('st'), lbl = document.getElementById('lbl');
+const R = new THREE.WebGPURenderer({ canvas: cv, antialias: true, forceWebGL: /webgl/i.test(location.hash) }); R.setPixelRatio(Math.min(2, devicePixelRatio));
+const sc = new THREE.Scene(); const cam = new THREE.PerspectiveCamera(32, 1, .01, 100);
+// the painted maps, on the main thread (a 1536 map takes a few seconds)
+await new Promise(r => setTimeout(r, 30));
+const g = generate(world, W), H = g.H;
+const mk = (data, w, h, srgb, fmt = THREE.RGBAFormat) => { const t = new THREE.DataTexture(data, w, h, fmt, THREE.UnsignedByteType); if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.wrapS = THREE.RepeatWrapping; t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true; t.anisotropy = 8; t.needsUpdate = true; return t; };
+const day = mk(g.day, W, H, true), night = g.night ? mk(g.night, W, H, true) : null, hgt = g.hgt ? mk(g.hgt, W, H, false, THREE.RedFormat) : null;
+// the province map at the painter's own resolution, so the borders sit on the painted coast
+const PW = Math.min(W, 1024), PH = PW / 2, land = (lat, lon, i, j) => { const I = Math.floor(i * W / PW), J = Math.floor(j * H / PH); return g.day[((H - 1 - J) * W + I) * 4 + 3] < 128; };
+const ids = provMap(world, PW, PH, land), M = MAPS[world];
+const pm = planetMapMaterial({ world, day, night, hgt, nProv: M.provs.length, W, H }); // seats come from MAPS[world]; provMap's ids are used for picking
+const globe = new THREE.Mesh(new THREE.SphereGeometry(1, 192, 96), pm.material); sc.add(globe);
+globe.rotation.y = -Math.PI / 2; // uv 0 at lon −180 faces −z as planetgen paints it; turn so lon 0 faces the camera
+// owners: the Society holds the capital and the north, the Republic has landed in the south and the Waste, the Rim holds Keryx
+const own = { tyche: 'core', highlands: 'core', heliopolis: 'rising', ladon: 'rising', jungles: 'rising', keryx: 'rim' };
+M.provs.forEach((p, i) => { const f = own[p.id]; if (f) pm.setOwner(i, FACTIONS[f].col.main); });
+const sun = new THREE.Vector3(3, 1.2, 4); pm.setSun(sun);
+// a globe camera
+let dist = 2.6, lat = 10, lon = 0, drag = null;
+const setView = (d, la, lo) => { dist = d; lat = la; lon = lo; };
+const place = () => { const la = lat * Math.PI / 180, lo = lon * Math.PI / 180; cam.position.set(Math.cos(la) * Math.sin(lo), Math.sin(la), Math.cos(la) * Math.cos(lo)).multiplyScalar(dist); cam.lookAt(0, 0, 0); };
+cv.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, lat, lon, moved: false }; });
+addEventListener('pointerup', e => { if (drag && !drag.moved) pick(e, true); drag = null; });
+addEventListener('pointermove', e => { if (drag) { const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true; lon = drag.lon - dx * .25 * dist / 2.6; lat = Math.max(-85, Math.min(85, drag.lat + dy * .25 * dist / 2.6)); } else pick(e, false); });
+cv.addEventListener('wheel', e => { dist = Math.max(1.25, Math.min(8, dist * (e.deltaY > 0 ? 1.1 : .91))); e.preventDefault(); }, { passive: false });
+let hov = -1, sel = -1, ovl = true, lw = 1.1;
+addEventListener('keydown', e => { if (e.key === 'o' || e.key === 'O') { ovl = !ovl; pm.setOverlay(ovl); } if (e.key === 'w' || e.key === 'W') { lw = lw > 1.5 ? 1.1 : lw + .4; pm.setLineWidth(lw); }
+  if (sel >= 0 && /^[0-3]$/.test(e.key)) pm.setOwner(sel, ['', 'rising', 'core', 'rim'][+e.key] ? FACTIONS[['', 'rising', 'core', 'rim'][+e.key]].col.main : null); });
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+function pick(e, click) { ndc.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ndc, cam); const h = ray.intersectObject(globe)[0]; let id = -1;
+  if (h) { const u = h.uv.x, v = h.uv.y, i = Math.floor(u * PW) % PW, j = Math.floor((1 - v) * PH); const k = ids[j * PW + i]; if (k !== 255) id = k; }
+  if (click) { sel = id; pm.setSelected(sel); } if (id !== hov) { hov = id; pm.setHover(hov); }
+  if (id >= 0) { lbl.style.display = 'block'; lbl.style.left = e.clientX + 14 + 'px'; lbl.style.top = e.clientY + 10 + 'px'; lbl.textContent = M.provs[id].name + (own[M.provs[id].id] ? ' · ' + own[M.provs[id].id] : ''); } else lbl.style.display = 'none'; }
+function size() { const w = innerWidth, h = innerHeight; R.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); } addEventListener('resize', size); size();
+let frames = 0; const t0 = performance.now();
+R.setAnimationLoop(() => { place(); R.render(sc, cam); if (++frames % 30 === 0) st.textContent = `${world} ${W}×${H} · provinces ${PW}×${PH} · ${(frames / ((performance.now() - t0) / 1000)).toFixed(0)} fps · ${R.backend.constructor.name.replace('Backend', '')}`; });
+window.__pm = { pm, cam, setView, ids, M, globe, R };
+</script></body></html>
