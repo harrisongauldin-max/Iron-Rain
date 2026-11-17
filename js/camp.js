@@ -722,7 +722,9 @@ export function groundSpec(fl) {
   return { world: w.id, storm: ctx.storm, maxT: 1800, fleet: fl.id,
     att: { f: fl.owner, shells: Math.round(shells * k * GROUND_SCALE), leech: Math.round(leech * k * GROUND_SCALE), storks: Math.round(storks * k * GROUND_SCALE), cmdr: c ? c.name : null, total: Math.round(o.troops * GROUND_SCALE), air: { rip: Math.round(rip * 2), thunder } }, // at legion scale a campaign ripWing stands for a pair
     def: { f: w.owner, men: Math.round(w.garrison * ctx.dmul * GROUND_FIELD * GROUND_SCALE), garrison: w.garrison, fort: w.lv.fort || 0, gun: w.gun || 0, shield: w.shield || 0, barracks: w.lv.barracks || 0, morale: clamp(1 - weeks * .02, .8, 1), cmdr: 'The Legate',
-      air: { rip: 12 * Math.min(2, w.gun || 0), thunder: (w.lv.fort || 0) >= 2 ? 4 : 0 } } }; // the garrison's own squadrons (placeholder: the campaign keeps no planetary air yet)
+      air: { rip: 12 * Math.min(2, w.gun || 0), thunder: (w.lv.fort || 0) >= 2 ? 4 : 0 } }, // the garrison's own squadrons (placeholder: the campaign keeps no planetary air yet)
+    // the same Rain as a war across the planet (planetwar.js; the ground brief offers it as a preview where the world has a map)
+    planet: { world: w.id, by: fl.owner, def: w.owner, troops: Math.round(o.troops), garrison: w.garrison, fort: w.lv.fort || 0, gun: w.gun || 0, shield: w.shield || 0, barracks: w.lv.barracks || 0, loyalty: w.cl ? w.cl.war : w.loyalty } };
 }
 // the drop is made: the Senate's vote is defied if it stood, the pods and Storks are spent
 export function groundDrop(fl) { const w = C.worlds[fl.at]; senateDefied(fl.owner, w.id); spendDrop(fl); C.fleets = C.fleets.filter(f => f.ships.length); }

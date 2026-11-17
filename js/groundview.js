@@ -16,6 +16,8 @@ import { pass, renderOutput } from 'three/tsl'; // the post: the scene pass and 
 import { bloom } from '../vendor/three/tsl/BloomNode.js';
 import { smaa } from '../vendor/three/tsl/SMAANode.js';
 import { preset } from './gfx.js';
+import * as PMV from './planetwarview.js'; // the planet map (M2): previewed from the brief until the campaign opens it itself
+import { hasMap } from './planetwar.js';
 
 const PI = Math.PI, TAU = PI * 2, hyp = Math.hypot, clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const FK = { rep: 'rising', soc: 'core', rim: 'rim' };
@@ -210,7 +212,7 @@ export function groundFrame(dt) {
   if (!G.over && G.phase === 'battle' && !G.paused) GR.step(dt * G.speed);
   camUpdate(dt); GFX.tick(dt, V.camera);
   drawUnits(dt); drawAir(dt); drawFx(dt); drawSites(); PX.frame(dt, G.paused ? 0 : dt * G.speed, V.camera, innerHeight);
-  if (V.ready) { PX.shake(V.camera); try { if (V.post) V.post.render(); else V.R.render(V.scene, V.camera); } finally { PX.restore(V.camera); } } // the renderer starts asynchronously; the first frame or two wait for it
+  if (V.ready && !PMV.active()) { PX.shake(V.camera); try { if (V.post) V.post.render(); else V.R.render(V.scene, V.camera); } finally { PX.restore(V.camera); } } // the renderer starts asynchronously; the first frame or two wait for it
   overlay();
   V.hudT -= dt; if (V.hudT <= 0) { V.hudT = .2; hud(); }
   if (G.over && !V.ended) { V.ended = true; setTimeout(showEnd, 1400); }
@@ -567,7 +569,7 @@ function showBrief() {
     ${airBrief()}
     ${sp.storm ? '<p class="bad">The walls are not yet broken: only half the drop reaches the ground in fighting order.</p>' : ''}
     ${G.map.walls.length ? '<p>A <b>wall</b> rings the heart of the city, with eight gates. Your <b>StarShells</b> can bring a stretch of it down in a minute or two of fire, the <b>RailRifles</b> more slowly: select them, and the wall is traced in orange; right-click it.</p>' : ''}
-    <div class="gb-bb"><button class="btn" data-g="autoz">Pick zones for me</button><button class="btn go" data-g="rain" id="gbRain">Drop the Rain ▸</button></div>`;
+    <div class="gb-bb"><button class="btn" data-g="autoz">Pick zones for me</button>${sp.planet && hasMap(sp.planet.world) ? '<button class="btn" data-g="planet" title="The same Rain as a war across the whole planet: a preview of the planet map. Nothing in it goes back to the campaign.">Planet map (preview)</button>' : ''}<button class="btn go" data-g="rain" id="gbRain">Drop the Rain ▸</button></div>`;
 }
 function showEnd() {
   const r = GR.result(), el = V.root.querySelector('#gbEnd'), won = r.won;
@@ -670,6 +672,7 @@ function bindInput() {
     if (b.dataset.u) { const u = G.units.find(x => x.id === +b.dataset.u); if (!u) return; if (e.shiftKey) V.sel = V.sel.includes(u) ? V.sel.filter(x => x !== u) : V.sel.concat(u); else V.sel = [u]; if (e.detail > 1 && u.state !== 'fall') { if (u.T.air) follow(u); else { V.cam.tx = u.x; V.cam.tz = u.y; } V.cam.dist = Math.min(V.cam.dist, u.T.air ? 900 : 700); } hud(true); return; }
     const g = b.dataset.g;
     if (g === 'autoz') { GR.aiZones(); V.plSel.clear(); sfx('click'); planPanel(); }
+    else if (g === 'planet') { sfx('click'); PMV.open(V.spec.planet, { human: 'att', preview: true }); }
     else if (g === 'plall') { if (V.plSel.size) V.plSel.clear(); else for (const w of [0, 1]) G.drop[w].forEach((d, i) => V.plSel.add(w + ':' + i)); planPanel(); }
     else if (g === 'plspread') { GR.planSpread(); V.plSel.clear(); sfx('click'); planPanel(); }
     else if (g === 'rain') { if (!G.zones.length) GR.aiZones(); V.root.querySelector('#gbBrief').classList.add('hide'); V.plSel.clear(); GR.beginRain(); planPanel(); GR.start(0); sfx('alarm'); const z = G.zones[0]; if (z) Object.assign(V.cam, { tx: z.x, tz: z.y, dist: 2000, pitch: .5 }); hud(true); }

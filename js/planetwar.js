@@ -145,8 +145,8 @@ export function weekTick(war, { ai = {}, rnd = Math.random, orbit = true } = {})
   for (const id of Object.keys(war.provs)) { const fa = sideMen(war, 'att', id), fd = sideMen(war, 'def', id);
     if (fa && fd) { if (war.provs[id].own === 'def' && war.provs[id].walls && fa < fd * 2.2 && (war.provs[id].siege || 0) < 2) { war.provs[id].siege = (war.provs[id].siege || 0) + 1; war.provs[id].breach = Math.min(.8, war.provs[id].siege * .3); war.log.push(`${P(war, id).name} is besieged (week ${war.provs[id].siege}).`); continue; } // a walled city: invest it, break the walls, then storm
       fight(war, id, rnd); }
-    else if (fa && war.provs[id].own === 'def') take(war, id, 'att');
-    else if (fd && war.provs[id].own === 'att') take(war, id, 'def'); }
+    else if (fa && war.provs[id].own === 'def') { take(war, id, 'att'); war.log.push(`${P(war, id).name} is taken unopposed.`); }
+    else if (fd && war.provs[id].own === 'att') { take(war, id, 'def'); war.log.push(`The garrison retakes ${P(war, id).name}.`); } }
   merge(war);
   // supply: hungry armies lose men; a cut-off garrison too, more slowly
   for (const side of ['att', 'def']) { const ok = supplied(war, side); for (const a of war.armies) if (a.side === side && !ok.has(a.prov)) { const k = side === 'att' ? .1 : .05; a.men = Math.round(a.men * (1 - k)); a.hungry = (a.hungry || 0) + 1; } else if (a.side === side) a.hungry = 0; }
@@ -208,6 +208,28 @@ export function standIn(war, side) {
       if (enemyNext > power(war, 'def', a.prov, a.men) * 1.1) { const back = reach(war, a).filter(n => war.provs[n].own === 'def' && !foeAt(n) && !bySea(war.world, a.prov, n)).sort((x, y) => dc[x] - dc[y])[0]; if (back && dc[back] < dc[a.prov]) out.push([a.id, back]); } }
   }
   return out;
+}
+
+// ---------------------------------------------------------------- helpers for the map screen (planetwarview.js)
+// What a march would meet: 'join' (our own stack), 'take' (nobody there), 'siege' (walls the stack can't storm this
+// week), or 'fight' with the auto-resolve odds for the attacker. men: the part of the army sent (all of it by default).
+export function preview(war, a, to, men = a.men) {
+  const foe = a.side === 'att' ? 'def' : 'att', fm = sideMen(war, foe, to), own = war.provs[to].own === a.side;
+  if (!fm) return { kind: own ? 'join' : 'take', odds: 1 };
+  const mine = men + sideMen(war, a.side, to), pr = war.provs[to];
+  if (a.side === 'att' && pr.own === 'def' && pr.walls && mine < fm * 2.2 && (pr.siege || 0) < 2) return { kind: 'siege', odds: null, weeks: 2 - (pr.siege || 0) };
+  const pa = power(war, 'att', to, a.side === 'att' ? mine : fm), pd = power(war, 'def', to, a.side === 'att' ? fm : mine), p = oddsOf(pa, pd);
+  return { kind: 'fight', odds: a.side === 'att' ? p : 1 - p, foe: fm };
+}
+// The legate's landing plan: the best of a few simple plans (everything on one province, or split over two provinces
+// joined by a road), judged by playing each out with the stand-in commanders. Far-side provinces count too.
+export function suggestPlan(spec, n = 30) {
+  const m = MAPS[spec.world]; if (!m) return []; const T = spec.troops, cand = [];
+  for (const p of m.provs) cand.push([{ prov: p.id, troops: T }]);
+  for (const [a, b] of m.roads) for (const k of [.6, .4]) cand.push([{ prov: a, troops: Math.round(T * k) }, { prov: b, troops: T - Math.round(T * k) }]);
+  let best = null;
+  for (const plan of cand) { const f = forecast(spec, plan, n), sc = f.win - f.weeks * .004; if (!best || sc > best.sc) best = { plan, sc, f }; }
+  return best.plan;
 }
 
 // ---------------------------------------------------------------- for the globe (graphics chat)
