@@ -435,7 +435,8 @@ function drawTop() {
   const rels = ['rep', 'soc', 'rim'].filter(f => f !== me).map(f => { const rel = C.fac[f].alive ? K.relOf(me, f) : 'fallen';
     return `<button class="relchip ${rel}" data-a="diplo" style="--fc:${colS(f)}" data-tip="${tipA(`<div class='th' style='--fc:${colS(f)}'>${K.BLOC_NAME[f]}</div><div class='tdim'>${C.leaders[f]}</div><div class='trow'><span>Relation</span><b>${rel === 'fallen' ? 'Fallen' : RELT[rel]}</b></div><div class='tdim'>Click for diplomacy (P)</div>`)}">${SHIELD(f, 20)}<span><b>${esc(K.BLOC_NAME[f].replace(/^The /, '').split(' ').slice(-1)[0])}</b><em>${RELW[rel]}</em></span></button>`; }).join('');
   const RD = Object.fromEntries(RES.map(x => [x[0], x]));
-  const cell = k => { const [, n, c] = RD[k], low = r[k] <= 0 && inc[k] < 0, dry = inc[k] < 0 && r[k] + inc[k] * 3 < 0;
+  const dl = C.fac[me].delta || {}; // G4: how each stock moved last week: a stock that rose is never drawn red
+  const cell = k => { const [, n, c] = RD[k], up = dl[k] > 0, low = !up && r[k] <= 0 && inc[k] < 0, dry = !up && inc[k] < 0 && r[k] + inc[k] * 3 < 0;
     return `<div class="sres ${low ? 'crit' : dry ? 'warn' : ''}" data-tip="${tipA(resTip(k, n) + (low ? `<div class='tbad'>Exhausted and still falling.</div>` : dry ? `<div class='tbad'>Runs out within three weeks at this rate.</div>` : ''))}"><i style="color:${c}">${n}</i><b>${fmt(r[k])}</b><em class="${inc[k] < 0 ? 'neg' : ''}">${sgn(inc[k])}</em></div>`; };
   $('stop').innerHTML = `<button class="btn ico" data-a="menu" data-tip="Menu (Esc)">≡</button>
     <div class="fbanner" data-a="faction" data-tip="${tipA('Faction summary (F)')}" style="--fc:${colS(me)}">${SHIELD(me, 28)}<div><b>${K.BLOC_NAME[me]}</b><span>${C.leaders[me]}</span></div></div>

@@ -60,7 +60,7 @@ export function newCampaign(player, difficulty = 1, start = null, opts = {}) {
     stats: {}, spyOps: {}, spyTry: {}, incidents: 0, opsLog: 0, opsMulti: 0, crisisT: {}, secrets: [], capStreak: {}, _own: null, _shipN: null, lawT: {}, warned: {}, bombards: {}, tribute: [], truce: {},
     threats: [], risings: [], takePend: [], crewPend: null, fear: {}, levyT: {}, start: null, ahist: false, wrecks: {}, moves0: {}, quests: {}, heir: {} });
   C.moving = true; placePlanets(1); /* the planets always move: the worlds go round their orbits, a week a turn */
-  for (const f of ['rep', 'soc', 'rim']) C.fac[f] = { key: f, ai: f !== player, alive: true, res: { he: 900, ore: 700, ord: 1200, man: 20000, food: 0, alloy: 0, rare: 0, inf: 0, sci: 0 }, lastInc: {} };
+  for (const f of ['rep', 'soc', 'rim']) C.fac[f] = { key: f, ai: f !== player, alive: true, res: { he: 900, ore: 700, ord: 1200, man: 20000, food: 600 /* G4: a war starts with something in the granaries */, alloy: 0, rare: 0, inf: 0, sci: 0 }, lastInc: {} };
   C.fac.neu = { key: 'neu', ai: true, alive: true, res: { he: 0, ore: 0, ord: 0, man: 0, food: 0 }, lastInc: {} };
   for (const w of WORLDS) {
     const b = bodyOf(w.id), slots = b.kind === 'planet' && !b.dwarf ? 6 : b.r > 700 ? 4 : 3, home = w.side;
@@ -198,6 +198,9 @@ export const navalMul = f => { const c = navalCap(f), u = navalUsed(f); return u
 export const upkeep = fl => fl.ships.reduce((a, s) => a + (defsOf(fl.owner)[s.t]?.value || 50) * .006, 0) * (fl.ships.length > CM.capOf(fl) ? 1.5 : 1) * navalMul(fl.owner) * (fl.levy ? .3 : 1); /* a House pays most of its levy's keep */
 
 // ---------------------------------------------------------------- economy
+// G4: the working reserve of food a realm's granaries keep without loss: four weeks of what its crews and garrisons
+// eat (rations), between 600 and 1,500
+export const foodKeep = (f, rations) => clamp(4 * Math.max(0, rations ?? 0), 600, 1500);
 export function income(f) {
   const o = { he: 0, ore: 0, ord: 0, man: 0, food: 0, alloy: 0, rare: 0, inf: 0, sci: 0 };
   for (const id in C.worlds) { const w = C.worlds[id]; if (w.owner !== f) continue; const y = yieldOf(w); for (const k in o) o[k] += y[k]; }
@@ -208,8 +211,15 @@ export function income(f) {
   o.inf *= [.85, 1, 1.15, 1.25][C.tax ? C.tax[f] ?? 1 : 1]; // heavy taxes fill the coffers of influence too: the Silvers skim, and pay for it in favours
   o.inf -= EC.overSprawl(f); // an over-extended realm buys its administrators' loyalty
   // the realm eats: crews afloat and garrisons ashore; a world under blockade feeds only itself
-  for (const fl of C.fleets) if (fl.owner === f) for (const s of fl.ships) o.food -= ((defsOf(f)[s.t] || {}).crew || 0) * s.crew / 400;
-  for (const id in C.worlds) { const w = C.worlds[id]; if (w.owner !== f) continue; o.food -= w.garrison / 1000; if (w.siege) { const y = yieldOf(w); if (y.food > 0) o.food -= y.food; } }
+  let rations = 0;
+  for (const fl of C.fleets) if (fl.owner === f) for (const s of fl.ships) rations += ((defsOf(f)[s.t] || {}).crew || 0) * s.crew / 400;
+  for (const id in C.worlds) { const w = C.worlds[id]; if (w.owner !== f) continue; rations += w.garrison / 1000; if (w.siege) { const y = yieldOf(w); if (y.food > 0) o.food -= y.food; } }
+  o.food -= rations;
+  if (o.food > 400) o.food = 400 + (o.food - 400) * .3; // G4: a glut. Of a weekly surplus beyond 400, only 30% reaches the granaries; the rest is sold cheap or rots in the fields
+  // G4: food costs something to keep. Stores spoil 5% a week, and 60% of what lies above a working reserve (foodKeep) is
+  // eaten each week, rising to all of it as the stores near the 3,000 cap: the cities eat their fill when granaries are full. Food used to climb to the 3,000 cap by week
+  // 5-19 and sit there; now a store settles near the reserve plus 1.5 times the week's surplus
+  { const st = Math.max(0, C.fac[f].res.food), keep = foodKeep(f, rations), lost = st * .05 + Math.max(0, st - keep) * (.6 + .4 * Math.min(1, st / 3000) ** 2); C.foodLoss = C.foodLoss || {}; C.foodLoss[f] = { lost: Math.round(lost), keep: Math.round(keep) }; o.food -= lost; }
   if (C.fac[f].res.food > 1000) o.man *= 1 + Math.min(.06, Math.floor((C.fac[f].res.food - 1000) / 500) * .01); // full granaries: more hands for the legions
   for (const fl of C.fleets) if (fl.owner === f) o.he -= upkeep(fl);
   o.man *= CM.wearyMan(f);
@@ -811,11 +821,12 @@ export function finishTurn() {
   }
   EC.govTick(); EC.treasuryTick(); CM.attrition(); CM.wearyTick(); CM.cmdrTick(); RU.tick(); P.tick(); AG.tick(); ST.tick(); CQ.tick(); SR.tick(); QS.tick(); wreckTick();
   for (const f of ['rep', 'soc', 'rim']) {
-    const inc = income(f), r = C.fac[f].res; C.fac[f].lastInc = inc;
+    const inc = income(f), r = C.fac[f].res, r0 = Object.assign({}, r); C.fac[f].lastInc = inc;
     for (const k in inc) r[k] += inc[k];
     for (const k of ['inf', 'ore', 'alloy', 'rare', 'ord']) if (r[k] < 0) r[k] = 0;
     if (r.he < 0) { r.he = 0; if (f === C.player) note('Helium-3 reserves are empty: the fleet cannot be fuelled. Ships lose crew to desertion.', 'bad'); for (const fl of C.fleets) if (fl.owner === f) for (const s of fl.ships) s.crew = Math.max(.3, s.crew - .05); }
     r.food = Math.max(-2000, Math.min(3000, r.food)); EC.spoil(f); TE.tick(f);
+    C.fac[f].delta = {}; for (const k in r) C.fac[f].delta[k] = r[k] - (r0[k] || 0); // how each stock actually moved this week (the top bar reads it)
   }
   history();
   ownerDiff();
