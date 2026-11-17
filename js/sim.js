@@ -557,12 +557,13 @@ const mainReach = s => s.weapons.reduce((a, w) => w.def.nuke || w.def.pd ? a : M
 const acq = s => s.def.fighter ? 1400 : s.def.boarder ? 1600 : Math.max(1800, mainReach(s) * 1.15);
 
 // ================================================================ behaviour
-export function nearestEnemy(s, x, y, R, preferSmall) {
+// craftLast: a warship looking for a ship to fight takes a fighter, pod or shell only when no warship is in reach
+export function nearestEnemy(s, x, y, R, preferSmall, craftLast) {
   let best = null, bs = 1e18; const ot = s.order.type === 'attack' ? s.order.t : null;
   query(x, y, R, o => {
     if (!hostileTo(s, o, ot) || o.docked || !o.vis[s.team]) return;
     const d2 = (o.x - x) ** 2 + (o.y - y) ** 2; if (d2 > R * R) return;
-    let sc = d2; if (preferSmall && !(o.def.fighter || o.def.boarder)) sc *= 2.2; if (o.def.static) sc *= 1.6; if (o.derelict) sc *= 4;
+    let sc = d2; if (preferSmall && !(o.def.fighter || o.def.boarder)) sc *= 2.2; if (craftLast && (o.def.fighter || o.def.boarder || o.def.shell)) sc *= 1e6; if (o.def.static) sc *= 1.6; if (o.derelict) sc *= 4;
     if (sc < bs) { bs = sc; best = o; }
   });
   return best;
@@ -594,7 +595,7 @@ function think(s, dt) {
       }
       arrive(s, o.x, o.y, 0, 0);
       if (o.face != null) { G.face = o.face; return; }
-      if (s.def.broadside) { if (s.thinkT <= 0) { s.thinkT = .5; s.aware = nearestEnemy(s, s.x, s.y, acq(s), false); } if (s.aware && !s.aware.dead) G.face = broadsideFace(s, s.aware); }
+      if (s.def.broadside) { if (s.thinkT <= 0) { s.thinkT = .5; s.aware = nearestEnemy(s, s.x, s.y, acq(s), false, true); } if (s.aware && !s.aware.dead) G.face = broadsideFace(s, s.aware); }
       return;
     }
     case 'brake': {
@@ -611,7 +612,7 @@ function think(s, dt) {
     }
     case 'form': return formThink(s, o.g, dt);
     case 'amove': {
-      if (s.thinkT <= 0) { s.thinkT = .5; if (!s.engage || s.engage.dead || dist(s, s.engage) > acq(s) * 1.45 || (!s.def.fighter && dist(s, s.engage) > mainReach(s))) s.engage = (s.type === 'hauler' || s.type === 'tender' || s.type === 'scout') ? null : packTarget(s, o) || nearestEnemy(s, s.x, s.y, acq(s), s.def.fighter); }
+      if (s.thinkT <= 0) { s.thinkT = .5; if (!s.engage || s.engage.dead || dist(s, s.engage) > acq(s) * 1.45 || (!s.def.fighter && dist(s, s.engage) > mainReach(s))) s.engage = (s.type === 'hauler' || s.type === 'tender' || s.type === 'scout') ? null : packTarget(s, o) || nearestEnemy(s, s.x, s.y, acq(s), s.def.fighter, !s.def.fighter); }
       if (s.engage) return combat(s, s.engage, dt);
       const d = hyp(o.x - s.x, o.y - s.y);
       if (d < 60 + s.r && hyp(s.vx, s.vy) < 25) orderDone(s, o, o.x, o.y);
@@ -626,7 +627,7 @@ function think(s, dt) {
     case 'attack': return combat(s, o.t, dt);
     case 'line': { // the line of battle: hold the place on the axis, broadside to the enemy
       arrive(s, o.x, o.y, 0, 0, s.group ? s.group.cruise : undefined);
-      if (s.thinkT <= 0) { s.thinkT = .5; s.aware = nearestEnemy(s, s.x, s.y, acq(s) * 1.2, false); }
+      if (s.thinkT <= 0) { s.thinkT = .5; s.aware = nearestEnemy(s, s.x, s.y, acq(s) * 1.2, false, true); }
       if (s.aware && !s.aware.dead) G.face = s.def.broadside ? broadsideFace(s, s.aware) : Math.atan2(s.aware.y - s.y, s.aware.x - s.x);
       else G.face = Math.atan2(o.ey - s.y, o.ex - s.x);
       return;
@@ -917,7 +918,15 @@ function pickTarget(s, w, mx, my) {
     else if (D.emp) { if (o.emp > 1 || small || o.type === 'hauler' || o.derelict) return; sc = d2 / (o.mass * (o.sh > 0 ? 2 : 1)); }
     else if (D.pd) sc *= small ? .25 : (o.type === 'hauler' ? .5 : 1);
     else if (D.kind === 'missile') sc *= small ? 8 : (o.def.static ? 1.5 : 1);
-    else if (D.kind === 'slug') sc *= small ? 5 : (o.type === 'hauler' ? 1.5 : 1);
+    else if (D.kind === 'slug') {
+      // a heavy gun (laid for warships, D.track 500 or more) leaves fighters to point defence, and pods until they are within
+      // 1,500 km, while a warship is in its reach,
+      // and of the warships it lays on the ones its rounds will not pass by (the same odds as the hit test). The side that
+      // closed met the enemy's fighters and pods first and spent about a third of its rail rounds on them, hitting 6-30%
+      if (D.track >= 500) { if (o.def.fighter) sc *= 1e6; else if (o.def.boarder || o.def.shell) sc *= d2 < 1500 * 1500 ? 4 : 1e6; /* a pod that is nearly on us is fair game: one let through takes the ship */ else sc /= clamp((o.def.len || 1000) * (s.def.fc || 1) / D.track, D.trackMin || .25, 1); }
+      else sc *= small ? 5 : 1;
+      if (o.type === 'hauler') sc *= 1.5;
+    }
     if (o.derelict) sc *= 6;
     if (sc < bs) { bs = sc; best = o; }
   });
@@ -1767,10 +1776,10 @@ function formThink(s, g, dt) {
   if (s.thinkT <= 0) {
     s.thinkT = .5;
     if (g.stance === 'line') s.engage = null;
-    else if (g.stance === 'aggressive') { s.engage = s.engage && !s.engage.dead && dist(s.engage, f) < acq(s) * 1.45 ? s.engage : nearestEnemy(s, s.x, s.y, s.def.fighter ? 1500 : acq(s), s.def.fighter); }
-    else if (g.stance === 'defensive') { s.engage = s.engage && !s.engage.dead && dist(s.engage, f) < acq(s) * .8 ? s.engage : nearestEnemy(s, f.x, f.y, acq(s) * .6, s.def.fighter); }
+    else if (g.stance === 'aggressive') { s.engage = s.engage && !s.engage.dead && dist(s.engage, f) < acq(s) * 1.45 ? s.engage : nearestEnemy(s, s.x, s.y, s.def.fighter ? 1500 : acq(s), s.def.fighter, !s.def.fighter); }
+    else if (g.stance === 'defensive') { s.engage = s.engage && !s.engage.dead && dist(s.engage, f) < acq(s) * .8 ? s.engage : nearestEnemy(s, f.x, f.y, acq(s) * .6, s.def.fighter, !s.def.fighter); }
     else s.engage = null;
-    if (s.def.broadside || g.lineOn) s.aware = g.stance === 'hold' ? null : nearestEnemy(s, s.x, s.y, acq(s) * (g.lineOn ? 1.2 : 1), false);
+    if (s.def.broadside || g.lineOn) s.aware = g.stance === 'hold' ? null : nearestEnemy(s, s.x, s.y, acq(s) * (g.lineOn ? 1.2 : 1), false, true);
   }
   if (s.engage && !s.engage.dead && s.engage.team !== s.team && s.weapons.length && mainAmmo(s) > 0) return combat(s, s.engage, dt);
   const sl = s.slot || { x: -200, y: 0 }, ca = Math.cos(g.hdg), sa = Math.sin(g.hdg);
