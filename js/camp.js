@@ -1174,12 +1174,15 @@ function aiSides(f, fls, id) {
   return S;
 }
 // the auto-resolver's roll (each side ×0.85–1.15) worked out exactly: the chance that strength a beats strength b
-const oddsOf = (a, b) => { if (b <= 0) return 1; let p = 0; for (let k = 0; k < 24; k++) { const u0 = .85 + (k + .5) / 24 * .3; p += clamp((a * u0 / b - .85) / .3, 0, 1); } return p / 24; }; // G7: still the old ±15% roll's odds, which the AI's appetites (wantOdds) and recall thresholds are tuned to; the battle itself now rolls LUCK (winOdds)
+const oddsOf = winOdds; // the war councils judge on the battle's own curve (G7's LUCK); since A5 the appetites below are set on it
 function aiOdds(f, fls, id) { const S = aiSides(f, fls, id); return oddsOf(S[0], S[1]); }
-// the odds a ruler wants before a fleet goes in: its appetite for risk, from the superiority it asks for (rulers.js sup):
-// a Reckless ruler goes at two in five, an Onslaught at one in two, a Steady one at three in five, a Patient one at five
-// in six. These are the fights the player gets to play: a Reckless ruler's are coin tosses
-const wantOdds = D => clamp(.35 + (D.sup - 1) * .8, .38, .9);
+// the odds a ruler wants before a fleet goes in: its appetite for risk, from the superiority it asks for (rulers.js sup).
+// It is set as the strength it wants against what it sees, and judged on the battle's curve (A5): a Reckless ruler goes
+// in at 0.97:1 (48%), an Onslaught at about even, a Steady one at 1.03:1 (53%), a Patient one at 1.14:1 (59%). These
+// are the same fights it took on the old ±15% roll; k raises the strength asked (a world where we were beaten, a last
+// stand). These are the fights the player gets to play: a Reckless ruler's are coin tosses
+const wantRatio = D => clamp(.955 + (D.sup - 1) * .31, .96, 1.18);
+const wantOdds = (D, k = 1) => oddsOf(wantRatio(D) * k, 1);
 // how long the owner's known battle fleets would take to come to a world's aid, as power f sees them: a world four weeks
 // from any fleet that could save it is worth more than one under the guns of the enemy's main fleet (0 to 1)
 function farFrom(f, o, id) {
@@ -1203,7 +1206,7 @@ function aiRecall(f, D) {
   for (const fl of C.fleets) { const t = fl.transit; if (fl.owner !== f || !t || t.retreat || t.sortie || fl.engage || (t.left || 0) < 2 || fl.levy || fl.raid) continue;
     const w = C.worlds[t.to]; if (!w || !hostile(f, w.owner)) continue; // a relief of our own world goes on whatever it finds
     const mates = C.fleets.filter(x => x.owner === f && x.transit && !x.transit.retreat && x.transit.to === t.to && Math.abs((x.transit.left || 0) - t.left) <= 1);
-    if (aiOdds(f, mates, t.to) >= Math.max(.2, wantOdds(D) - .3)) continue;
+    if (aiOdds(f, mates, t.to) >= oddsOf(Math.max(.9, wantRatio(D) - .12), 1)) continue; // well short of what it was sent for: 0.9:1 for the boldest (42%), 1.02:1 for a Patient ruler
     const loc = IN.fleetLoc(fl), home = C.worlds[t.from] && C.worlds[t.from].owner === f ? t.from : nearestOwned(f, t.to); if (!home || typeof loc === 'string') continue;
     for (const x of mates) { const lx = IN.fleetLoc(x); if (typeof lx === 'string') continue; const n = ptWeeks(x, home, lx); x.transit = { from: x.transit.from, to: home, p0: lx, left: n, total: n, mode: 'burn', retreat: true }; stat('recall');
       if (w.owner === C.player && IN.levelOf(C.player, x) >= 1) note(`${IN.levelOf(C.player, x) === 2 ? x.name : 'An enemy fleet'} bound for ${bodyOf(t.to).name} turns back: what waits there is more than it bargained for.`, 'gold', t.to); }
@@ -1253,8 +1256,8 @@ function aiOps(f, D, agg, avail) {
   // the second echelon: fleets of the offensive a week further from the target than the muster's slowest go straight
   // there instead, and arrive while the battle is joined (sidesOf counts them at .7, as the battle screen shows them)
   const n0 = at.length ? Math.max(...at.map(x => moveWeeks(x, op.tgt))) : 0, ech = C.difficulty >= 1 && at.length ? fls.filter(x => !x.transit && x.at !== op.muster && moveWeeks(x, op.tgt) === n0 + 1) : [];
-  const sA = at.length && C.difficulty >= 1 ? aiSides(f, at, op.tgt) : null, odds = sA ? oddsOf(sA[0] + ech.reduce((a, x) => a + aiSides(f, [x], op.tgt)[0] * .7, 0), sA[1]) : 1, ok = odds >= wantOdds(D) * (aiLostAt(f, op.tgt) ? 1.15 : 1); // the gathered strike force, with its second echelon, put to the odds
-  if (ok && (str * agg >= op.need * (aiLostAt(f, op.tgt) ? 1.5 : 1) || (C.turn - op.t >= 8 && str * agg >= op.need * .8 && at.length && !aiLostAt(f, op.tgt)) || (at.length && odds >= Math.max(.75, wantOdds(D)) && str * agg >= op.need * .7))) {
+  const sA = at.length && C.difficulty >= 1 ? aiSides(f, at, op.tgt) : null, odds = sA ? oddsOf(sA[0] + ech.reduce((a, x) => a + aiSides(f, [x], op.tgt)[0] * .7, 0), sA[1]) : 1, ok = odds >= wantOdds(D, aiLostAt(f, op.tgt) ? 1.03 : 1); // the gathered strike force, with its second echelon, put to the odds
+  if (ok && (str * agg >= op.need * (aiLostAt(f, op.tgt) ? 1.5 : 1) || (C.turn - op.t >= 8 && str * agg >= op.need * .8 && at.length && !aiLostAt(f, op.tgt)) || (at.length && odds >= Math.max(oddsOf(1.09, 1), wantOdds(D)) && str * agg >= op.need * .7))) {
     // the feint is sprung: the blow falls on the other world, if it is still worth the strike force
     if (op.feint && C.worlds[op.feint] && hostile(f, C.worlds[op.feint].owner) && str * agg >= (IN.knownStrAt(f, op.feint, fleetStr) + defStr(C.worlds[op.feint])) * D.sup) {
       const decoy = op.tgt; op.tgt = op.feint; stat('feint');
@@ -1396,7 +1399,7 @@ function aiTurn(f) {
       const sc = val / (t + 1) / (1 + enemy / str); cand.push([sc, id]); if (sc > bs) { bs = sc; best = id; }
     }
     // the best two by value, put to the odds: the first the ruler would risk is the one
-    if (best && C.difficulty >= 1) { best = null; for (const [, id] of cand.sort((a, b) => b[0] - a[0]).slice(0, 2)) if (aiOdds(f, [fl], id) >= wantOdds(D) * (lastStand ? 1.1 : 1)) { best = id; break; } if (!best) stat('declined'); }
+    if (best && C.difficulty >= 1) { best = null; for (const [, id] of cand.sort((a, b) => b[0] - a[0]).slice(0, 2)) if (aiOdds(f, [fl], id) >= wantOdds(D, lastStand ? 1.02 : 1)) { best = id; break; } if (!best) stat('declined'); }
     if (best) { fl.run = !globalThis.__FOG_OFF && travel(fl.at, best) >= 3 && rnd() < D.dark ? 'dark' : null; moveFleet(fl, best); } // some raids go in dark
     else if (here && hostile(f, here.owner) && aiStalled(f, here.id) && !enoughTroops(f, here, troopsOf(fl))) { const home = nearestOwned(f, here.id); if (home) { moveFleet(fl, home); stat('cut'); } } // a siege that cannot end: home for troops
   }
