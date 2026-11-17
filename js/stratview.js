@@ -1533,7 +1533,7 @@ async function parleyUI(cf) {
   const voiceC = () => (ctx.foeChamp && ctx.foeChamp.cmdr) || ctx.foeLead;
   said.push({ o: foe, t: PA.say(foe, hail, hail === 'challenge' ? voiceC() : ctx.foeLead, cf.world) });
   const who = o => o === me ? 'We' : (ctx.foeLead ? RV.rivalName(ctx.foeLead) : o === 'neu' ? 'The rebels' : K.BLOC_NAME[o]);
-  const ownChallenge = () => { if (hail === 'challenge' && !used.challenge) { used.challenge = true; PA.refuse(cf, me); said.push({ o: me, t: 'We do not answer their challenge. Every deck hears that we would not.' }); } };
+  const ownChallenge = () => { if (hail === 'challenge' && !used.challenge) { used.challenge = true; PA.refuse(cf, me, foe); said.push({ o: me, t: 'We do not answer their challenge. Every deck hears that we would not.' }); } };
   const side = (c, o, lbl) => `<div class="pside" style="--fc:${colS(o)}">${c ? faceSVG(c, { size: 72 }) : `<div class="pnoface">${SHIELD(o, 46)}</div>`}<div><span class="kicker">${lbl}</span><b>${c ? esc(RV.rivalName(c)) : o === 'neu' ? 'Rebel captains' : esc(K.BLOC_NAME[o])}</b><i>${c ? `${CM.RANK[c.rank]} · ${esc(K.BLOC_NAME[o])}${RV.rivalRec(c) ? ` · <em class="rivtag">${esc(RV.recordLine(RV.rivalRec(c)))}</em>` : ''}` : 'No Gold in command'}</i></div></div>`;
   for (;;) {
     const q = ctx.q, strong = q >= .5, champs = ctx.myChamp && ctx.foeChamp;

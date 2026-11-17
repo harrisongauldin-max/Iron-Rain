@@ -153,14 +153,26 @@ export function pursued(cf, refuser, asker) { mod(cf, refuser, PURSUE_MUL, 4, 'R
 
 // ================================================================ ENEMY ANSWERS (AI chat)
 // How an AI commander meets a hail. q is the player's chance to win, so 1 - q is the enemy's.
+// Since A4 the answers weigh what each refusal does to the battle (G1: DEFY_MUL, PURSUE_MUL, SHAME_MUL, CHALLENGE_WAIT),
+// what terms cost in influence (G6) and the duel's ×DUEL_MUL either way.
+
+// a side's chance p once the parley has multiplied its strength by mul, on the battle's own curve (G7's winOdds)
+function shift(p, mul) {
+  if (p <= 0 || p >= 1) return p; let lo = .01, hi = 100;
+  for (let i = 0; i < 40; i++) { const m = Math.sqrt(lo * hi); if (K.winOdds(m, 1) < p) lo = m; else hi = m; }
+  return K.winOdds(Math.sqrt(lo * hi) * mul, 1);
+}
 
 // a Steady or Patient commander keeps the ships for another day, but by fighting clear or asking terms, not by handing
 // them over: halved after the 16 Nov playtest, where demands at 90%+ won 16 of 20 against them (task A1)
 const DOC_YIELD = { reckless: .08, onslaught: .3, steady: .38, patient: .5, cunning: .8 };
 // strike their colours: only when the battle is hopeless, and never for the proudest. A commander whose crews
-// don't trust them, a junior officer, or a people tired of the war yield sooner; a legend of the books almost never
+// don't trust them, a junior officer, or a people tired of the war yield sooner; a legend of the books almost never.
+// Hopeless is under 20% to win, about 1.6:1 against on G7's curve (A5: under the old ±15% roll, 12% was already
+// 1.15:1, and on the new curve 12% would need 2:1, which left two or three surrenders a war). They weigh the battle as
+// it will be once they refuse (G1): defiance stiffens them
 export function surrenderChance(ctx) {
-  const foeQ = 1 - ctx.q; if (foeQ > .12) return 0;
+  const foeQ = shift(1 - ctx.q, DEFY_MUL); if (foeQ > .2) return 0;
   const c = ctx.foeLead, foe = ctx.foe; let k = DOC_YIELD[ctx.foeDoc] ?? .7;
   if (c) {
     if (CM.hasT(c, 'discipline') || CM.hasT(c, 'peerless')) k *= .5;
@@ -172,34 +184,39 @@ export function surrenderChance(ctx) {
   if ((C().weary[foe] || 0) > 50) k *= 1.4;
   if (foe === 'soc' && ctx.me === 'rep') k *= .7; // a Society Gold does not kneel to the Rising lightly
   if (foe === 'rim') k *= 1.1; // the Rim counts its ships and its honour, and will not throw away either
-  return clamp((.12 - foeQ) / .12 * k, 0, .9);
+  return clamp((.2 - foeQ) / .2 * k, 0, .9);
 }
 // terms: if we are the stronger, we let them go and they take the offer when the battle looks lost and their
-// commander is not one to fight to the last; if we are the weaker, we ask leave to go, and they grant it when the
-// field is theirs anyway and their commander would rather keep the ships than have the kill
+// commander is not one to fight to the last. Leaving costs them influence (G6), but less than the ships: from about
+// 45% down they take it more often than not, unless they are Reckless or it is their own orbit. If we are the weaker,
+// we ask leave to go: they grant it when the field is theirs anyway and their commander would rather keep the ships
+// than have the kill, or, if careful, when refusing would still leave the fight in doubt (G1: refusing gives them
+// ×PURSUE_MUL, and the grant earns them influence)
 export function termsChance(ctx) {
   const foeQ = 1 - ctx.q, foe = ctx.foe, w = C().worlds[ctx.cf.world], hate = (C().weary[foe] || 0) > 40 ? 1.3 : 1;
   const D = { reckless: [.15, .1], onslaught: [.5, .3], steady: [.9, .8], patient: [1.1, .9], cunning: [1, .5] }[ctx.foeDoc] || [.9, .7];
   if (ctx.q >= .5) {
-    let p = clamp((.5 - foeQ) / .35, 0, 1) * D[0] * hate;
+    let p = clamp((.55 - foeQ) / .3, 0, 1) * D[0] * hate;
     // giving up the orbit of their own world is harder, of their capital hardest
     if (!ctx.cf.space && w.owner === foe) p *= ctx.cf.world === K.CAPITAL[foe] ? .2 : .55;
     return clamp(p, 0, .9);
   }
-  let p = clamp((foeQ - .5) / .4, 0, 1) * D[1];
+  const careful = ctx.foeDoc === 'steady' || ctx.foeDoc === 'patient' || ctx.foeDoc === 'cunning', foeQp = shift(foeQ, PURSUE_MUL);
+  let p = Math.max(clamp((foeQ - .5) / .4, 0, 1), careful ? clamp((.7 - foeQp) / .2, 0, 1) * .6 : 0) * D[1] * 1.1;
   if (!ctx.cf.space && w.owner === ctx.me && !ctx.att) p *= 1.3; // we offer them the orbit of our world: a prize without a fight
   if (ctx.foeLead && CM.hasT(ctx.foeLead, 'hunter')) p *= .6;
   return clamp(p, 0, .9);
 }
 // a challenge: a Gold of honour answers it; a careful commander outmatched keeps their champion home and takes the
-// shame. Rebels and raiders have no use for single combat
+// shame, which since G1 costs them less than it costs the challenger (×SHAME_MUL against ×CHALLENGE_WAIT), while a
+// lost duel costs ×(2 − DUEL_MUL). Rebels and raiders have no use for single combat
 export function challengeAccept(ctx) {
   if (!ctx.foeChamp) return 0;
   if (ctx.foe === 'neu') return .2;
   const gap = (ctx.myChamp ? ctx.myChamp.rating : 30) - ctx.foeChamp.rating, d = ctx.foeDoc;
   if (d === 'reckless' || d === 'onslaught') return .97;
   if (gap <= 0) return .95;
-  return clamp(.92 - gap / (d === 'patient' || d === 'cunning' ? 30 : 60), .25, .92);
+  return clamp(d === 'patient' || d === 'cunning' ? .85 - gap / 20 : .9 - gap / 40, .1, .92);
 }
 // what the enemy says first. A demand when the battle is theirs and their commander is the kind to make it; a
 // request for terms when it is lost and they would keep their ships; a challenge from a famous blade; else defiance
@@ -207,8 +224,11 @@ export function aiHail(ctx) {
   const foeQ = 1 - ctx.q, d = ctx.foeDoc, ch = ctx.foeChamp;
   if (foeQ > .9 && d !== 'patient') return 'demand';
   if (foeQ < .2 && (d === 'patient' || d === 'steady' || d === 'cunning') && ctx.foe !== 'neu') return 'terms';
-  if (ch && ch.rating >= 74 && foeQ > .2 && foeQ < .85 && ctx.foe !== 'neu') return 'challenge';
-  if (ch && ch.rating >= 66 && (d === 'reckless' || d === 'onslaught') && ctx.foe !== 'neu') return 'challenge';
+  // a challenge we refuse now costs the challenger too (G1), so they make one only with the better blade: 55% to win
+  // the duel, or 45% for the bold
+  const pw = 1 - (ctx.duelP ?? .5);
+  if (ch && ch.rating >= 74 && pw >= .55 && foeQ > .2 && foeQ < .85 && ctx.foe !== 'neu') return 'challenge';
+  if (ch && ch.rating >= 66 && pw >= .45 && (d === 'reckless' || d === 'onslaught') && ctx.foe !== 'neu') return 'challenge';
   return 'defy';
 }
 // the words: short, in each power's voice. {n} is the enemy commander, {w} the world

@@ -146,6 +146,28 @@ async def main():
                 check(rel < 1 and moved, f"G1 a refused {k} turns the auto-resolve odds against us (battle scaled to about even first): strength x{rel:.3f} relative, our chance {v['q0']:.3f} -> {v['q1']:.3f}")
         await pg.close()
         pg = await fresh(b, errs)
+        # A4: the enemy's answers weigh what each refusal costs it. Swept over our chance q and their commander's doctrine,
+        # on a made-up context (deep space, so no world's orbit is at stake; no named commander)
+        r = await pg.evaluate("""async()=>{const PA=await import('./js/parley.js'), C=window.__CAMP.C, w=Object.keys(C.worlds)[0], out={};
+          const ctx=(q, d, dp, ch)=>({cf:{world:w, space:true}, me:C.player, foe:'soc', att:true, q, foeDoc:d, foeLead:null, myChamp:{rating:60}, foeChamp:ch==null?null:{rating:ch}, duelP:dp});
+          for (const d of ['reckless','onslaught','steady','patient','cunning']) { out[d]={};
+            for (const q of [.1,.3,.5,.55,.7,.8,.9,.97]) { const c=ctx(q,d,.5,60); out[d][q]={s:PA.surrenderChance(c), t:PA.termsChance(c), hail:PA.aiHail(c)}; }
+            out[d].chOut=PA.challengeAccept(ctx(.5,d,.75,50)); out[d].chEven=PA.challengeAccept(ctx(.5,d,.5,60));
+            out[d].hailBetter=PA.aiHail(ctx(.5,d,.3,80)); out[d].hailWorse=PA.aiHail(ctx(.5,d,.75,80)); }
+          return out;}""")
+        for d, v in r.items():
+            # we offer terms with the battle 80% ours: a careful commander takes them more often than not
+            if d in ('steady', 'patient', 'cunning'):
+                check(v['0.8']['t'] >= .6, f"A4 {d}: offered terms at 20% to win, they leave more often than not ({v['0.8']['t']:.2f})")
+                check(v['0.5']['t'] > 0 and v['0.55']['t'] < v['0.8']['t'], f"A4 {d}: terms are likelier the worse the battle looks for them ({v['0.55']['t']:.2f} -> {v['0.8']['t']:.2f}), and asked at even they may grant leave ({v['0.5']['t']:.2f})")
+                check(v['chOut'] < .7, f"A4 {d}: their champion outmatched (25% to win the duel), they refuse the challenge more often ({v['chOut']:.2f})")
+            check(v['chEven'] >= .9, f"A4 {d}: an even duel is accepted ({v['chEven']:.2f})")
+            check(all(v[q]['s'] <= v[q2]['s'] for q, q2 in [('0.8', '0.9'), ('0.9', '0.97')]), f"A4 {d}: surrender only grows as the battle gets more hopeless ({[round(v[q]['s'], 2) for q in ('0.8', '0.9', '0.97')]})")
+            check(v['0.5']['s'] == 0 and v['0.8']['s'] == 0, f"A4 {d}: no surrender while the battle is in doubt")
+            check(v['hailWorse'] != 'challenge', f"A4 {d}: no challenge from a champion who would likely lose the duel ({v['hailWorse']})")
+            check(v['hailBetter'] == 'challenge', f"A4 {d}: a famous blade with the better odds challenges ({v['hailBetter']})")
+        await pg.close()
+        pg = await fresh(b, errs)
         # G6: the rival talent cap is 4 on Hard and 3 otherwise
         r = await pg.evaluate("""async()=>{const C=window.__CAMP.C, RV=await import('./js/rivals.js'), CM=await import('./js/command.js'); const d0=C.difficulty, out={};
           for (const d of [0,1,2]) { C.difficulty=d; const c={talents:[]}, R={learned:[]}; let n=0; for (let k=0;k<8;k++) if (RV.learn(c, R, k===0, 'bane')) n++; out[d]=n; }
