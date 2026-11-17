@@ -743,7 +743,9 @@ function fighterAttack(s, t, dt) {
   const close = Math.min(s.def.cruise, 170 + d * .6);
   finish(s, (t.vx + dx / d * close - s.vx) * 2.2, (t.vy + dy / d * close - s.vy) * 2.2);
   G.face = d < 1000 ? la : null;
-  if (d < t.r + 80) { s.fstate = 'extend'; s.ft = 0; }
+  // U3: break off in time to pass her, not into her: at the closing speed a fighter needs about a second to turn away, and
+  // a run that ended at her hull rammed her (ripWings against a dreadnought lost more to collisions than to her guns)
+  if (d < t.r + Math.max(80, hyp(s.vx - t.vx, s.vy - t.vy) * 1.4)) { s.fstate = 'extend'; s.ft = 0; }
 }
 function boardRun(s, t, dt) {
   if (!isCapital(t)) { setIdle(s); return arrive(s, s.x, s.y, 0, 0); }
@@ -917,7 +919,7 @@ function pickTarget(s, w, mx, my) {
     else if (D.emp) { if (o.emp > 1 || small || o.type === 'hauler' || o.derelict) return; sc = d2 / (o.mass * (o.sh > 0 ? 2 : 1)); }
     else if (D.pd) sc *= small ? .25 : (o.type === 'hauler' ? .5 : 1);
     else if (D.kind === 'missile') sc *= small ? 8 : (o.def.static ? 1.5 : 1);
-    else if (D.kind === 'slug') sc *= small ? 5 : (o.type === 'hauler' ? 1.5 : 1);
+    else if (D.kind === 'slug') { if (D.big && small) return; sc *= small ? 5 : (o.type === 'hauler' ? 1.5 : 1); } // U3: a lance (a few shots, seconds to charge) is not spent on fighters and pods
     if (o.derelict) sc *= 6;
     if (sc < bs) { bs = sc; best = o; }
   });
@@ -1065,7 +1067,7 @@ export function damage(s, amt, team, x, y, kind, src) {
   if ((kin || kind === 'lance') && s.sub && x != null) { const rel = Math.abs(angDiff(s.a, Math.atan2(y - s.y, x - s.x))); if (rel > 2.3) { amt *= STERN; stern = true; } else if (rel < .55) amt *= RAKE; } /* raked down her length; in the stern, into the drive */
   if (kin && s.def.armor && !stern) amt = Math.max(amt * .15, amt - s.def.armor); /* armour plate: per hit */
   if (s.sh > 0 && kind !== 'internal') {
-    const sk = s.shT > S.time ? .5 : 1, mul = kind === 'nuke' ? .5 : 1; let absorb;
+    const sk = s.shT > S.time ? .5 : 1, mul = kind === 'nuke' || kind === 'breach' ? .5 : 1; /* U3: a nuke, and a torpedo or a ripWing's nuke laid against her (breach), spend half their force on the shield */ let absorb;
     if (s.sub) { // the struck half takes it; with that half down the shot goes through to the hull
       shSync(s); const side = sideOf(s, x, y), k = side > 0 ? 'shS' : 'shP';
       absorb = Math.min(s[k], amt * mul * sk); s[k] -= absorb; if (side > 0) s.hitS = S.time; else s.hitP = S.time;
@@ -1462,6 +1464,7 @@ function boardingFight(s, t, dt) {
 }
 function collide(a, b) {
   const fast = s => s.tOn && hyp(s.vx, s.vy) > s.def.cruise * 3; if (fast(a) || fast(b) || (a.team === b.team && (a.tOn || b.tOn))) return; // a ship on a transit burn passes above or below the traffic
+  if (a.def.fighter || b.def.fighter) return; // U3: a fighter passes above or below what it flies at (head-on passes and attack runs rammed and killed more ripWings than the guns did)
   const dx = b.x - a.x, dy = b.y - a.y, d = hyp(dx, dy) || 1e-3; const m = a.r * .8 + b.r * .8; if (d >= m) return;
   const nx = dx / d, ny = dy / d; const ia = a.def.static ? 0 : 1 / a.mass, ib = b.def.static ? 0 : 1 / b.mass; if (ia + ib === 0) return;
   const corr = (m - d) / (ia + ib); a.x -= nx * corr * ia; a.y -= ny * corr * ia; b.x += nx * corr * ib; b.y += ny * corr * ib;
@@ -1549,6 +1552,7 @@ function updShots(dt) {
 }
 export function killMissile(m, intercepted) {
   if (m.dead) return; m.dead = true;
+  if (S.dbgMis) S.dbgMis(m, intercepted); /* test harnesses only */
   if (m.nuke && !intercepted) { nukeBlast(m.x, m.y, m.vx, m.vy, m.team); return; }
   if (m.emp && !intercepted) { empBlast(m.x, m.y, m.vx * .3, m.vy * .3); return; }
   burst(m.x, m.y, m.vx * .3, m.vy * .3, intercepted ? 10 : 16, m.nuke ? 0xffffff : 0xffb36b, intercepted ? 140 : 220, .4);
@@ -1579,12 +1583,12 @@ function updMissiles(dt) {
     if (rocksNear(m.x, m.y, 4, k => hyp(m.x - k.x, m.y - k.y) < k.r * .9)) { killMissile(m, false); continue; }
     if (m.arm <= 0) {
       let hit = null; const fuse = m.nuke ? 60 : (m.emp ? 40 : 10);
-      query(m.x, m.y, 30 + fuse, o => { if (o.team === m.team || o.dead || (o.team === 2 && o !== m.t)) return; if (hyp(o.x - m.x, o.y - m.y) < (o.sh > 0 ? o.r * 1.25 : o.r * .85) + fuse) { hit = o; return true; } });
+      query(m.x, m.y, 30 + fuse, o => { if (o.team === m.team || o.dead || (o.team === 2 && o !== m.t) || (m.breach && (o.def.fighter || o.def.boarder))) return; /* U3: a torpedo or a ripWing's nuke is fused for a hull, and passes the small craft screening her */ if (hyp(o.x - m.x, o.y - m.y) < (o.sh > 0 ? o.r * 1.25 : o.r * .85) + fuse) { hit = o; return true; } });
       if (hit) {
         if (m.nuke || m.emp) { if (m.emp) damage(hit, m.dmg, m.team, m.x, m.y, 'missile', m.src); killMissile(m, false); continue; }
         { const vis = !(hit.sh > 0) && S.skinAt ? S.skinAt(hit, m.x, m.y, m.vx - hit.vx, m.vy - hit.vy) : null, mx0 = m.x, my0 = m.y; // it bursts on her skin as drawn, not on the hit circle
           if (vis) { m.x = vis[0]; m.y = vis[1]; } killMissile(m, false); m.x = mx0; m.y = my0;
-          damage(hit, m.breach && !bigHull(hit) ? m.dmg * .25 : m.dmg, m.team, m.x, m.y, 'missile', m.src); if (vis) { hit.hitX = vis[0]; hit.hitY = vis[1]; } }
+          damage(hit, m.breach && !bigHull(hit) ? m.dmg * .25 : m.dmg, m.team, m.x, m.y, m.breach ? 'breach' : 'missile', m.src); if (vis) { hit.hitX = vis[0]; hit.hitY = vis[1]; } }
         query(m.x, m.y, 60, o => { if (o !== hit && o.team !== m.team && !o.dead && hyp(o.x - m.x, o.y - m.y) < o.r + 50) damage(o, m.dmg * .3, m.team, m.x, m.y, 'missile', m.src); });
         S.rings.push({ x: m.x, y: m.y, vx: hit.vx, vy: hit.vy, r: 4, max: 60, life: .35, maxl: .35, col: 0xffcf8a }); sfx('boom', m.x, m.y, 6); continue;
       }
