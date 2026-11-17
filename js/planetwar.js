@@ -19,12 +19,12 @@ export const MAPS = {
   mercury: {
     name: 'Mercury', capital: 'tyche',
     provs: [
-      { id: 'tyche', name: 'Tyche', lat: 46, lon: -26, kind: 'capital', terrain: 'alpine', pop: .26, gar: .38, walls: 1, guns: .6, shield: 1, note: 'the capital' },
-      { id: 'heliopolis', name: 'Heliopolis', lat: -4, lon: -24, kind: 'city', terrain: 'temperate', pop: .26, gar: .26, walls: 2, guns: .4, port: 1, field: 'mercury', note: 'the centre of commerce; spaceport' },
-      { id: 'keryx', name: 'Keryx', lat: 8, lon: 40, kind: 'port', terrain: 'temperate', pop: .14, gar: .12, port: 1, note: 'port city' },
-      { id: 'ladon', name: 'Waste of Ladon', lat: 6, lon: 2, kind: 'towns', terrain: 'desert', pop: .08, gar: .07, note: 'mining towns' },
-      { id: 'highlands', name: 'Northern highlands', lat: 38, lon: 8, kind: 'forts', terrain: 'highland', pop: .06, gar: .08, note: 'hill forts' },
-      { id: 'jungles', name: 'Southern jungles', lat: -30, lon: 5, kind: 'towns', terrain: 'jungle', pop: .08, gar: .05, note: 'scattered towns' },
+      { id: 'tyche', name: 'Tyche', lat: 46, lon: -26, kind: 'capital', terrain: 'alpine', pop: .26, gar: .34, walls: 1, guns: .3, shield: 1, note: 'the capital' },
+      { id: 'heliopolis', name: 'Heliopolis', lat: -4, lon: -24, kind: 'city', terrain: 'temperate', pop: .26, gar: .25, walls: 2, guns: .4, port: 1, field: 'mercury', note: 'the centre of commerce; spaceport' },
+      { id: 'keryx', name: 'Keryx', lat: 8, lon: 40, kind: 'port', terrain: 'temperate', pop: .14, gar: .11, port: 1, note: 'port city' },
+      { id: 'ladon', name: 'Waste of Ladon', lat: 6, lon: 2, kind: 'towns', terrain: 'desert', pop: .08, gar: .06, note: 'mining towns' },
+      { id: 'highlands', name: 'Northern highlands', lat: 38, lon: 8, kind: 'forts', terrain: 'highland', pop: .06, gar: .16, guns: .3, note: 'hill forts guarding the road to Tyche, with half the capital\'s batteries' }, // decision 10
+      { id: 'jungles', name: 'Southern jungles', lat: -30, lon: 5, kind: 'towns', terrain: 'jungle', pop: .08, gar: .04, note: 'scattered towns' },
       { id: 'borw', name: 'Borealis West', lat: 22, lon: 162, kind: 'port', terrain: 'temperate', pop: .07, gar: .03, port: 1, note: 'far side' },
       { id: 'bore', name: 'Borealis East', lat: -4, lon: 204, kind: 'towns', terrain: 'jungle', pop: .05, gar: .01, note: 'far side' },
     ],
@@ -55,7 +55,7 @@ export function reach(war, army) {
 // here the whole garrison is on the map, spread over the provinces.
 // the garrison's edge on its own world (it knows the ground, holds the strongpoints and is fed): tuned with tests/planet_war.mjs
 // so the stand-in attacker's plan takes Mercury in week 1 about two times in three; a test may change it
-export const TUNE = { def: 2 }; // 16 Nov (M2b): with the fitted field, a garrison troop puts about twice the men of a Rain troop in the line (the city's militia, police and levies under arms)
+export const TUNE = { def: 2.3 }; // 16 Nov (M2b) 2, 17 Nov (decision 10, with the highlands garrisoned) 2.3: with the fitted field, a garrison troop puts about twice the men of a Rain troop in the line (the city's militia, police and levies under arms)
 // What the field shows, fitted from ground.js province battles (tests/planet_fit.mjs, 2026-11-16: 234 battles on
 // Mercury's provinces at 15,000 holders, both ways round; claude/planet-maps.md):
 //   HOLD: the holder's edge on its own ground with no walls, by settlement and terrain. Small towns and hill forts are

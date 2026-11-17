@@ -21,7 +21,10 @@ const PLANS = {
   'Heliopolis and Ladon': [['heliopolis', .6], ['ladon', .4]],
   'far side first': [['borw', .6], ['bore', .4]],
 };
-export const AI_PLAN = 'Heliopolis and Ladon'; // the plan the stand-in attacker uses
+// the legate's plan: suggestPlan's best (decision 10: it must win 55–80%; it's the plan the computer's Rain and the
+// player's "Legate's plan" button both use)
+const LEG = PW.suggestPlan(spec); PLANS["the legate's plan (" + LEG.map(x => x.prov).join(' + ') + ')'] = LEG.map(x => [x.prov, x.troops / T]);
+export const AI_PLAN = Object.keys(PLANS).at(-1);
 const out = {};
 for (const [name, shares] of Object.entries(PLANS)) {
   let won = 0, weeks = 0, n = 0, lost = 0, maxW = 0;
@@ -51,5 +54,5 @@ for (const [name, shares] of Object.entries(PLANS)) {
   if (!fine) process.exitCode = 1; }
 const ai = out[AI_PLAN].win, wins = Object.values(out).map(o => o.win), spread = Math.max(...wins) - Math.min(...wins), wk = out[AI_PLAN].weeks;
 const ok = ai >= .55 && ai <= .8 && spread >= .15 && wk >= 3 && wk <= 8;
-console.log(`\nthe AI's plan (${AI_PLAN}): ${(ai * 100).toFixed(0)}% in ${wk.toFixed(1)} weeks; plans range ${(spread * 100).toFixed(0)} points.  ${ok ? 'PASS' : 'FAIL'}`);
+console.log(`\n${AI_PLAN}: ${(ai * 100).toFixed(0)}% in ${wk.toFixed(1)} weeks; plans range ${(spread * 100).toFixed(0)} points.  ${ok ? 'PASS' : 'FAIL'}`);
 process.exit(ok && !process.exitCode ? 0 : 1);
