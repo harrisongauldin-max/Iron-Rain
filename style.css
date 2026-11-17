@@ -1606,3 +1606,7 @@ body.bcalm #babhint{top:-46px}
 .aords .aord span{grid-column:2 / 4;color:var(--dim)}
 .aords .aord.good span{color:#9fd8a5}.aords .aord.bad span{color:#ffb3a8}
 .aords .aord:only-child span{grid-column:1 / 4}
+/* ---- UI Builder: the war for a planet on the world and fleet panels (M3-UI) ---- */
+.pwrow{margin:6px 0 4px;padding:5px 8px;border-left:2px solid var(--gold,#f2c14e);background:rgba(242,193,78,.06);font-size:11.5px;line-height:1.4}
+.pwrow.good{border-left-color:#7fd88a}.pwrow.bad{border-left-color:#ff7a6a}
+.pwrow + .btn[data-a="pmap"],.istats .btn[data-a="pmap"]{margin:2px 0 6px}

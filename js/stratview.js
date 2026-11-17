@@ -7,6 +7,7 @@ import { BODIES, FACTIONS, sigilSVG, ICON_SCALE, COUNTER, CRAFT, CRAFT_NAME, BAY
 import { WORLDS, WORLD as WDEF, bodyOf, setupBodies, AU } from './solar.js';
 const PI = Math.PI;
 import * as K from './camp.js';
+import * as PW from './planetwar.js';
 import { C } from './camp.js';
 import { toWorld, projectTo } from './cam.js';
 import { buildIcon, overlayAPI, portrait, silhouette, fleetGlow, siegeFx, clashFx, surfaceFx } from './render.js';
@@ -626,6 +627,7 @@ function fleetPanel(fl) {
       if (!K.canRefit(fl)) h += `<button class="btn" data-a="refit" data-tip="${tipA('Change the fit of the marked hulls, or of the whole fleet, at this shipyard')}">Refit${V.mark.size ? ' ' + V.mark.size + ' marked' : ''}</button>`;
       for (const o of K.fleetsAt(fl.at, me)) if (o !== fl) h += `<button class="btn" data-merge="${o.id}">Merge ${esc(o.name)}</button>`;
       const w = C.worlds[fl.at], rc = rainCheck(fl);
+      if (w.war && K.warHuman(w.war)) h += planetRow(w);
       if (K.hostile(me, w.owner)) {
         if (rc.err) h += `<div class="rainbox off" data-tip="${tipA(rc.err + (rc.troops ? '. ' + fmt(rc.troops) + ' troops are ready' + (rc.need ? ', ' + fmt(rc.need) + ' more needed for even odds' : '') + '.' : '.'))}"><b>Iron Rain</b><span>${rc.err}</span></div>`;
         else if (rc.chance < .2) h += `<button class="rainbox weak" data-a="rain" data-tip="${tipA(`<div class='th'>Iron Rain on ${nm(fl.at)}</div><div class='tbad'>${Math.round(rc.chance * 100)}% to take it. Bring about ${fmt(rc.need)} more troops for even odds.</div>`)}"><b>Iron Rain · ${Math.round(rc.chance * 100)}%</b><span>Need ~${fmt(rc.need)} more troops for even odds</span></button>`;
@@ -771,6 +773,7 @@ function worldPanel(w) {
     <div class="ibody"><div class="istats">
       <div class="lore" data-tip="${tipA(`<div class='th'>${nm(w.id)}</div><div class='tdim'>${esc(W.lore || '')}</div>` + (W.pros || []).map(p => `<div class='tgood'>+ ${esc(p[0])}: ${esc(p[1])}</div>`).join('') + (W.cons || []).map(c => `<div class='tbad'>− ${esc(c[0])}: ${esc(c[1])}</div>`).join(''))}">${esc(W.lore || '')}</div>
       ${w.siege ? `<div class="warn">Besieged by ${K.BLOC_NAME[w.siege.by]} · week ${w.siege.turns}. Output falls to a quarter and nothing can be built.</div>` : ''}
+      ${planetRow(w)}
       <div class="mrow" data-tip="${tipA(`<div class='th'>Loyalty</div><div class='tdim'>The loyalty of the world's estates, weighted by their numbers. Each estate drives its own work. Under 12% the world may revolt; an estate under 25% goes on strike.</div>`)}"><span>Loyalty</span><b>${Math.round(w.loyalty)}%</b></div>${estateStrip(w)}
       <div class="mrow" data-tip="${tipA(`<div class='th'>Garrison</div><div class='tdim'>Legions on the ground. An Iron Rain must beat them. Barracks and Fortresses raise the cap.</div>`)}"><span>Garrison</span><b>${fmt(w.garrison)} / ${fmt(cap)}</b></div>${bar(w.garrison / cap, 'am')}
       <div class="dchips"><span data-tip="${tipA('Orbital gun platforms: they fire on hostile fleets and shoot down Iron Rain drops')}">⊕ ${w.gun} guns</span><span data-tip="${tipA('Shield platforms: they cover the guns and the authority')}">◈ ${w.shield} shields</span><span data-tip="${tipA('The orbital authority: board it in battle and the world falls at once')}">⌖ ${Math.round(w.gov * 100)}%</span></div>
@@ -906,6 +909,7 @@ function onClick(e) {
   if (d.scancel !== undefined) { const w = C.worlds[s.w], q = w.sq[+d.scancel], e2 = K.cancelShip(me, w, +d.scancel); if (e2) toastS(e2, 'bad'); else { sfx && sfx('click'); toastS('Cancelled: ' + K.defsOf(me)[q.t].name + ', refunded'); } return refresh(); }
   if (d.bld) { const e2 = K.startBuild(me, C.worlds[s.w], d.bld); if (e2) toastS(e2, 'bad'); else { sfx && sfx('click'); closePop(); } return refresh(); }
   if (d.dz !== undefined) return dzClick(d.dz);
+  if (d.a === 'pmap') return planetMapUI(d.w);
   if (d.tr) { const w = s && s.w && C.worlds[s.w], f0 = s && s.fl, e2 = d.tr === 'patron' ? EC.patronage(me) : d.tr === 'charter' ? EC.charter(me) : d.tr === 'works' ? EC.publicWorks(me, w) : d.tr === 'levy' ? EC.levy(me, w) : d.tr === 'sworks' ? EC.siegeWorks(me, C.worlds[f0.at]) : 'unknown';
     if (e2) toastS(e2, 'bad'); else toastS({ patron: 'Favours bought: +15 influence', charter: 'Charter signed: naval capacity +' + EC.CHARTER.cap, works: 'Public works begin', levy: 'The levy musters: +' + fmt(EC.LEVY.garrison) + ' garrison', sworks: 'The sappers go in: a week off the holdout' }[d.tr], 'good');
     if (d.tr === 'patron' || d.tr === 'charter') return factionUI(); return refresh(); }
@@ -1300,6 +1304,63 @@ async function rainUI(fl, preferAssault) {
   if (!C.fleets.includes(fl)) V.sel = { w: w.id }; refresh(); checkOver();
 }
 
+// ---------------------------------------------------------------- the war for a planet (M3-UI; camp.js M3-C, planetwarview.js)
+// a world with a planet map under siege or at war, where the player is one of the sides: the war's line on the world
+// and fleet panels, and the button to its map
+function planetRow(w) {
+  if (!PW.hasMap(w.id)) return ''; const me = C.player, war = w.war, h = war && K.warHuman(war);
+  if (!(h || (w.siege && (w.siege.by === me || w.owner === me)))) return '';
+  let line = '';
+  if (war) { const heldA = 1 - (war.share ?? 1), mine = h === 'att' ? heldA : 1 - heldA, men = s => war.armies.reduce((t, a) => t + (a.side === s ? a.men : 0), 0);
+    line = `<div class="pwrow ${mine >= .5 ? 'good' : 'bad'}">War on the surface · week ${war.week} · ${h === 'att' ? 'our legions' : 'the enemy'} hold ${Math.round(heldA * 100)}% of the people · legions ${fmt(men('att'))}, garrison ${fmt(men('def'))}${war.pending && war.pending.length ? ` · <b>${war.pending.length} battle${war.pending.length > 1 ? 's' : ''} waiting</b>` : ''}${war.ordered === C.turn ? ' · orders given' : ''}</div>`; }
+  const tip = war ? `<div class='th'>The planet map</div><div class='tdim'>The war for ${nm(w.id)}, province by province. Give your armies their marches for this week; they move when the turn ends. Armies you leave without orders follow the legate's plan, unless you gave any orders this week.</div>`
+    : `<div class='th'>The planet map · preview</div><div class='tdim'>${nm(w.id)}'s provinces, garrisons and guns. Plan a Rain and play it out: nothing here goes back to the campaign.</div>`;
+  return line + `<button class="btn" data-a="pmap" data-w="${w.id}" data-tip="${tipA(tip)}">${war ? 'Planet map ▸' : 'Planet map (preview) ▸'}</button>`;
+}
+// a ground battle for a province, fought from the campaign: the map is hidden while it is fought
+async function provinceFight(spec, meta) { leaveStrat(); let r = null; try { r = await GV.fight(spec, meta); } catch (e) { console.error('the province battle failed', e); } enterStrat(); return r; }
+const warNames = war => ({ attName: K.BLOC_NAME[war.by], defName: K.BLOC_NAME[war.def] || 'The garrison' });
+async function planetMapUI(wid, inTurn = false) { // inTurn: from the battle list, while the turn is ending
+  const w = C.worlds[wid]; if (!w || !PW.hasMap(wid) || (V.busy && !inTurn) || modalOpen()) return;
+  const war = w.war, me = C.player, h = war && K.warHuman(war); let spec, opts;
+  if (war && h) { spec = { world: wid, by: war.by, def: war.def, troops: 0, cmdrs: [] }; opts = { war, human: h, date: date(C.turn), ...warNames(war), fight: provinceFight, title: nm(wid) }; }
+  else if (w.siege && (w.siege.by === me || w.owner === me)) { const fl = K.fleetsAt(wid, w.siege.by).sort((a, b) => K.troopsOf(b) - K.troopsOf(a))[0]; if (!fl) return;
+    spec = K.warSpec(fl); if (spec.troops < 50) spec.troops = Math.max(1000, Math.round(w.garrison)); opts = { human: w.siege.by === me ? 'att' : 'def', preview: true, date: date(C.turn), attName: K.BLOC_NAME[w.siege.by], defName: K.BLOC_NAME[w.owner], fight: provinceFight, title: nm(wid) }; }
+  else return;
+  const busy0 = V.busy; V.busy = true; closePop(); hideTip();
+  try { const PMV = await import('./planetwarview.js'); await PMV.open(spec, opts); } catch (e) { console.error('the planet map failed', e); }
+  V.busy = busy0;
+  if (war && war.armies.some(a => a.side === h && a.to)) war.ordered = C.turn; // the player's orders stand in for the legate's plan this week
+  refresh();
+}
+// the battle list, after the space battles: the week's planet battles the player is in (C.planetBattles, camp.js
+// planetMoves), each fought on its province's field or auto-resolved; or opened on the planet map
+async function planetBattlesUI() {
+  for (const wid of [...new Set((C.planetBattles || []).map(b => b.world))]) {
+    const w = C.worlds[wid], war = w && w.war; if (!war) continue; const h = K.warHuman(war), M = PW.MAPS[wid];
+    while (war.pending.length && !C.over) {
+      const b = war.pending[0], p = M.provs.find(x => x.id === b.prov), men = s => war.armies.reduce((t, a) => t + (a.side === s && a.prov === b.prov ? a.men : 0), 0);
+      const cm = s => war.armies.filter(a => a.side === s && a.prov === b.prov).flatMap(a => a.cmdrs || []).map(c => esc(c.name)).join(', ');
+      const pa = PW.oddsAt(war, b.prov), q = h === 'att' ? pa : 1 - pa, col = q >= .55 ? 'good' : q < .4 ? 'bad' : 'gold', ca = cm('att'), cd = cm('def');
+      const what = b.kind === 'landing' ? 'The Rain lands' : war.provs[b.prov].own === 'att' ? 'The garrison attacks' : 'The legions attack';
+      { const pos = LAY.pos[wid]; if (pos) { S.cam.x = pos.x; S.cam.y = pos.y; } }
+      const v = await modal(`<div class="kicker">${date(C.turn)} · ${nm(wid)}${war.week ? ' · week ' + war.week + ' of the war' : ''}</div><h2>${esc(p.name)}: ${what.toLowerCase()}</h2>
+        <div class="fgrid"><div class="stat"><i>${esc(warNames(war).attName)}</i><b>${fmt(men('att'))}</b>${ca ? `<span class="dim">${ca}</span>` : ''}</div><div class="stat"><i>${esc(warNames(war).defName)}</i><b>${fmt(men('def'))}</b>${cd ? `<span class="dim">${cd}</span>` : ''}</div><div class="stat"><i>Your chance</i><b class="${col}">${Math.round(q * 100)}%</b></div></div>
+        <p class="dim">${esc(p.name)}: ${esc(p.note || p.kind)}. Fight it on its own field, or let it be auto-resolved: the odds are the same either way.${war.pending.length > 1 ? ` ${war.pending.length - 1} more battle${war.pending.length > 2 ? 's' : ''} on ${nm(wid)} this week.` : ''}</p>`,
+        [['map', 'Planet map ▸'], ...(war.pending.length > 1 ? [['all', 'Auto-resolve all']] : []), ['auto', 'Auto-resolve'], ['fight', 'Fight it ▸', 'go']], { esc: 'auto', cls: 'rain' });
+      if (v === 'map') { await planetMapUI(wid, true); continue; }
+      if (v === 'all') { for (const x of war.pending.slice()) K.resolvePlanet(wid, x.prov); break; }
+      let r = null; const t0 = Date.now();
+      if (v === 'fight') { const sp = PW.battleSpec(war, b.prov), holder = sp.planet.holder, side = s => s === 'att' ? warNames(war).attName : warNames(war).defName;
+        r = await provinceFight(sp, { world: nm(wid), date: date(C.turn), attName: side(sp.planet.foe), defName: side(holder) }); }
+      const res = r && r.att0 != null ? K.settlePlanet(wid, b.prov, r) : K.resolvePlanet(wid, b.prov);
+      if (v === 'fight') SL.ev('fightSecs', { s: Math.round((Date.now() - t0) / 1000) });
+      if (res) { const won = res.won === h; sfx && sfx(won ? 'victory' : 'defeat'); toastS(`${p.name}: ${won ? 'we win' : 'we lose'}${res.how === 'fought' ? ' on the field' : ''}`, won ? 'good' : 'bad'); }
+    }
+  }
+  C.planetBattles = []; refresh();
+}
+
 // the Iron Rain fought on the ground (ground.js, groundview.js): the drop is spent when it falls, win or lose
 async function groundUI(fl) {
   const w = C.worlds[fl.at], name = nm(w.id), before = w.owner, spec = K.groundSpec(fl); if (spec.err) return toastS(spec.err, 'bad');
@@ -1393,6 +1454,7 @@ async function endTurnUI() {
       await battleResult(cf, res, snap, W0); await pendingUI();
       if (C.over) break;
     }
+    if (!C.over) await planetBattlesUI();
     if (!C.over) K.finishTurn();
     if (C.moving) { LAY = layout(); S.orrery = LAY; }
     while (C.pendingEvents && C.pendingEvents.length && !C.over) { const ev = C.pendingEvents.shift(), E = ST.EVENTS[ev.k]; const tg = typeof ev.t === 'string' && C.worlds[ev.t] ? ev.t : null;
