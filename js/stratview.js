@@ -1496,11 +1496,11 @@ async function parleyUI(cf) {
       said.push({ o: foe, t: PA.say(foe, 'no', ctx.foeLead, cf.world) }); PA.defied(cf, foe); (cf.parley.lines).push(`${who(foe)} refused to strike.`); }
     else if (v === 'terms') { used.terms = true; ownChallenge();
       if (strong) { said.push({ o: me, t: theirTerms ? 'Go, then. Leave the field.' : 'Leave the field and nobody dies here today.' }); if (theirTerms || roll < ctx.pTerms) return { res: PA.terms(cf, foe) }; }
-      else { said.push({ o: me, t: 'Let us withdraw. Nobody need die here today.' }); if (roll < ctx.pTerms) return { res: PA.terms(cf, me) }; }
+      else { said.push({ o: me, t: 'Let us withdraw. Nobody need die here today.' }); if (roll < ctx.pTerms) return { res: PA.terms(cf, me) }; PA.pursued(cf, foe, me); (cf.parley.lines).push(`${who(foe)} refused us leave to go: they will press us.`); }
       said.push({ o: foe, t: PA.say(foe, 'no', ctx.foeLead, cf.world) }); }
     else if (v === 'challenge') { used.challenge = true;
       if (hail !== 'challenge') { said.push({ o: me, t: `${ctx.myChamp.name} will meet your best, before the guns speak.` });
-        if (roll >= ctx.pChallenge) { PA.refuse(cf, foe); said.push({ o: foe, t: 'They will not send a champion.' }); cf.parley.lines.push(`${who(foe)} refused our challenge: their crews saw it.`); ctx = Object.assign(PA.context(cf, me), { hail }); continue; } }
+        if (roll >= ctx.pChallenge) { PA.refuse(cf, foe, me); said.push({ o: foe, t: 'They will not send a champion.' }); cf.parley.lines.push(`${who(foe)} refused our challenge: their crews saw it.`); ctx = Object.assign(PA.context(cf, me), { hail }); continue; } }
       const d = PA.duel(ctx), W = d.winner, L = d.loser;
       const fateT = { killed: `${L.name} is cut down.`, wounded: `${L.name} is carried off wounded.`, yielded: `${L.name} yields, and is taken.`, beaten: `${L.name} is beaten.` }[d.fate];
       said.push({ o: d.weWin ? me : foe, t: `${W.name} wins the duel. ${fateT}` });

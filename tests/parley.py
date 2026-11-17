@@ -119,6 +119,21 @@ async def main():
             check(r['grant'] == [r['G'], -r['A']], f"G6 terms we grant: we gain {r['G']} influence, the side that asked leave pays {r['A']} ({r['grant']})")
             check(r['ask'] == [-r['A'], r['G']], f"G6 terms we ask: we pay {r['A']} influence, the side that let us go gains {r['G']} ({r['ask']})")
             check(r['poor'] == 0, f"G6 asking leave with 4 influence leaves us at 0, not below ({r['poor']})")
+        await pg.close()
+        # G1: every refusal moves the auto-resolve odds, not only morale
+        pg = await fresh(b, errs); hit = await pg.evaluate(FIND)
+        if hit:
+            r = await pg.evaluate("""async()=>{const K=window.__CAMP.K, C=window.__CAMP.C, PA=await import('./js/parley.js'); const cf=window.__CF, me=C.player, foe=cf.att===me?cf.def:cf.att, att=cf.att===me;
+              const q=()=>{ const p=K.forecastBattle(cf, 5000).attWin; return att?p:1-p; }, i=att?0:1, out={};
+              for (const [k, f] of [['demand', ()=>PA.defied(cf, foe)], ['askLeave', ()=>PA.pursued(cf, foe, me)], ['challenge', ()=>PA.refuse(cf, foe, me)]]) {
+                delete cf.parley; const q0=q(); f(); const m=cf.parley.mul.slice(); const q1=q(); out[k]={q0, q1, ours:m[i], theirs:m[1-i]}; }
+              delete cf.parley; return out;}""")
+            for k, v in r.items():
+                rel = v['ours'] / v['theirs']
+                moved = v['q1'] < v['q0'] - .004 or v['q0'] < .02 or v['q0'] > .98
+                check(rel < 1 and moved, f"G1 a refused {k} turns the auto-resolve odds against us: strength x{rel:.3f} relative, our chance {v['q0']:.3f} -> {v['q1']:.3f}")
+        await pg.close()
+        pg = await fresh(b, errs)
         # G6: the rival talent cap is 4 on Hard and 3 otherwise
         r = await pg.evaluate("""async()=>{const C=window.__CAMP.C, RV=await import('./js/rivals.js'), CM=await import('./js/command.js'); const d0=C.difficulty, out={};
           for (const d of [0,1,2]) { C.difficulty=d; const c={talents:[]}, R={learned:[]}; let n=0; for (let k=0;k<8;k++) if (RV.learn(c, R, k===0, 'bane')) n++; out[d]=n; }

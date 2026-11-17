@@ -135,9 +135,17 @@ export function duel(ctx) {
   return { weWin, winner: W, loser: L, fate };
 }
 // a challenge refused: the side that would not send its champion fights shamed
-export function refuse(cf, o) { mod(cf, o, SHAME_MUL, -SHAME_MOR, 'Refused a challenge'); }
-// a demand refused: the defiance stiffens the side that gave it
-export function defied(cf, o) { mod(cf, o, 1, 4, 'Defied a demand to yield'); }
+// G1: no parley choice is a free roll any more; each refusal moves cf.parley.mul, which the auto-resolver counts too
+// (sidesOf), not only morale, which counts only in a fought battle.
+// challenger: whose challenge was refused. Waiting on a duel that never came costs the challenger's lines a little
+// (CHALLENGE_WAIT), so a challenge the enemy is sure to refuse no longer wins something for nothing
+export const DEFY_MUL = 1.05, PURSUE_MUL = 1.06, CHALLENGE_WAIT = .94; // .94 against the refuser's SHAME_MUL .96: on auto-resolve an unanswered challenge nets the challenger about -2%; in a fought battle the refuser's shame (morale) still tells
+export function refuse(cf, o, challenger) { mod(cf, o, SHAME_MUL, -SHAME_MOR, 'Refused a challenge'); if (challenger) mod(cf, challenger, CHALLENGE_WAIT, 0, 'Their challenge went unanswered'); }
+// a demand refused: the defiance stiffens the side that gave it, in strength as well as heart
+export function defied(cf, o) { mod(cf, o, DEFY_MUL, 4, 'Defied a demand to yield'); }
+// leave to withdraw refused: the side that refused it has smelled weakness and will press the pursuit; the side that
+// asked goes in knowing it wanted out
+export function pursued(cf, refuser, asker) { mod(cf, refuser, PURSUE_MUL, 4, 'Refused them leave to go'); if (asker) mod(cf, asker, 1, -4, 'Asked leave to withdraw, and was refused'); }
 
 // ================================================================ ENEMY ANSWERS (AI chat)
 // How an AI commander meets a hail. q is the player's chance to win, so 1 - q is the enemy's.
