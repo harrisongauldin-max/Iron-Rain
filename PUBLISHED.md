@@ -4,6 +4,7 @@ Each publish of `main` to the claude.ai artifact (slug `fc8b77cf-d69b-4cca-9154-
 
 | Artifact version | Date | Commit | What changed |
 |---|---|---|---|
+| 1794888824-2ae4 | 2026-11-16 | 05ae05b | G5, a late game: late-war cards at least every 3 weeks after a fall (`js/story.js` `lateTick`; loyalists, triumph, spoils, rebuild, exiles, yards, last war), mobilisation's battle edge (`js/camp.js` `sidesOf`), hoards above the store spoil 15% a week (`js/economy.js` `SPOIL`). |
 | 1794888103-d164 | 2026-11-16 | 1d63f05 | G2, prize hulls cost something: recommissioning at a yard for ore and a full crew (`js/camp.js` `recommission`), crews scuttle by doctrine instead of striking (`js/parley.js` `SCUTTLE`). |
 | 1794887030-b9e5 | 2026-11-16 | 1ec49ac | G1, parley choices cost something: a refused demand x1.05 to the defiant side, a refused ask-leave x1.06 pursuit to the refuser, a refused challenge of ours x.94 to us against the refuser's x.96 (`js/parley.js`); parleyUI calls them (`js/stratview.js`). |
 | 1794886545-1e3c | 2026-11-16 | 4b75c10 | G6, Harrison's parley decisions: terms move influence (`js/parley.js` `terms`: granter +5, the side asking leave -12, never below 0, with a dispatch); rivals learn up to 4 talents on Hard, 3 otherwise (`js/rivals.js` `maxLearned`). |
