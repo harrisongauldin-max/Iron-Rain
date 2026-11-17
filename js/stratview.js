@@ -1290,8 +1290,11 @@ async function rainUI(fl, preferAssault) {
   if (go === 'ground') return groundUI(fl);
   if (go !== 'go') return;
   const r = K.ironRain(fl); if (r.err) return toastS(r.err, 'bad');
-  sfx && sfx(r.won ? 'victory' : 'defeat');
+  sfx && sfx(r.won || r.war ? 'victory' : 'defeat');
   const last = C.log[0];
+  if (r.war && r.won == null) { // a world with a planet map: the Rain starts the war for the planet (M3-C)
+    await modal(`${rainArt(w.id, 'won')}<div class="kicker">${date(C.turn)}</div><h2 class="good">The war for ${name} begins</h2><p>${esc(last ? last.msg : '')}</p><p class="dim">The legions march each week with the campaign. They follow the legate's plan unless you give them orders on the planet map. Keep the orbit: without it no supplies or reinforcements reach them.</p>`, [['ok', 'Continue', 'go']], { esc: 'ok', enter: 'ok', cls: 'rain' });
+    await pendingUI(); if (!C.fleets.includes(fl)) V.sel = { w: w.id }; refresh(); return checkOver(); }
   await modal(`${rainArt(w.id, r.won ? 'won' : 'lost')}<div class="kicker">${date(C.turn)}</div><h2 class="${r.won ? 'good' : 'bad'}">${r.won ? 'Iron Rain: ' + name + ' falls' : 'The drop on ' + name + ' fails'}</h2><p>${esc(last ? last.msg : '')}</p>${r.won ? `<p class="dim">${name} was held by ${K.BLOC_NAME[before]}. Its loyalty starts low: garrison it and build a Fortress before it revolts.</p>` : ''}`, [['ok', 'Continue', 'go']], { esc: 'ok', enter: 'ok', cls: 'rain' });
   await pendingUI();
   if (!C.fleets.includes(fl)) V.sel = { w: w.id }; refresh(); checkOver();

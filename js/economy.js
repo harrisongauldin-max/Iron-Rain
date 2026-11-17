@@ -213,7 +213,7 @@ export function jolt(w, d) { if (!w) return; if (!w.cl) { w.loyalty = clamp(w.lo
 export function syncLoy(w) { if (w && w.cl) w._loy = w.loyalty = avgLoy(w); }
 export function yieldOf(w, WK) {
   const W = WD(w.id), b = bodyOf(w.id), gas = b.gas || (b.parent != null && BODIES[b.parent].gas), f = w.owner;
-  const sieged = w.siege ? .25 : 1, tax = f !== 'neu' ? TAX[C.tax[f]].mul : 1, m = mixOf(w.id), pop = popOf(w.id);
+  const sieged = (w.siege ? .25 : 1) * (w.war ? w.war.share ?? 1 : 1), /* a world at war on its surface yields only from the provinces its owner still holds (M3-C) */ tax = f !== 'neu' ? TAX[C.tax[f]].mul : 1, m = mixOf(w.id), pop = popOf(w.id);
   const R = ef(w, 'red'), O = ef(w, 'orange'), X = ef(w, 'war');
   const y = { he: 0, ore: 0, ord: 0, man: 0, food: 0, alloy: 0, rare: 0, inf: 0, sci: 0 };
   const work = workOf(w.id);

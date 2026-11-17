@@ -16,6 +16,7 @@ import * as SR from './starts.js';
 import * as QS from './quests.js';
 import * as TRN from './terrain.js';
 import * as RV from './rivals.js';
+import * as PW from './planetwar.js';
 export const onCapture = (w, by, base) => EC.onCapture(w, by, base);
 // a world has changed hands by force: its conqueror decides what to do with it (conquest.js)
 export const worldTaken = (w, by, old, how) => CQ.onTaken(w, by, old, how);
@@ -161,6 +162,7 @@ export function rainWaves(fl) {
   for (const s of fl.ships) { const d = defsOf(fl.owner)[s.t] || DEFS[s.t], H = hangarOf(fl.owner, s), k = (s.fit && TE.FITS[s.fit] ? TE.FITS[s.fit].troops || 1 : 1) * (s.cls ? (TE.classSpec(fl.owner, s.cls) || { troops: 1 }).troops : 1);
     if (H) { w1 += (H.cur.starshell * troopsPer(fl.owner, 'starshell') + H.cur.boarder * troopsPer(fl.owner, 'boarder')) * s.crew; w2 += H.cur.stork * troopsPer(fl.owner, 'stork'); }
     w1 += ((d.troops || 0) * s.crew + (d.cmd ? (d.crew || 0) * .04 * s.crew : 0)) * k; }
+  w1 += fl.legions || 0; // legions taken back off a planet (M3-C): aboard the fleet, they drop with the first wave
   return { w1, w2: w1 >= 50 ? w2 : 0, storks: w2, total: w1 + (w1 >= 50 ? w2 : 0) };
 }
 export const troopsOf = fl => rainWaves(fl).total;
@@ -406,6 +408,7 @@ export function endTurn() {
   // merge same-owner fleets that sit together only for the AI (the player keeps his formations)
   for (const f of ['rep', 'soc', 'rim', 'neu']) if (C.fac[f].ai) for (const id in C.worlds) { const here = fleetsAt(id, f).filter(x => !x.garrison && !x.levy && !x.raid).sort((a, b) => CM.capOf(b) - CM.capOf(a)); for (let i = 1; i < here.length; i++) if (here[0].ships.length + here[i].ships.length <= CM.capOf(here[0])) mergeFleets(here[0], here[i]); }
   CM.tidy(); EC.govTick();
+  planetMoves(); // the planet wars' marches (M3-C)
   const out = conflicts(); IN.scanAll(); return out;
 }
 // A fleet that shares an orbit with an enemy fleet cannot simply sail away from it: the week's battle is fought there
@@ -675,6 +678,8 @@ export function rainOdds(fl) {
   const w = fl.at && C.worlds[fl.at]; if (!w || !hostile(fl.owner, w.owner)) return { err: 'No hostile world here' };
   const troops = troopsOf(fl); if (troops < 50) return { err: 'No troops aboard: starShells and leechCraft take the beachhead, Storks land the legions' };
   if (fleetsAt(fl.at).some(o => o.owner === w.owner && !bottled(o))) return { err: 'Win the orbit first', troops };
+  if (w.war && w.war.by !== fl.owner) return { err: `${BLOC_NAME[w.war.by]}'s legions already fight on the surface`, troops };
+  if (PW.hasMap(w.id)) return warRainOdds(fl, w, troops);
   const storm = w.siege && w.siege.by === fl.owner && (w.siege.hold || 0) > 0, shot = clamp(w.gun * .12 + w.shield * .05, 0, .6), mul = 5 * (1 - shot) * rainBonus(fl, w) * (storm ? .5 : 1);
   const def = w.garrison * (1.25 + .2 * w.lv.fort) * (((w.cl ? w.cl.war : w.loyalty) + 8) / 70), att = troops * mul;
   const chance = clamp((1.25 - def / att) / .5, 0, 1), need = Math.max(0, Math.ceil(def / mul - troops));
@@ -695,6 +700,8 @@ function ironRain0(fl) {
   if (fleetsAt(fl.at).some(o => o.owner === w.owner && !bottled(o))) return { err: 'win the orbit first' };
   if (!w.siege || w.siege.by !== fl.owner || w.siege.turns < 1) return { err: 'lay siege for a week first: the bombardment softens the defences' };
   let troops = troopsOf(fl); if (troops < 50) return { err: 'this fleet carries no troops: load starShells and Storks' };
+  if (w.war && w.war.by !== fl.owner) return { err: 'another power\'s legions already fight on the surface' };
+  if (PW.hasMap(w.id)) { const war = startWar(fl, null, { defer: w.owner === C.player }); return { war: true, won: war.over ? war.over.won === 'att' : null, world: w.id }; } // the war for the planet (M3-C)
   senateDefied(fl.owner, w.id);
   const shotDown = clamp(w.gun * .12 + w.shield * .05, 0, .6), storm = (w.siege.hold || 0) > 0; troops *= (1 - shotDown) * (storm ? .5 : 1); // storming the walls before they are broken costs half the drop
   const def = w.garrison * (1.25 + .2 * w.lv.fort) * (((w.cl ? w.cl.war : w.loyalty) + 8) / 70), att = troops * 5 * rainBonus(fl, w) * (.75 + rnd() * .5);
@@ -715,7 +722,7 @@ function ironRain0(fl) {
 function spendDrop(fl) {
   const W = rainWaves(fl); // reckoned once, before any hangar is emptied: every Stork counted in the drop goes down with it
   for (const s of fl.ships) { const d = defsOf(fl.owner)[s.t], H = hangarOf(fl.owner, s); if (H) s.hangar = { ...H.cur, starshell: 0, boarder: 0, stork: W.w2 ? 0 : H.cur.stork }; if (d.troops) s.hp = 0; else if (d.cmd) s.crew = Math.max(.4, s.crew - .04); }
-  fl.ships = fl.ships.filter(s => s.hp > 0); C.fleets = C.fleets.filter(f => f.ships.length);
+  fl.legions = 0; fl.ships = fl.ships.filter(s => s.hp > 0); C.fleets = C.fleets.filter(f => f.ships.length);
 }
 // a world taken by an Iron Rain, however it was fought: gar(w) is the garrison the surviving legions make, reckoned
 // after the world has changed hands
@@ -789,6 +796,145 @@ export function groundSettle(fl, wid, r, def0) {
   return { won: r.won };
 }
 
+// ---------------------------------------------------------------- the war for a planet (planetwar.js; M3-C)
+// A world with a planet map (Mercury so far) isn't taken by one Rain. The Rain lands legions in its provinces, and a
+// war runs on the surface with the campaign weeks until the legions hold the capital and most of the people, or are
+// destroyed, give up, or are taken back to the fleet. w.war is that war (plain JSON, saved with the campaign).
+//   endTurn → planetMoves(): the week's marches, after the powers have moved; the battles no player is in are
+//     auto-resolved, the player's wait in C.planetBattles for the battle list (fought: settlePlanet; or resolvePlanet)
+//   finishTurn → planetEnd(): supply, recruitment and levies (PW.weekEnd), commanders lost, and the end of the war
+// The week a Rain lands, its armies don't march: the landing is that week's fighting.
+// The player's armies follow the legate's plan (the stand-in commander) unless the player gave them orders this week
+// on the planet map (war.ordered = C.turn). The computer's armies follow aiPlanet (the AI chat's), or the stand-in.
+const warSide = (war, f) => war.by === f ? 'att' : war.def === f ? 'def' : null;
+export const warHuman = war => war ? warSide(war, C.player) : null;
+const planetAI = (war, side) => (PW.aiPlanet || PW.standIn)(war, side);
+// the attacker holds the orbit: its fleets are over the world and the defender's are beaten or bottled up
+const orbitHeld = (w, war) => fleetsAt(w.id, war.by).length > 0 && !fleetsAt(w.id, war.def).some(o => !bottled(o));
+// the legions' quality from the campaign: the Rain bonus of tech, agents and the staged drop (a commander's own
+// talents travel with him as one of the war's commanders)
+const warQ = (fl, w) => TE.mod(fl.owner, 'rain') * AG.rainMul(fl) * (1 + .1 * ((w.siege && w.siege.staged) || 0));
+// what a war for this world starts from: the drop (campaign troops), the garrison and the world's defences. The
+// defender's commanders are those of its fleets bottled up over the world.
+export function warSpec(fl, troops) {
+  const w = C.worlds[fl.at], c = CM.cmdrOf(fl), def = fleetsAt(w.id, w.owner).map(CM.cmdrOf).filter(Boolean).map(planetCmdr);
+  return { world: w.id, by: fl.owner, def: w.owner, troops: Math.round(troops ?? troopsOf(fl)), garrison: Math.round(w.garrison), fort: w.lv.fort || 0, gun: w.gun || 0, shield: w.shield || 0,
+    barracks: w.lv.barracks || 0, loyalty: Math.round(w.cl ? w.cl.war : w.loyalty), cmdrs: c ? [planetCmdr(c)] : [], defCmdrs: def, attQ: warQ(fl, w) };
+}
+// the legate's landing plan (planetwar.js suggestPlan plays out a few dozen plans: about half a second, so it is kept)
+const planKeep = new Map();
+function legatePlan(spec) {
+  const k = [spec.world, spec.troops >> 6, spec.garrison >> 6, spec.fort, spec.gun, spec.shield, spec.loyalty / 5 | 0, Math.round(spec.attQ * 20)].join();
+  let p = planKeep.get(k); if (!p) { p = PW.suggestPlan(spec); if (planKeep.size > 40) planKeep.clear(); planKeep.set(k, p); } return p;
+}
+// the commanders land with the biggest landing
+const withCmdrs = (plan, cmdrs) => { const big = plan.reduce((b, x, i) => x.troops > plan[b].troops ? i : b, 0); return plan.map((x, i) => ({ ...x, cmdrs: i === big ? (cmdrs || []).slice() : [] })); };
+// more troops for a war already on: they come down where the legions stand thickest, or by the legate's plan if they
+// hold nothing
+function reinforcePlan(war, troops, spec) {
+  const men = id => war.armies.reduce((s, a) => s + (a.side === 'att' && a.prov === id ? a.men : 0), 0);
+  const held = Object.keys(war.provs).filter(id => war.provs[id].own === 'att' && men(id) > 0).sort((a, b) => men(b) - men(a));
+  return held.length ? [{ prov: held[0], troops: Math.round(troops), cmdrs: [] }] : withCmdrs(legatePlan(spec), []);
+}
+// the war's odds as it stands (with a landing still to come, if plan is given): played out n times with the stand-in
+// commanders, seeded, so the same war shows the same odds
+export function warOdds(war, plan, n = 100) {
+  const s0 = JSON.stringify(war); let won = 0, weeks = 0;
+  for (let k = 1; k <= n; k++) { let s = k * 7919 + 13; const r = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296, x = JSON.parse(s0);
+    if (plan) PW.land(x, plan, r); for (const b of x.pending.slice()) PW.resolve(x, b.prov, r);
+    while (!x.over && x.week < 40) PW.weekTick(x, { ai: { att: PW.standIn, def: PW.standIn }, rnd: r });
+    if (x.over && x.over.won === 'att') won++; weeks += (x.over ? x.over.week : 40) - war.week; }
+  return { win: won / n, weeks: weeks / n };
+}
+// rainOdds for a world with a map: the chance the war is won, played out from the legate's plan (or, with a war on,
+// from the war as it stands with these troops landed), and how many more troops would make it even
+const oddsKeep = new Map();
+function warRainOdds(fl, w, troops) {
+  const spec = warSpec(fl, troops), war = w.war && w.war.by === fl.owner ? w.war : null;
+  const k = [C.turn, fl.id, spec.troops, spec.garrison, spec.gun, spec.shield, spec.fort, spec.loyalty, Math.round(spec.attQ * 20), war ? war.week + ':' + war.log.length : 0].join();
+  let o = oddsKeep.get(k);
+  if (!o) {
+    const plan = war ? reinforcePlan(war, spec.troops, spec) : withCmdrs(legatePlan(spec), spec.cmdrs);
+    const at = (m, n) => war ? warOdds(war, plan.map(x => ({ ...x, troops: Math.round(x.troops * m) })), n).win : PW.forecast({ ...spec, troops: Math.round(spec.troops * m) }, plan.map(x => ({ ...x, troops: Math.round(x.troops * m) })), n).win;
+    const chance = at(1, 120); let need = 0;
+    if (chance < .5) { need = null; for (const m of [1.25, 1.5, 2, 3]) if (at(m, 50) >= .5) { need = Math.ceil(spec.troops * (m - 1)); break; } if (need == null) need = spec.troops * 3; }
+    const shot = clamp(w.gun * .12 + w.shield * .05, 0, .6);
+    o = { troops, shot, chance, need, def: w.garrison, storm: false, hold: 0, planet: true, plan, war: !!war };
+    if (oddsKeep.size > 40) oddsKeep.clear(); oddsKeep.set(k, o);
+  }
+  if (!war && (!w.siege || w.siege.by !== fl.owner || w.siege.turns < 1)) return { err: 'Hold the siege a week first', troops, chance: o.chance, need: o.need, shot: o.shot, def: o.def, planet: true };
+  return o;
+}
+// the Rain on a world with a map: the drop is spent and lands by the plan (the legate's if none is given), starting
+// the war for the planet, or adding to it. defer: the landing battles wait for the battle list (the player's to fight).
+// The ground chat's groundDrop hands its Rain here too.
+export function startWar(fl, plan, { defer = false } = {}) {
+  const w = C.worlds[fl.at], nm = bodyOf(w.id).name, spec = warSpec(fl), old = w.war && w.war.by === fl.owner ? w.war : null;
+  if (!plan) plan = old ? reinforcePlan(old, spec.troops, spec) : withCmdrs(legatePlan(spec), spec.cmdrs);
+  senateDefied(fl.owner, w.id); spendDrop(fl); C.fleets = C.fleets.filter(f => f.ships.length);
+  const war = old || Object.assign(PW.newWar(spec), { t0: C.turn, fleet: fl.id, ordered: -1 });
+  w.war = war;
+  const L = PW.land(war, plan, rnd, { defer: defer && !!warHuman(war) });
+  if (!defer || !warHuman(war)) for (const b of war.pending.slice()) PW.resolve(war, b.prov, rnd);
+  war.share = PW.popOf(war, 'def'); w.garrison = PW.menOf(war, 'def');
+  const down = L.reduce((s, x) => s + x.troops, 0), lost = L.reduce((s, x) => s + x.lost, 0), provs = L.length, me = C.player;
+  const txt = old ? `Reinforcements fall on ${nm}: ${Math.round(down).toLocaleString()} troops${lost ? `, ${Math.round(lost).toLocaleString()} lost in the sky` : ''}.`
+    : `IRON RAIN on ${nm}! ${Math.round(down).toLocaleString()} troops of ${BLOC_NAME[fl.owner]} fall on ${provs} province${provs === 1 ? '' : 's'}${lost ? `; ${Math.round(lost).toLocaleString()} die in the sky` : ''}. The war for ${nm} begins.`;
+  note(txt, fl.owner === me ? 'good' : w.owner === me ? 'bad' : 'gold', w.id, !old && (fl.owner === me || w.owner === me) ? { title: `The war for ${nm}`, kind: 'rain' } : null);
+  if (!old) chron('battle', `The Iron Rain falls on ${nm}: ${BLOC_NAME[fl.owner]} lands its legions, and the war for the planet begins.`, w.id, fl.owner);
+  return war;
+}
+// endTurn: the week's marches on every planet at war
+function planetMoves() {
+  C.planetBattles = [];
+  for (const id in C.worlds) { const w = C.worlds[id], war = w.war; if (!war || war.over) continue;
+    const h = warHuman(war);
+    if (war.t0 !== C.turn) { // the week the Rain lands, the landing is the week's fighting (reinforcements don't stop the marches)
+      const ai = {}; for (const side of ['att', 'def']) ai[side] = side === h ? (x => x.ordered === C.turn ? [] : PW.standIn(x, side)) : planetAI;
+      PW.weekMoves(war, { ai, orbit: orbitHeld(w, war) });
+    }
+    for (const b of war.pending.slice()) if (h) C.planetBattles.push({ world: id, prov: b.prov, kind: b.kind }); else PW.resolve(war, b.prov, rnd);
+  }
+}
+// the battle list's planet battles (M3-UI): auto-resolved, or fought on the ground (r: ground.js result()) and settled
+export function resolvePlanet(wid, prov) { const war = C.worlds[wid].war; return war ? PW.resolve(war, prov, rnd) : null; }
+export function settlePlanet(wid, prov, r) { const war = C.worlds[wid].war; return war ? PW.settle(war, prov, r) : null; }
+// a commander lost with his army on the planet: killed or taken
+function planetCmdrs(w, war) {
+  const nm = bodyOf(w.id).name; war.cmdrN = war.cmdrN || 0;
+  for (const e of war.cmdrLost.slice(war.cmdrN)) { const c = C.cmdrs.find(x => (x.id ?? x.name) === e.id); if (!c || c.state === 'dead' || c.state === 'captured') continue;
+    const by = e.side === 'att' ? war.def : war.by;
+    if (rnd() < .5) CM.kill(c, null, `${c.name} falls with the legions on ${nm}.`, null, by); else CM.capture(c, null, by, nm); }
+  war.cmdrN = war.cmdrLost.length;
+}
+// finishTurn: the end of the planet week, and of the war when it is decided
+function planetEnd() {
+  for (const id in C.worlds) { const w = C.worlds[id], war = w.war; if (!war) continue; const nm = bodyOf(id).name;
+    if (w.owner !== war.def || !C.fac[war.by] || !C.fac[war.by].alive) { // the world changed hands some other way, or the attacker is gone
+      w.war = null; note(`The war on ${nm}'s surface is over: ${BLOC_NAME[war.by]}'s legions there lay down their arms.`, war.by === C.player ? 'bad' : '', id); continue; }
+    war.orbit = orbitHeld(w, war); PW.weekEnd(war); planetCmdrs(w, war);
+    war.share = PW.popOf(war, 'def'); w.garrison = PW.menOf(war, 'def');
+    if (war.over) warOver(w, war);
+  }
+}
+function warOver(w, war) {
+  const o = war.over, nm = bodyOf(w.id).name, me = C.player, weeks = Math.max(1, C.turn - war.t0 + 1); w.war = null;
+  (C.planetWars = C.planetWars || []).push({ world: w.id, by: war.by, def: war.def, won: o.won, weeks, t: C.turn, why: o.why, levied: war.levied, landed: war.land0 });
+  if (o.won === 'att') {
+    const fl = C.fleets.find(f => f.id === war.fleet && f.owner === war.by) || fleetsAt(w.id, war.by)[0] || { id: -1, owner: war.by, ships: [] }, men = PW.menOf(war, 'att');
+    const old = rainTaken(fl, w, () => Math.round(Math.max(1200, Math.min(garrisonCap(w), men))));
+    note(`${nm} falls to ${BLOC_NAME[war.by]} after ${weeks} week${weeks === 1 ? '' : 's'} of war on the surface. ${o.why}`, war.by === me ? 'good' : old === me ? 'bad' : 'gold', w.id, war.by === me || old === me ? { title: war.by === me ? nm + ' is ours' : nm + ' has fallen', kind: 'rain' } : null);
+    chron('battle', `The war for ${nm} ends: ${BLOC_NAME[war.by]} holds the planet.`, w.id, war.by);
+    checkEnd();
+  } else {
+    w.garrison = Math.max(200, PW.menOf(war, 'def'));
+    const back = Math.round(o.withdrawn || 0), fl = back ? fleetsAt(w.id, war.by).sort((a, b) => fleetStr(b) - fleetStr(a))[0] : null;
+    if (fl) fl.legions = (fl.legions || 0) + back;
+    note(`The war for ${nm} is lost for ${BLOC_NAME[war.by]}: ${o.why}${back ? fl ? ` ${back.toLocaleString()} troops are taken back aboard ${fl.name}.` : ` No fleet holds the orbit: the ${back.toLocaleString()} troops left are lost.` : ''}`, war.by === me ? 'bad' : war.def === me ? 'good' : '', w.id, war.by === me || war.def === me ? { title: `${nm} holds`, kind: 'rain' } : null);
+    chron('battle', `The war for ${nm} ends: the garrison holds for ${BLOC_NAME[war.def]}.`, w.id, war.def);
+  }
+}
+
 // after battles: sieges grind, queues advance, the economy pays out, loyalty moves
 export function finishTurn() {
   releaseHeld();
@@ -817,11 +963,12 @@ export function finishTurn() {
       if (w.bq.length && !w.siege) { const q = w.bq[0]; if (--q.left <= 0) { w.bq.shift(); w.lv[q.k]++; if (q.k === 'grid') w.gun++; if (q.k === 'array') w.shield++; if (w.owner === C.player) note(`${nm}: ${BUILD[q.k].name} ${w.lv[q.k] > 1 ? 'raised to level ' + w.lv[q.k] : 'completed'}.`, '', id); } }
       if (w.sq.length && !w.siege && !EC.yardsStalled(w)) { const q = w.sq[0]; if (--q.left <= 0) { w.sq.shift(); let fl = fleetsAt(id, w.owner).find(f => !f.orders && !f.garrison && f.ships.length < CM.capOf(f)); if (!fl) fl = fleet(w.owner, id, {}, null); const ns = newShip(q.t); if (q.cls && TE.classById(w.owner, q.cls)) ns.cls = q.cls; ns.crew = EC.crewOnLaunch(w); fl.ships.push(ns); if (w.owner === C.player) note(`${nm}: a new ${q.cls && TE.classById(w.owner, q.cls) ? TE.classById(w.owner, q.cls).name + '-class ' : ''}${defsOf(w.owner)[q.t].name} joins ${fl.name}.`, 'good', id); } }
     }
-    { const grow = Math.max(0, Math.min(garrisonCap(w) - w.garrison, 150 + 100 * w.lv.barracks + (!w.siege && w.owner !== 'neu' && fleetsAt(id, w.owner).length ? 300 : 0))), r = w.owner !== 'neu' && C.fac[w.owner].res, keep = r && C.fac[w.owner].ai && !frontier(w) && w.id !== CAPITAL[w.owner] && !w.siege ? 10000 : 0, g = r ? Math.min(grow, Math.max(0, r.man - keep)) : grow; w.garrison += g; if (r) r.man -= g; } // garrisons are raised from the realm's manpower; an AI keeps a reserve for its ships rather than fill quiet worlds' barracks
+    { const grow = Math.max(0, Math.min(garrisonCap(w) - w.garrison, 150 + 100 * w.lv.barracks + (!w.siege && w.owner !== 'neu' && fleetsAt(id, w.owner).length ? 300 : 0))), r = w.owner !== 'neu' && C.fac[w.owner].res, keep = r && C.fac[w.owner].ai && !frontier(w) && w.id !== CAPITAL[w.owner] && !w.siege ? 10000 : 0, g = r ? Math.min(grow, Math.max(0, r.man - keep)) : grow; if (w.war) w.war.recruit = g; else w.garrison += g; if (r) r.man -= g; } // at war on the surface, the week's recruits join the cities' armies (planetwar weekEnd) // garrisons are raised from the realm's manpower; an AI keeps a reserve for its ships rather than fill quiet worlds' barracks
     w.gov = Math.min(1, w.gov + (w.siege ? 0 : .15));
     EC.tickWorld(w); // every estate moves toward where its loyalty settles; strikes, plots and risings
     if (w.owner !== 'neu' && w.loyalty < 12 && !(w.hostage > C.turn) && rnd() < .25) { const old = w.owner; w.owner = 'neu'; w.garrison = 1500; w.bq = []; w.sq = []; w.siege = null; P.seatLost(old, w.id); EC.onCapture(w, 'neu', 40); worldLost(old, w); note(`Revolt! ${nm} throws off ${BLOC_NAME[old]} and declares itself free.`, old === C.player ? 'bad' : 'gold', id, old === C.player ? { title: 'Revolt on ' + nm, kind: 'revolt' } : null); }
   }
+  planetEnd(); // the planet wars' week ends (M3-C)
   // supply: ships at friendly worlds repair, re-crew and rearm; ships far from supply lose a little each week
   const recom = {};
   for (const fl of C.fleets) {
