@@ -50,7 +50,7 @@ async def main():
           if (SC.startsWith('even')) for (const s of mob(0)) if (['moonbreaker','torch'].includes(s.type)) { s.dead=true; s.offField=true; }
           S.ships=S.ships.filter(s=>!s.dead);
           const A0=mob(0), E0=mob(1); let ac=cen(A0), ec=cen(E0); const D0=SC.includes('far')?60000:24000; const d=H(ac[0]-ec[0],ac[1]-ec[1]), k=(d-D0)/d; for(const s of A0){s.x-=(ac[0]-ec[0])*k; s.y-=(ac[1]-ec[1])*k;}
-          if (SC.includes('easy')) EA.plan().ctx.diff=0; if (SC.includes('hard')) EA.plan().ctx.diff=2; const att = SC.includes('attack'); if (att) { EA.plan().ctx.defending=false; const OPm=await import('./js/ops.js'); OPm.OP.orb=null; for (const s of S.ships) if (s.team===1&&s.def.static) { s.dead=true; } S.ships=S.ships.filter(s=>!s.dead); }
+          if (SC.includes('easy')) EA.plan().ctx.diff=0; if (SC.includes('hard')) EA.plan().ctx.diff=2; const att = SC.includes('attack'); if (att) { EA.plan().ctx.defending=false; MO.M.att=1; const OPm=await import('./js/ops.js'); OPm.OP.orb=null; for (const s of S.ships) if (s.team===1&&s.def.static) { s.dead=true; } S.ships=S.ships.filter(s=>!s.dead); }
           if (!att) T.advance(); else for (const s of mob(0)) s.order={type:'idle',x:s.x,y:s.y};
           const val=L=>L.reduce((a,s)=>a+(s.def.value||50),0);
           const startV=[val(mob(0)), val(mob(1))];

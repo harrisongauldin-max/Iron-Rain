@@ -29,15 +29,19 @@ const str = t => S.ships.reduce((a, s) => a + (s.team === t && armed(s) ? (s.def
 const note = (t, c) => S.hooks && S.hooks.note && S.hooks.note(t, c);
 const nm = s => s.title || s.def.name;
 
-export function setup(world) {
+// attTeam: the side that came to fight (battle.js B.attTeam), when known
+export function setup(world, attTeam) {
+  M.att = attTeam ?? null;
   const lead = (S.cmdrs || []).filter(c => c.team === 1 && c.state === 'aboard').sort((a, b) => (b.rank || 0) - (a.rank || 0))[0] || null;
   Object.assign(M, { mor: [100, 100], shockV: [0, 0], base: [0, 0], ev: [], world, lead, doc: lead ? doctrineOf(lead.name) : 'steady', peak: [str(0), str(1)], rout: [null, null], warned: false, esc: [0, 0], broke: [0, 0], next: 0, batch: [[], []], prizes: 0 });
 }
 export const doc = () => DOC[M.doc] || DOC.steady;
 // fleet morale, 0 to 100, for each side: what is left of the fleet, how the fight stands, and the shocks of the
 // battle (a flagship lost, a ship taken, a champion cut down), which fade over a minute or two. Below its breaking
-// point a fleet breaks: for the enemy, the point is its commander's; ours breaks at 30.
-export const breakAt = t => t === 1 ? Math.round(doc().rout * 100) : 30;
+// point a fleet breaks: for the enemy, the point is its commander's; ours breaks at 30. An enemy that came to attack
+// has committed to it and takes 30% more before it breaks (task A2: the 16 Nov playtest saw the AI's assaults run at
+// 30–40% losses while the line they attacked never broke); one that holds its ground keeps its commander's point
+export const breakAt = t => t === 1 ? Math.round(doc().rout * 100 * (M.att === 1 ? .7 : 1)) : 30;
 S.shock = (t, v, w) => shock(t, v, w);
 // what the parley before the battle left each side (parley.js): a lasting shift, unlike a shock, which fades
 export function parley(base, why) { M.base = base.slice(); for (const t of [0, 1]) if (base[t] && why[t]) M.ev.unshift({ t: 0, team: t, v: -base[t], why: why[t] }); }

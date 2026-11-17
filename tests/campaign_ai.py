@@ -5,7 +5,8 @@
             power does after a fall)
   --player rep|soc|rim: which power the player's side is (default: the menu's, the Republic)
   --parley: the player's power (played by the campaign AI) parleys before its battles and demands surrender whenever
-            it may (surr, demands); enc/enc2080 count its encounters and those the forecast calls 20-80%
+            it may (surr, demands); enc/enc2080 count its encounters and those the forecast calls 20-80% (encK breaks
+            them down by kind, side and how sure they were)
 
 passive: the player's power (the Republic by default) is played by nobody, so it neither builds nor moves on its own
          beyond what the game does for it. Shows how the AI treats a power that does not fight back.
@@ -48,7 +49,8 @@ RUN_JS = """async([MODE,TURNS,PARLEY,FALL])=>{const K=window.__CAMP.K, C=window.
     const small={}; for (const f of F) small[f]=C.fac[f].alive && nW(f)<=2;
     if (FALL && C.turn===FALL[2]) { for (const id in C.worlds) if (C.worlds[id].owner===FALL[0]) { C.worlds[id].owner=FALL[1]; C.worlds[id].siege=null; } C.fleets=C.fleets.filter(f=>f.owner!==FALL[0]); out.forced=FALL.join(':'); } // a rival made to fall on schedule (--fall)
     const cf=K.endTurn(); for(const c of cf) { const p=K.forecastBattle(c,60).attWin; out.battles=(out.battles||0)+1; if (p>=.1&&p<=.9) out.close=(out.close||0)+1;
-      if ([c.att,c.def].includes(C.player) || (K.sideOf(c,c.att)||[]).includes(C.player) || (K.sideOf(c,c.def)||[]).includes(C.player)) { const q=(K.sideOf(c,c.att)||[c.att]).includes(C.player)?p:1-p; out.enc=(out.enc||0)+1; if (q>=.2&&q<=.8) out.enc2080=(out.enc2080||0)+1; }
+      if ([c.att,c.def].includes(C.player) || (K.sideOf(c,c.att)||[]).includes(C.player) || (K.sideOf(c,c.def)||[]).includes(C.player)) { const q=(K.sideOf(c,c.att)||[c.att]).includes(C.player)?p:1-p; out.enc=(out.enc||0)+1; if (q>=.2&&q<=.8) out.enc2080=(out.enc2080||0)+1;
+        /* encK: what kind of encounter (space, alone = a world's platforms only, world, fleet), who brought it on (us = the player's side attacked), how sure it was for the player (lo <20%, mid, hi >80%) */ const us=(K.sideOf(c,c.att)||[c.att]).includes(C.player)?'us':'them', kind=c.space?'space':c.alone?'alone':(K.cfFleets(c,c.def).length?(c.withWorld?'world':'fleet'):'alone'), b=q<.2?'lo':q<=.8?'mid':'hi'; out.encK=out.encK||{}; const kk=us+':'+kind+':'+b; out.encK[kk]=(out.encK[kk]||0)+1; }
       if (PARLEY && PA.canParley(c, C.player)) { const x=PA.context(c, C.player); out.parleys=(out.parleys||0)+1; // the scripted player demands whenever it may
         if (x.pSurrender>0) { out.demands=(out.demands||0)+1; out.demandP=(out.demandP||0)+x.pSurrender; if (Math.random()<x.pSurrender) { PA.surrender(c, C.player, x.foe); out.surr=(out.surr||0)+1; continue; } PA.defied(c, x.foe); } } K.autoResolve(c); } K.finishTurn();
     // new chronicle entries this week
@@ -67,7 +69,7 @@ RUN_JS = """async([MODE,TURNS,PARLEY,FALL])=>{const K=window.__CAMP.K, C=window.
       for (const id in C.worlds) { const w=C.worlds[id]; if (w.owner!==f||!w.lv.yard) continue; if (!room) continue; out.yardTot++; if (!w.sq.length && R.he>1500) out.yardIdle++; }
       if (nW(f)<=2 && F.some(o=>o!==f&&C.fac[o].alive&&K.relOf(f,o)==='war'&&(C.weary[o]||0)<55)) out.linger++; }
   }
-  const S=C.aiStats||{}; out.feint=S.feint||0; out.evade=S.evade||0; out.rally=S.rally||0; out.allied=S.allied||0; out.balJoin=S.balJoin||0; out.finalWar=S.finalWar||0; out.player=C.player; out.withdraw=S.withdraw||0; out.declined=S.declined||0; out.demandP=+(out.demandP||0).toFixed(2); out.closeShare=out.battles?+(out.close/out.battles).toFixed(3):0; out.ops=S.ops||C.opsLog||0; out.multi=S.multi||C.opsMulti||0; out.opFleets=S.ops?+(S.fleets/S.ops).toFixed(2):null;
+  const S=C.aiStats||{}; out.feint=S.feint||0; out.evade=S.evade||0; out.rally=S.rally||0; out.allied=S.allied||0; out.balJoin=S.balJoin||0; out.finalWar=S.finalWar||0; out.recall=S.recall||0; out.echelon=S.echelon||0; out.rallyLate=S.rallyLate||0; out.player=C.player; out.withdraw=S.withdraw||0; out.declined=S.declined||0; out.demandP=+(out.demandP||0).toFixed(2); out.closeShare=out.battles?+(out.close/out.battles).toFixed(3):0; out.ops=S.ops||C.opsLog||0; out.multi=S.multi||C.opsMulti||0; out.opFleets=S.ops?+(S.fleets/S.ops).toFixed(2):null;
   out.inc={}; for (const f of F) out.inc[f]=C.fac[f].alive?Math.round(K.income(f).he):null;
   out.cut=S.cut||0; out.turn=C.turn; out.over=C.over||null;
   out.own={}; for (const id in C.worlds) out.own[C.worlds[id].owner]=(out.own[C.worlds[id].owner]||0)+1;
@@ -98,7 +100,7 @@ def summarise(runs):
     S['warsAI'] = avg([sum(r['wars'].values()) for r in runs])
     S['yardIdle'] = avg([r['yardIdle'] / max(1, r['yardTot']) for r in runs])
     for k in ['ops', 'multi', 'idle', 'streak', 'ping5', 'linger', 'peaceNearDead', 'peace', 'cut']: S[k] = avg([r[k] for r in runs])
-    for k in ['battles', 'closeShare', 'feint', 'evade', 'rally', 'withdraw', 'declined', 'enc', 'enc2080', 'parleys', 'demands', 'surr', 'allied', 'balJoin', 'finalWar']: S[k] = avg([r.get(k) or 0 for r in runs])
+    for k in ['battles', 'closeShare', 'feint', 'evade', 'rally', 'withdraw', 'declined', 'enc', 'enc2080', 'parleys', 'demands', 'surr', 'allied', 'balJoin', 'finalWar', 'recall', 'echelon', 'rallyLate']: S[k] = avg([r.get(k) or 0 for r in runs])
     S['opFleets'] = avg([r['opFleets'] for r in runs if r['opFleets'] is not None]) if any(r['opFleets'] for r in runs) else None
     S['falls'] = avg([len(r['fell']) for r in runs])
     for f in F: S['heEnd_' + f] = avg([r['inc'][f] for r in runs if r.get('inc') and r['inc'][f] is not None]); S['worldsEnd_' + f] = avg([r['own'].get(f, 0) for r in runs])
@@ -113,7 +115,7 @@ async def main():
         res = await asyncio.gather(*[one(p, a.mode, a.turns) for _ in range(a.runs)])
     for r, e in res:
         runs.append(r); errs += e
-        print(json.dumps({k: r.get(k) for k in ["turn", "own", "rel", "wars", "fell", 'ops', 'multi', 'idle', 'streak', 'streakAt', 'linger', 'peaceNearDead', 'fell', 'hoard', 'manMin', 'battles', 'close', 'enc', 'enc2080', 'parleys', 'demands', 'surr', 'demandP', 'allied', 'balJoin', 'finalWar', 'player', 'forced']}))
+        print(json.dumps({k: r.get(k) for k in ["turn", "own", "rel", "wars", "fell", 'ops', 'multi', 'idle', 'streak', 'streakAt', 'linger', 'peaceNearDead', 'fell', 'hoard', 'manMin', 'battles', 'close', 'enc', 'enc2080', 'parleys', 'demands', 'surr', 'demandP', 'allied', 'balJoin', 'finalWar', 'player', 'forced', 'recall', 'echelon', 'rallyLate', 'encK']}))
     S = summarise(runs); S['mode'] = a.mode; S['turns'] = a.turns
     print('SUMMARY', json.dumps(S))
     os.makedirs(os.path.join(HERE, 'results'), exist_ok=True)

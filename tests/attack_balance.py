@@ -38,7 +38,7 @@ TRIAL = r"""async (C) => {
   const n = Math.round(comp.length * (C.ratio || 1)), alist = Array.from({ length: n }, (_, k) => comp[k % comp.length]);
   const A = mk(att, alist, att === 0 ? X0 - D0 / 2 : X0 + D0 / 2, att === 0 ? 0 : Math.PI);
   const Dd = mk(def, comp, def === 0 ? X0 - D0 / 2 : X0 + D0 / 2, def === 0 ? 0 : Math.PI);
-  MO.setup(w0);
+  MO.setup(w0, att);
   S.paused = false; T.T.ff = false; T.T.ffOff = true; T.T.manual = false; S.speed = 1; S.ffStep = null;
   const cen = L => { const a = L.filter(s => !s.dead); return a.length ? [a.reduce((q, s) => q + s.x, 0) / a.length, a.reduce((q, s) => q + s.y, 0) / a.length] : [0, 0]; };
   const dc = cen(Dd);
