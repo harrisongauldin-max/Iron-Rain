@@ -977,7 +977,7 @@ export function result() {
   const left = t => G.units.reduce((a, u) => a + (u.team === t && !u.T.air && !u.gone && u.men > 0 ? u.men * u.eq : 0), 0) + ((G.escaped || [0, 0])[t]) * (t === 1 ? .5 : 0);
   const won = G.over ? G.over.win === 0 : false;
   const airLeft = (t, ty) => G.units.reduce((a, u) => a + (u.team === t && u.T.air && (!ty || u.type === ty) && !u.gone ? u.men : 0), 0) + (G.airQ || []).reduce((a, q) => a + (q.team === t && (!ty || q.type === ty) ? q.men : 0), 0); // and the squadrons not yet come
-  return { won, why: G.over ? G.over.why : '', t: G.t, air: [airLeft(0), airLeft(1)], air0: G.air0 || [0, 0], rip: [airLeft(0, 'ripwing'), airLeft(1, 'ripwing')], rip0: G.rip0 || [0, 0], // the campaign takes the fleet's lost ripWings off its hangars att0: G.att0, def0: G.def0, attLeft: Math.round(left(0)), defLeft: Math.round(left(1)), sky: Math.round(G.skyLost || 0), killed: [Math.round(G.stats[0].killed), Math.round(G.stats[1].killed)],
+  return { won, why: G.over ? G.over.why : '', t: G.t, air: [airLeft(0), airLeft(1)], air0: G.air0 || [0, 0], rip: [airLeft(0, 'ripwing'), airLeft(1, 'ripwing')], rip0: G.rip0 || [0, 0], /* the campaign takes the fleet's lost ripWings off its hangars */ att0: G.att0, def0: G.def0, attLeft: Math.round(left(0)), defLeft: Math.round(left(1)), sky: Math.round(G.skyLost || 0), killed: [Math.round(G.stats[0].killed), Math.round(G.stats[1].killed)],
     storks: G.storksDone && G.units.some(u => u.wave === 1), leaderLost: G.leaderLost.slice(), city: G.map.B.city, sites: G.map.sites.map(s => ({ name: s.name, own: s.own })) };
 }
 export function log(msg, cls) { G.feed.unshift({ t: G.t, msg, cls: cls || '' }); if (G.feed.length > 40) G.feed.pop(); }
