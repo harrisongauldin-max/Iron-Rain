@@ -641,6 +641,69 @@ function entryPod() {
   return F.build();
 }
 
+// a squad's drop pod: the legions' way down in the first wave ("thousands of drop-pods", Dark Age). Built like the
+// cocoon (entryPod): centred, long axis along Z, the burning face at −Z, so the view can orient it along the fall the same
+// way. Bigger and squarer than a starShell's shell: an eight-sided hull, four doors that blow out on landing, four
+// air-brake petals, a cluster of retro bells. About 5 m across and 10.5 m long
+function dropPod() {
+  const F = new Fig(), hull = '#4b4640', hullD = '#2e2a26', hullL = '#6a645c';
+  F.loft([[-4.2, 1.3, 1.3], [-3.5, 2.3, 2.3], [-1.5, 2.5, 2.5], [2.6, 2.4, 2.4], [4.0, 1.7, 1.7], [4.6, 1.1, 1.1]], 8, 0, 0, 0, hull, 0, 0, [0, 0, 1], PI / 8); // the hull, flats to the sides
+  F.loft([[-4.9, .9, .9], [-4.5, 1.9, 1.9], [-4.1, 2.35, 2.35]], 8, 0, 0, 0, C.exhaust, 0, 1.0, [0, 0, 1], PI / 8);                                        // the heat shield, burning
+  F.loft([[-3.6, 2.42, 2.42], [-3.3, 2.56, 2.56]], 8, 0, 0, 0, hullD, 0, 0, [0, 0, 1], PI / 8); F.loft([[2.5, 2.52, 2.52], [2.8, 2.46, 2.46]], 8, 0, 0, 0, hullD, 0, 0, [0, 0, 1], PI / 8); // hoops fore and aft of the doors
+  for (let i = 0; i < 4; i++) { const a = i * PI / 2, cx = Math.cos(a), sy = Math.sin(a);
+    F.rbox(1.5, .16, 4.6, .06, 2, cx * 2.36, sy * 2.36, -.3, hullL, 0, 0, 0, a + PI / 2); F.box(.5, .1, 3.6, cx * 2.46, sy * 2.46, -.3, C.team, 1, 0, 0, a + PI / 2);   // a door, its stripe in the legion's colour
+    F.box(.12, .12, .5, cx * 2.5, sy * 2.5, 1.7, C.red, 0, 0, 0, a + PI / 2, .9);                                                                              // the door's blow-out charge light
+    const b = a + PI / 4, bx = Math.cos(b), by = Math.sin(b); F.box(1.7, .14, 2.6, bx * 2.75, by * 2.75, 3.7, hullD, 0, 0, 0, b + PI / 2); F.limb([bx * 1.8, by * 1.8, 2.6], [bx * 2.7, by * 2.7, 3.9], .09, .09, 6, hullL); // an air brake, open, on its strut
+    F.cyl(.45, .28, .9, 8, bx * .75, by * .75, 5.0, C.vent, 0, PI / 2); F.cyl(.36, .36, .12, 8, bx * .75, by * .75, 5.42, C.glow, 0, PI / 2, 0, 0, false, .9); }        // a retro bell, lit
+  return F.build();
+}
+// a city's shield generator (claude/shields.md): the machine a province's field battle is fought to take. A round
+// stepped plinth, six buttress pylons leaning in to a collar, a mast of insulator discs, and the projector on top: a
+// lit dish under a lit core. About 46 m tall, a site-sized landmark like the standard. Static (staticMaterial)
+function shieldGen() {
+  const F = new Fig(), st = '#8a8f98', stD = '#555a63', stL = '#aeb4bd', lit = '#9fd7ff';
+  F.cyl(13, 14.5, 2, 16, 0, 1, 0, stD); F.cyl(10, 11.5, 2, 16, 0, 3, 0, st); F.cyl(7.2, 8.2, 2.4, 16, 0, 5.2, 0, stL);                  // the plinth, three steps
+  for (let k = 0; k < 6; k++) { const a = k * PI / 3, c = Math.cos(a), sn = Math.sin(a);
+    F.limb([c * 11, 2, sn * 11], [c * 3.4, 23, sn * 3.4], 1.25, .7, 6, st); F.box(2.2, 3, 2.2, c * 11, 3.4, sn * 11, stD, 0, -a);       // a buttress pylon and its foot
+    F.box(.5, .5, 2.4, c * 7.2, 12.6, sn * 7.2, lit, 0, -a + PI / 2, 0, 0, .9);                                                        // a lit conduit band on it
+    F.cyl(.9, .9, 3.2, 8, c * 8.6, 7.9, sn * 8.6, stD); F.sph(.9, 8, 5, c * 8.6, 9.5, sn * 8.6, stL); }                                // a capacitor drum between the pylons' feet
+  F.cyl(2.2, 3.0, 17, 12, 0, 14.9, 0, stL); F.cyl(4.2, 4.2, 1.4, 12, 0, 23.4, 0, stD);                                                 // the core mast, the collar the pylons meet
+  for (let i = 0; i < 5; i++) { F.cyl(3.3 - i * .3, 3.3 - i * .3, .5, 14, 0, 25.6 + i * 2.2, 0, i % 2 ? st : stL); F.cyl(1.5, 1.5, 1.7, 10, 0, 26.7 + i * 2.2, 0, stD); } // insulator discs up the mast
+  F.cyl(6.4, 2.0, 3.2, 16, 0, 37.9, 0, st); F.cyl(6.0, 6.0, .3, 16, 0, 39.55, 0, lit, 0, 0, 0, 0, false, .8);                          // the projector dish, its lit face
+  F.add(torus(6.5, .3, 39.6, 20), stL); F.sph(2.3, 14, 10, 0, 42.4, 0, lit, 0, 1, 1, 1.0); F.cyl(.2, .5, 3.2, 6, 0, 45.6, 0, stL);     // rim, the core, a finial
+  return F.build();
+}
+// a field shield generator: the one an army carries and sets up over its camp (20 km across). A six-sided crawler body on
+// four outriggers, a mast with three emitter petals round a lit core, the owner's stripe on the body. About 9 m tall
+function fieldGen() {
+  const F = new Fig(), st = '#5d636c', stD = '#32363c', stL = '#7d848e', lit = '#9fd7ff';
+  F.loft([[0, 2.5, 2.5], [.5, 2.9, 2.9], [1.7, 2.9, 2.9], [2.3, 2.2, 2.2]], 6, 0, .5, 0, st); F.loft([[0, 2.95, 2.95], [.35, 2.95, 2.95]], 6, 0, 1.3, 0, C.team, 1); // the body, the owner's band
+  for (let k = 0; k < 4; k++) { const a = k * PI / 2 + PI / 4, c = Math.cos(a), sn = Math.sin(a);
+    F.limb([c * 2.4, 1.5, sn * 2.4], [c * 4.6, .9, sn * 4.6], .28, .22, 6, stL); F.limb([c * 4.6, .9, sn * 4.6], [c * 4.8, .15, sn * 4.8], .2, .2, 6, stD); F.cyl(.7, .8, .22, 8, c * 4.8, .11, sn * 4.8, stD); } // outriggers and pads
+  F.rbox(1.6, 1.0, 1.2, .1, 2, 0, 2.6, -2.0, stD); F.cyl(.35, .35, 1.6, 8, 1.5, 2.9, -1.4, stD); F.cyl(.35, .35, 1.6, 8, -1.5, 2.9, -1.4, stD); // power pack and two cells
+  F.cyl(.9, 1.3, 1.2, 10, 0, 3.4, 0, stL); F.cyl(.45, .6, 3.4, 8, 0, 5.7, 0, st);                                                       // turret ring and mast
+  for (let i = 0; i < 3; i++) F.cyl(1.0 - i * .12, 1.0 - i * .12, .18, 12, 0, 4.6 + i * .8, 0, i % 2 ? stD : stL);                      // insulators
+  for (let k = 0; k < 3; k++) { const a = k * PI * 2 / 3, c = Math.cos(a), sn = Math.sin(a); F.limb([c * .5, 7.2, sn * .5], [c * 2.0, 8.6, sn * 2.0], .16, .1, 6, stL); F.box(.9, 1.5, .12, c * 2.1, 8.7, sn * 2.1, stL, 0, -a + PI / 2, 0, 0); F.box(.5, 1.0, .14, c * 2.04, 8.7, sn * 2.04, lit, 0, -a + PI / 2, 0, 0, .9); } // three emitter petals, lit inside
+  F.sph(.75, 12, 8, 0, 8.0, 0, lit, 0, 1, 1, 1.0);                                                                                     // the core
+  return F.build();
+}
+// a sky gun: one of the railgun installations round a city that "aim at the sky" (the Rain's toll on the way down).
+// An armoured drum sunk in a glacis, a traversing house, twin rails laid at 62°, capacitor drums behind, lit rails.
+// About 24 m to the muzzles; +Z is the way it faces. Static, or instanced with the garrison's colour on its house
+function skyGun() {
+  const F = new Fig(), st = '#666b74', stD = '#383c43', stL = '#878d97', el = 1.08, cz = Math.cos(el), sy = Math.sin(el);
+  F.cyl(8.5, 11, 2.2, 12, 0, 1.1, 0, stD); F.cyl(6.4, 7, 2.6, 12, 0, 3.5, 0, st); F.cyl(6.6, 6.6, .35, 12, 0, 4.95, 0, C.team, 1);       // glacis, drum, the garrison's band
+  F.rbox(6.4, 4.2, 7.4, .4, 2, 0, 7.1, -.4, stL); F.rbox(4.6, 3.0, 2.6, .3, 2, 0, 7.4, -4.6, stD);                                       // the house, its counterweight
+  F.both(s => { F.cyl(1.5, 1.5, 1.2, 12, s * 3.6, 7.6, .4, stD, 0, 0, PI / 2);                                                          // trunnions
+    const x = s * 1.25, a = [x, 8.2, .8], b = [x, 8.2 + sy * 17, .8 + cz * 17];
+    F.bar(a, b, .9, 1.3, st); F.bar([x + s * .5, a[1], a[2]], [x + s * .5, b[1], b[2]], .12, .4, C.edge, 0, .9);                        // a rail, its lit inner face
+    for (let i = 0; i < 4; i++) { const t = .22 + i * .2; F.box(1.5, 1.5, .5, x, 8.2 + sy * 17 * t, .8 + cz * 17 * t, stD, 0, 0, -(PI / 2 - el)); } // coil clamps along it
+    F.cyl(1.0, 1.0, 3.4, 10, s * 2.3, 6.2, -6.4, st); F.sph(1.0, 10, 6, s * 2.3, 7.9, -6.4, stL); });                                    // a capacitor drum
+  F.box(4.0, .5, .9, 0, 8.2 + sy * 9, .8 + cz * 9, stD, 0, 0, -(PI / 2 - el)); F.box(4.0, .5, .9, 0, 8.2 + sy * 15.5, .8 + cz * 15.5, stD, 0, 0, -(PI / 2 - el)); // braces tying the rails
+  F.cyl(.3, .3, 2.4, 6, 2.6, 10.2, -2.6, stL); F.sph(.35, 6, 5, 2.6, 11.5, -2.6, C.red, 0, 1, 1, 1.0);                                   // a director mast and its lamp
+  return F.build();
+}
+
 // a site standard: plinth, fluted pole, crossbar and finial; the flag itself stays a separate mesh (it changes colour)
 function standard() {
   const F = new Fig();
@@ -674,6 +737,7 @@ function standard() {
 //   deimos   the Battle Moon, a fleet base — bunkers with glacis plates, gun batteries, blast walls, radar masts
 //   _ice     a Rim colony: "very minimalistic and serene" — low pavilions with wide eaves, glass domes, thin white spires
 export const CITY_ROLE = { wall: 0, column: 1, facade: 2, trim: 3, pave: 4, metal: 5 }; // cells of the city texture atlas, see cityMaterial
+const SETTLE = { towns: 1, forts: 1, port: 1 };
 const CITY = {
   luna:    { base: '#d4d6dc', dark: '#9a9ea8', light: '#eceef2', trim: '#c9a24c', roof: '#6c7078', win: '#ffd9a0' },
   mars:    { base: '#8e3f2a', dark: '#5a2618', light: '#e8e2d8', trim: '#e8e2d8', roof: '#4a2016', win: '#ffd9a0' },
@@ -684,14 +748,15 @@ const CITY = {
   deimos:  { base: '#4a4c52', dark: '#2c2e33', light: '#656870', trim: '#7a7e88', roof: '#33353a', win: '#ffc890' },
   _ice:    { base: '#d0d8e0', dark: '#8a96a4', light: '#eef2f6', trim: '#b8c6d4', roof: '#9aa6b2', win: '#ffe8c0' },
 };
-export function cityGeo(blocks, CH, heightAt, stone, world) {
+export function cityGeo(blocks, CH, heightAt, stone, world, kind = null) {
   const F = new Fig(), PI2 = PI * 2;
   const sph0 = F.sph.bind(F); F.sph = (...a) => { const r0 = F.role; if (r0 == null) F.role = CITY_ROLE.metal; sph0(...a); F.role = r0; return F; }; // domes wear the metal
   const S = CITY[world] || CITY._ice; if (!CITY[world]) world = '_ice';
   // how each world builds: hx scales every height, core lifts the heart further, grand is the chance a whole 3x3 block between streets
   // becomes one great structure, split the chance an outer block is broken into several small buildings, open the chance it is left as a
   // plaza or garden instead, rot the twist of organic cities off the street grid
-  const { plots, lay: LAY, hashf } = cityPlan(blocks, CH, world);
+  if (!SETTLE[kind]) kind = null; // a province's lesser settlement (planet maps): 'towns', 'forts' or 'port' build their own kit in the world's stone; anything else is the world's city
+  const { plots, lay: LAY, hashf } = cityPlan(blocks, CH, world, kind);
   const V = (c, v) => { const k = new THREE.Color(c); k.multiplyScalar(v); return k.getStyle(); };
   for (const b of plots) {
     const jit = b.grand ? 0 : LAY.rot * CH * .5, x = b.x + (hashf(b.i, b.j, 91) - .5) * jit, z = b.z + (hashf(b.i, b.j, 97) - .5) * jit, w = b.w, // organic cities also stand a little off their grid lines
@@ -782,14 +847,53 @@ export function cityGeo(blocks, CH, heightAt, stone, world) {
       const k = q % 3; if (k === 0) { for (let d = 0; d < 3; d++) { const a = ang + d * PI2 / 3, r = w * (.3 - d * .06); F.cyl(r, r * 1.04, 2, 16, x + Math.cos(a) * w * .2, y0 + 1, z + Math.sin(a) * w * .2, P); dome(x + Math.cos(a) * w * .2, z + Math.sin(a) * w * .2, r, y0 + 2, r * (.6 + d * .15), W, .25); } } // Rim: three glass domes
       else if (k === 1) { const hh = Math.min(h, 16), [yt] = poly(6, x, z, w * .4, hh, { taper: 1 }); F.loft([[0, w * .56, w * .56], [.6, w * .56, w * .56]], 6, x, yt, z, D, 0, 0, null, ang); F.loft([[0, w * .2, w * .2], [3, w * .16, w * .16]], 6, x, yt + .6, z, L, 0, 0, null, ang); } // a six-sided pavilion under a wide eave
       else { const hh = Math.min(h, 8), r = w * .09; arc(x, z, w * .38, 0, PI2, w * .14, hh, 14, P); arc(x, z, w * .38, 0, PI2, w * .18, .6, 14, D, y0 + hh); F.cyl(r * .5, r, h + 8, 10, x, y0 + h / 2 + 4, z, L); F.sph(.7, 8, 6, x, y0 + h + 8.6, z, W, 0, 1, 1, .8); } return true; }; // a ring habitat round a thin spire
+    // ---- the lesser settlements of a planet map's provinces, each in the world's own stone: mining towns, hill forts, harbour towns
+    const metal = fn => { const r0 = F.role; F.role = CITY_ROLE.metal; fn(); F.role = r0; }, ST = '#8a8e96', SD = '#4a4e56';
+    const shed = (cx, cz, sx, sz, hh, ry = 0, roof = R) => { F.box(sx, hh, sz, cx, y0 + hh / 2, cz, P, 0, ry); metal(() => F.cyl(sz * .52, sz * .52, sx * 1.02, 10, cx, y0 + hh, cz, roof, 0, 0, PI / 2, ry)); }; // a long shed under a barrel roof
+    const tank = (cx, cz, r, hh) => metal(() => { F.cyl(r, r, hh, 12, cx, y0 + hh / 2, cz, ST); F.sph(r, 12, 5, cx, y0 + hh, cz, ST, 0, .35, 1); F.cyl(r * 1.04, r * 1.04, .3, 12, cx, y0 + hh * .6, cz, SD); });
+    const settle = () => { const q = fk % 6, lo = Math.min(h, 9), s2 = w * .5;
+      if (kind === 'towns') {
+        if (b.small) { F.rbox(w * .9, lo * .7, w * .8, .3, 2, x, y0 + lo * .35, z, q % 2 ? P : L, 0, ang); F.box(w, .3, w * .9, x, y0 + lo * .7, z, R, 0, ang); return true; }               // a prefab hut
+        if (q === 0) { const hf = Math.max(16, h + 8); metal(() => { F.both(sd => F.limb([x + sd * w * .22, y0, z], [x, y0 + hf, z], .35, .25, 6, ST)); F.limb([x, y0, z - w * .42], [x, y0 + hf * .93, z], .3, .22, 6, ST); F.box(w * .3, .3, .3, x, y0 + hf * .5, z, ST);
+            F.cyl(1.9, 1.9, .4, 14, x, y0 + hf + .6, z, SD, 0, PI / 2); F.cyl(1.2, 1.2, .5, 14, x + .9, y0 + hf + .2, z, SD, 0, PI / 2); }); F.sph(.4, 6, 5, x, y0 + hf + 2.8, z, W, 0, 1, 1, 1.0); shed(x - w * .12, z - w * .36, w * .5, w * .22, 4.5, 0); } // the pit-head: frame, back stay, two sheave wheels, a lamp, the winding house
+        else if (q === 1) { shed(x, z, w * .86, w * .4, 5, ang); F.box(w * .3, 3, w * .2, x + Math.cos(ang) * w * .2, y0 + 1.5, z - Math.sin(ang) * w * .2 + w * .32, L); }                             // the depot
+        else if (q === 2) { tank(x - s2 * .45, z - s2 * .3, w * .2, lo); tank(x + s2 * .4, z - s2 * .35, w * .15, lo * .8); F.rbox(w * .4, 4, w * .3, .3, 2, x, y0 + 2, z + s2 * .45, P); metal(() => F.limb([x - s2 * .45, y0 + lo * .7, z - s2 * .3], [x, y0 + 3.6, z + s2 * .35], .25, .25, 6, SD)); } // the pumphouse and its tanks
+        else if (q === 3) { for (let d = 0; d < 3; d++) { const cx = x + (d - 1) * w * .3, hh = Math.max(10, h) * (1 - d * .12); metal(() => { F.cyl(w * .13, w * .13, hh, 10, cx, y0 + hh / 2, z, ST); F.cyl(0, w * .13, 2.4, 10, cx, y0 + hh + 1.2, z, SD); }); } metal(() => F.limb([x - w * .42, y0 + 1, z + w * .3], [x - w * .3, y0 + Math.max(10, h), z], .35, .35, 4, SD)); } // ore silos and a conveyor
+        else if (q === 4) { F.rbox(w * .8, lo, w * .5, .3, 2, x, y0 + lo / 2, z, P, 0, ang); F.box(w * .86, .4, w * .56, x, y0 + lo, z, R, 0, ang); F.rbox(w * .3, lo * .5, w * .3, .3, 2, x, y0 + lo * 1.25, z, L, 0, ang); }  // a hab block
+        else { F.cyl(w * .4, w * .42, 1.5, 14, x, y0 + .75, z, D); dome(x, z, w * .38, y0 + 1.5, w * .22, L); metal(() => F.cyl(.2, .3, 6, 6, x, y0 + w * .22 + 4, z, ST)); }                                // a pressure dome
+        return true; }
+      if (kind === 'forts') { F.role = CITY_ROLE.wall;
+        if (b.grand) { const kh = Math.max(26, h); F.cyl(w * .5, w * .58, 5, 8, x, y0 + 2.5, z, D, 0, 0, 0, PI / 8); F.rbox(w * .5, kh, w * .5, .6, 2, x, y0 + 5 + kh / 2, z, P); F.box(w * .56, 2, w * .56, x, y0 + 5 + kh + 1, z, D);          // the keep on its talus
+          for (let c = 0; c < 4; c++) { const cx = x + (c & 1 ? 1 : -1) * w * .27, cz = z + (c & 2 ? 1 : -1) * w * .27; F.cyl(w * .09, w * .1, kh + 6, 8, cx, y0 + 5 + (kh + 6) / 2, cz, L); F.cyl(w * .11, w * .11, 1.4, 8, cx, y0 + 11.7 + kh, cz, D); }
+          metal(() => { F.limb([x, y0 + kh + 8, z], [x + w * .2, y0 + kh + 14, z + w * .2], .9, .6, 8, SD); F.cyl(.2, .3, 9, 6, x - w * .1, y0 + kh + 12, z - w * .1, ST); }); F.box(4, 2.4, .2, x - w * .1 + 2.1, y0 + kh + 15, z - w * .1, T); F.role = null; return true; } // a gun on the roof, a flagstaff
+        if (b.small || q === 0) { const [yt, r] = poly(6, x, z, w * .5, Math.min(h, 7), { taper: .78, a: P }); F.sph(r * .45, 10, 6, x, yt, z, D, 0, .6, 1); }                                              // a six-sided bunker
+        else if (q === 1) { const r = w * .34; F.cyl(r, r * 1.25, 4, 12, x, y0 + 2, z, P); F.cyl(r * .8, r * .8, .6, 12, x, y0 + 4.2, z, D); metal(() => { F.rbox(r * .7, 2.4, r * .9, .2, 2, x, y0 + 5.6, z, SD, 0, ang); F.limb([x, y0 + 6.2, z], [x + Math.sin(ang) * r * 1.2, y0 + 6.2 + r * 1.6, z + Math.cos(ang) * r * 1.2], .7, .45, 8, ST); }); } // a battery: a gun laid on the sky in a round pit
+        else if (q === 2) { F.cyl(w * .4, w * .44, 3.5, 14, x, y0 + 1.75, z, P); dome(x, z, w * .4, y0 + 3.5, w * .12, D); F.cyl(1.2, 1.2, 1, 8, x, y0 + 3.5 + w * .12, z, L); }                              // the cistern
+        else if (q === 3) { F.rbox(w * .86, 5, w * .34, .3, 2, x, y0 + 2.5, z, P, 0, ang); F.box(w * .9, .7, w * .4, x, y0 + 5.3, z, D, 0, ang); }                                                           // a barrack block
+        else if (q === 4) { const [yt, r] = poly(8, x, z, w * .16, Math.max(18, h + 6), { taper: .86, a: L }); F.cyl(r * 1.7, r * 1.2, 1.4, 8, x, yt + .7, z, D); F.cyl(r * 1.8, r * 1.8, .5, 8, x, yt + 2.6, z, P); metal(() => F.sph(.5, 6, 5, x, yt + 3.4, z, S.red || '#ff4040', 0, 1, 1, 1.0)); } // a watchtower
+        else { arc(x, z, w * .4, ang, PI * 1.3, 2.6, 5, 7, P); F.cyl(w * .2, w * .22, 1, 12, x, y0 + .5, z, D); }                                                                                             // a revetment round a hardstand
+        F.role = null; return true; }
+      // the harbour town
+      if (b.small) { F.box(w * .8, lo * .8, w * .8, x, y0 + lo * .4, z, q % 2 ? P : L, 0, ang); F.cyl(0, w * .6, lo * .45, 4, x, y0 + lo * 1.02, z, R, 0, 0, 0, ang + PI / 4); return true; }                // a house under a hipped roof
+      if (q === 0) { shed(x, z, w * .88, w * .42, 6, 0); F.box(w * .3, 4, .4, x, y0 + 2, z + w * .22, D); }                                                                                                  // a warehouse
+      else if (q === 1) { const gh = Math.max(20, h + 10); metal(() => { F.both(sd => { F.box(.8, gh, .8, x + sd * w * .3, y0 + gh / 2, z - w * .15, ST); F.box(.8, gh, .8, x + sd * w * .3, y0 + gh / 2, z + w * .15, ST); F.box(.6, .6, w * .34, x + sd * w * .3, y0 + gh * .55, z, SD); });
+          F.box(w * .7, 1.6, w * .36, x, y0 + gh + .8, z, SD); F.box(1.2, 1.2, w * 1.1, x, y0 + gh + 2.2, z + w * .2, ST); F.box(2.4, 2, 2.4, x, y0 + gh - 1, z + w * .45, T); F.limb([x, y0 + gh + 2.2, z + w * .45], [x, y0 + gh * .5, z + w * .45], .1, .1, 4, SD); }); } // a gantry crane: four legs, a bridge, a boom out over the quay, a cab and its fall
+      else if (q === 2) { const r = w * .34, yt = tholos(x, z, r, Math.min(h, 18)); dome(x, z, r * .8, yt, r * .5); metal(() => F.cyl(.2, .3, 5, 6, x, yt + r * .5 + 2, z, ST)); }                           // the customs house
+      else if (q === 3) { for (let d = 0; d < 7; d++) { const cx = x + ((d % 3) - 1) * w * .29, cz = z + (Math.floor(d / 3) - .7) * w * .32, n = 1 + (b.i * 5 + b.j * 3 + d * 7) % 3; for (let e = 0; e < n; e++) metal(() => F.box(w * .26, 2.6, w * .12, cx, y0 + 1.3 + e * 2.6, cz, [T, SD, R, ST][(d + e + b.i) % 4])); } } // container stacks
+      else if (q === 4) { tank(x - s2 * .4, z - s2 * .4, w * .2, lo); tank(x + s2 * .4, z - s2 * .4, w * .2, lo); tank(x, z + s2 * .4, w * .22, lo * 1.1); }                                               // a tank farm
+      else { const lh = Math.max(24, h + 12), [yt, r] = poly(16, x, z, w * .14, lh, { taper: .6, a: L }); F.cyl(w * .2, w * .22, 2, 12, x, y0 + 1, z, D); F.cyl(r * 1.5, r * 1.5, .5, 12, x, yt + .25, z, D); metal(() => { F.cyl(r * .9, r * .9, 2.2, 10, x, yt + 1.6, z, W, 0, 0, 0, 0, false, 1.0); F.cyl(0, r * 1.2, 1.8, 10, x, yt + 3.6, z, T); }); F.loft([[0, r * 1.25, r * 1.25], [lh * .12, r * 1.2, r * 1.2]], 16, x, y0 + lh * .45, z, T); } // the light: a tapering tower, a banded waist, the lamp and its cap
+      return true; };
     let done = false;
+    if (b.open && kind) { F.role = CITY_ROLE.pave; F.box(w, .4, w, x, y0 + 2.2, z, D); F.role = CITY_ROLE.metal; // a settlement's open ground: a yard with a spoil heap, a hardstand with stores, a quay with crates
+      if (kind === 'towns') F.sph(w * .3, 8, 5, x, y0 + 2.3, z, D, 0, .45, 1.2); else for (let d = 0; d < 4; d++) F.box(2.4, 1.6 + (d % 2), 2.4, x + ((d % 2) - .5) * w * .4, y0 + 3.2, z + (Math.floor(d / 2) - .5) * w * .4, d % 2 ? T : R);
+      F.role = null; continue; }
     if (b.open) { F.role = CITY_ROLE.pave; // open ground: a plaza, garden, yard or pad, in the city's own manner
       if (world === 'venus' || world === 'earth') { F.cyl(w * .4, w * .44, 1.2, 16, x, y0 + .6, z, R); for (let k = 0; k < 6; k++) F.sph(2 + hashf(k, b.i, 7) * 2, 6, 5, x + Math.cos(k * 1.05 + b.j) * w * .28, y0 + 3, z + Math.sin(k * 1.05 + b.j) * w * .28, V(S.roof, 1.2)); F.cyl(1.5, 1.5, 4, 8, x, y0 + 2, z, L); } // a garden with a fountain
       else if (world === 'deimos') { F.rbox(w, 1.6, w, .4, 2, x, y0 + .8, z, D); for (const s of [-1, 1]) F.box(w * .9, 4, 1.2, x, y0 + 2, z + s * w * .42, P); F.box(3, 2, 3, x, y0 + 2.6, z, D); } // a hardstand
       else if (world === 'mercury') { F.cyl(w * .42, w * .46, 2, 16, x, y0 + 1, z, L); for (let k = 0; k < 8; k++) F.cyl(.6, .7, 8, 6, x + Math.cos(k * PI / 4) * w * .36, y0 + 5, z + Math.sin(k * PI / 4) * w * .36, P); F.cyl(w * .4, w * .4, .6, 16, x, y0 + 9.3, z, T); } // a shaded court
       else { F.rbox(w, 1.2, w, .3, 2, x, y0 + .6, z, L); F.box(w * .2, .8, w * .2, x, y0 + 1.6, z, T); F.cyl(.5, .6, 7, 6, x, y0 + 4.6, z, D); F.sph(.6, 6, 5, x, y0 + 8.2, z, W, 0, 1, 1, .8); } // a plaza with a lamp
       continue; }
-    done = b.grand ? grand() : organic();
+    done = kind ? settle() : b.grand ? grand() : organic();
     if (done) { /* built above */ } else if (world === 'luna') { // Hyperion: tiers and promenades, spires, skybridges
       if (h > 34 && h2 < .5) { const top = spire(x, z, [.45, .3, .25]); F.cyl(w * .12, w * .12, 1.2, 12, x, top + .6, z, T, 0, 0, 0, 0, true); F.cyl(.4, 1.2, 10, 8, x, top + 5, z, D); F.sph(.9, 8, 6, x, top + 10, z, W, 0, 1, 1, 1.0); F.cyl(w * .13, w * .13, .6, 12, x, top + .3, z, W, 0, 0, 0, 0, false, .8);
         if (b.grand) for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) { const tw = w * .22, th = h * (.45 + hashf(sx + 2, sz + 2 + b.i, 71) * .25); F.rbox(tw, th, tw, .8, 2, x + sx * w * .42, y0 + th / 2, z + sz * w * .42, L); win(x + sx * w * .42, y0, z + sz * w * .42, tw * .92, tw * .92, Math.floor(th / 4.2), 3.6, .55); parapet(x + sx * w * .42, y0 + th, z + sz * w * .42, tw, tw); F.box(w * .3, 2, 3, x + sx * w * .27, y0 + th * .7, z + sz * w * .42, L); } } // spire with a lit crown and beacon; a grand one has four lesser towers bridged to it
@@ -963,6 +1067,10 @@ function mapSiege() { const F = new Fig(); // a siege: a heavy gun laid on the w
   F.box(2.3, 1.3, .14, 0, 1.25, 1.1, M.own, 1, 0, -.3);                                                                            // the mantlet
   flag(F, -1.5, .2, -1.3, 3.6, 1.2);
   return unit(F); }
+function mapShield() { const F = new Fig(), half = (R, ry) => { const g = new THREE.TorusGeometry(R, .12, 4, 12, PI); g.rotateY(ry); return g; }; // an army under a field generator: three lit hoops of a dome over a small generator
+  F.add(torus(3, .14, .14, 14), M.own, 1, .9); for (let k = 0; k < 3; k++) F.add(half(3, k * PI / 3), M.own, 1, .9);
+  F.cyl(.5, .7, .6, 6, 0, .3, 0, M.dark); F.cyl(.12, .16, 1.3, 6, 0, 1.25, 0, M.steel); F.sph(.34, 8, 6, 0, 2.05, 0, '#9fd7ff', 0, 1, 1, 1.0);
+  return unit(F); }
 function mapBattle() { const F = new Fig(); // a battle: two razors crossed over a burst
   for (let k = 0; k < 8; k++) { const a = k * PI / 4 + PI / 8, L = k % 2 ? 2.1 : 3.1; F.limb([Math.cos(a) * .5, .4, Math.sin(a) * .5], [Math.cos(a) * L, .55, Math.sin(a) * L], .42, .02, 4, M.fire, 0, 1.0); }
   F.sph(.95, 8, 6, 0, .5, 0, '#ffd28a', 0, .6, 1, 1.0);
@@ -974,7 +1082,8 @@ function mapBattle() { const F = new Fig(); // a battle: two razors crossed over
 // ---------------------------------------------------------------- public
 const BUILD = { inf: legionnaire, rail: railman, obs: obsidian, gold: peerless, lead: legate, shell: starshell, pod: gravpod, aa: sarissa, corpse, corpse_obs: corpseObs, corpse_gold: corpseGold, corpse_shell: corpseShell, stork,
   rip: ripwing, riplead: ripwingLead, thunder: thunderwing, wasp, drachen, titan, hover: hovertank, spider: spidertank, bike: gravbike, drop: entryPod, standard,
-  army: mapArmy, capital: mapCapital, city: mapCity, port: mapPort, towns: mapTowns, forts: mapForts, landing: mapLanding, siege: mapSiege, battle: mapBattle };
+  army: mapArmy, capital: mapCapital, city: mapCity, port: mapPort, towns: mapTowns, forts: mapForts, landing: mapLanding, siege: mapSiege, battle: mapBattle, shield: mapShield,
+  droppod: dropPod, shieldgen: shieldGen, fieldgen: fieldGen, skygun: skyGun };
 const CACHE = {};
 export function figureGeo(kind) { return CACHE[kind] || (CACHE[kind] = BUILD[kind]()); }
 export const corpseGeo = () => figureGeo('corpse');
@@ -984,7 +1093,8 @@ export const corpseOf = kind => kind === 'obs' ? 'corpse_obs' : kind === 'gold' 
 export const storkGeo = () => figureGeo('stork');
 export const triCount = kind => figureGeo(kind).userData.tris;
 export const BUDGET = { inf: 5500, rail: 5500, obs: 5000, gold: 5500, lead: 6000, shell: 6000, pod: 6000, aa: 6000, corpse: 500, corpse_obs: 700, corpse_gold: 700, corpse_shell: 800, stork: 15000, rip: 4000, riplead: 4500, thunder: 8000, wasp: 4000, drachen: 20000, titan: 24000, hover: 6000, spider: 8000, bike: 3000, drop: 2000, standard: 2000,
-  army: 2000, capital: 2000, city: 2000, port: 2000, towns: 2000, forts: 2000, landing: 600, siege: 600, battle: 600 }; // the last nine are the planet-map pieces
+  army: 2000, capital: 2000, city: 2000, port: 2000, towns: 2000, forts: 2000, landing: 600, siege: 600, battle: 600, shield: 600, // these ten are the planet-map pieces
+  droppod: 1500, shieldgen: 3000, fieldgen: 2000, skygun: 2000 };
 // kinds that exist as models but have no unit type in ground.js yet (section B of the unit list)
 export const PLANNED = ['rip', 'riplead', 'thunder', 'wasp', 'drachen', 'titan', 'hover', 'spider', 'bike'];
 
@@ -992,7 +1102,7 @@ export const PLANNED = ['rip', 'riplead', 'thunder', 'wasp', 'drachen', 'titan',
 // ignores onBeforeCompile): the base material multiplies the colour by the instance colour itself, so the colour node is
 // pre-divided by it and the product comes out as mix(paint, paint × instanceColour, tm). The emissive node adds the
 // glow where em is set. Every figure InstancedMesh must have an instanceColor (groundview seeds one with setColorAt).
-const LOOK = { drop: { roughness: .9, metalness: .1 }, rip: { roughness: .4, metalness: .6 }, riplead: { roughness: .35, metalness: .65, glow: [.1, .07, 0] }, thunder: { roughness: .4, metalness: .6 }, wasp: { roughness: .4, metalness: .6 }, drachen: { roughness: .5, metalness: .65 }, titan: { roughness: .55, metalness: .6 }, hover: { roughness: .55, metalness: .55 }, spider: { roughness: .55, metalness: .55 }, bike: { roughness: .5, metalness: .5 }, gold: { roughness: .35, metalness: .65, glow: [.12, .085, 0] }, lead: { roughness: .35, metalness: .65, glow: [.12, .085, 0] }, obs: { roughness: .7, metalness: .25 }, shell: { roughness: .5, metalness: .6 }, pod: { roughness: .5, metalness: .6 }, aa: { roughness: .6, metalness: .4 }, stork: { roughness: .45, metalness: .7 }, corpse: { roughness: 1, metalness: 0 } };
+const LOOK = { drop: { roughness: .9, metalness: .1 }, droppod: { roughness: .85, metalness: .2 }, shieldgen: { roughness: .45, metalness: .6 }, fieldgen: { roughness: .5, metalness: .55 }, skygun: { roughness: .55, metalness: .55 }, rip: { roughness: .4, metalness: .6 }, riplead: { roughness: .35, metalness: .65, glow: [.1, .07, 0] }, thunder: { roughness: .4, metalness: .6 }, wasp: { roughness: .4, metalness: .6 }, drachen: { roughness: .5, metalness: .65 }, titan: { roughness: .55, metalness: .6 }, hover: { roughness: .55, metalness: .55 }, spider: { roughness: .55, metalness: .55 }, bike: { roughness: .5, metalness: .5 }, gold: { roughness: .35, metalness: .65, glow: [.12, .085, 0] }, lead: { roughness: .35, metalness: .65, glow: [.12, .085, 0] }, obs: { roughness: .7, metalness: .25 }, shell: { roughness: .5, metalness: .6 }, pod: { roughness: .5, metalness: .6 }, aa: { roughness: .6, metalness: .4 }, stork: { roughness: .45, metalness: .7 }, corpse: { roughness: 1, metalness: 0 } };
 // fill: the paints are dark by design (a dark body, one bright team block), and a vertical face lit only by the sky
 // went near-black at battle range, so every figure carries a little of its own paint as light
 const FILL = .4;
@@ -1011,8 +1121,8 @@ export function figureMaterial(kind) {
 // ('#rrggbb', a number or a THREE.Color) for a side that flies another (the alt palettes). One material per look and owner
 // is made and kept, so a province that changes hands swaps materials on the same mesh; treat them as shared, do not edit one.
 // The pieces carry a good share of their own paint as light, the markers more, so they read on the night side of the globe.
-export const MAP_KINDS = ['army', 'capital', 'city', 'port', 'towns', 'forts', 'landing', 'siege', 'battle'];
-const MAP_MARK = { landing: 1, siege: 1, battle: 1 }, MAP_NEUTRAL = '#9aa0a6', MPM = {};
+export const MAP_KINDS = ['army', 'capital', 'city', 'port', 'towns', 'forts', 'landing', 'siege', 'battle', 'shield'];
+const MAP_MARK = { landing: 1, siege: 1, battle: 1, shield: 1 }, MAP_NEUTRAL = '#9aa0a6', MPM = {};
 export const mapPieceGeo = kind => MAP_KINDS.includes(kind) ? figureGeo(kind) : null;
 export function mapPieceMaterial(kind, faction = null) {
   const col = new THREE.Color(faction == null ? MAP_NEUTRAL : FACTIONS[faction] ? FACTIONS[faction].col.main : faction), key = (MAP_MARK[kind] ? 'm' : 'p') + col.getHexString();

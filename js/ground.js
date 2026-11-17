@@ -164,7 +164,7 @@ function buildMap(spec) {
     }
   }
   if (spec.def.breach > 0) for (const w of walls) if (r() < spec.def.breach * .5) { w.down = true; w.hp = 0; } // a siege on the planet map has already opened stretches of the wall
-  const bld = buildingIndex(cityPlan(keep, CH, spec.world).plots, CH); // the buildings, as the view will draw them: units walk round them
+  const bld = buildingIndex(cityPlan(keep, CH, spec.world, spec.site && !spec.site.field ? spec.site.kind : null).plots, CH); // the buildings, as the view will draw them: units walk round them
   return { B, H, cover, urban, veg, blocks: keep, sites, city, walls, wl: walls.filter(w => !w.down), seaH, relief, bld, far };
 }
 export function heightAt(x, y) {
@@ -197,7 +197,7 @@ export function los(ax, ay, bx, by) {
 // picture agree: a unit walks round what it sees. Deterministic from the blocks (hashes, no rng). Plots: x, z (= y here),
 // w (side), h (height before the world's scaling), grand (a whole block between the streets), small (one of several in
 // a block), open (a plaza or garden: no building, walkable). Model builder's section.
-export function cityPlan(blocks, CH, world) {
+export function cityPlan(blocks, CH, world, kind = null) {
   const LAY = { luna:    { hx: 1.9, core: 1.5, grand: .7, split: .15, open: .05, rot: 0, min: 24, jit: 40 },
                 mars:    { hx: 1.2, core: 1.3, grand: .5, split: .25, open: .15, rot: .08, min: 12, jit: 24 },
                 mercury: { hx: .95, core: 1.2, grand: .4, split: .35, open: .12, rot: .15, min: 8, jit: 16 },
@@ -205,7 +205,11 @@ export function cityPlan(blocks, CH, world) {
                 phobos:  { hx: 1.5, core: 1.4, grand: .5, split: .5, open: 0, rot: 0, min: 16, jit: 36 },
                 deimos:  { hx: .6, core: 1.0, grand: .2, split: .2, open: .35, rot: 0, min: 4, jit: 6 },
                 earth:   { hx: .9, core: 1.2, grand: .3, split: .6, open: .1, rot: .1, min: 8, jit: 14 },
-                _ice:    { hx: .7, core: 1.0, grand: .2, split: .2, open: .4, rot: .05, min: 6, jit: 10 } }[world] || { hx: .7, core: 1.0, grand: .2, split: .2, open: .4, rot: .05, min: 6, jit: 10 };
+                _ice:    { hx: .7, core: 1.0, grand: .2, split: .2, open: .4, rot: .05, min: 6, jit: 10 },
+                }[world] || { hx: .7, core: 1.0, grand: .2, split: .2, open: .4, rot: .05, min: 6, jit: 10 };
+  // the lesser settlements of a planet map's provinces (groundmodels.cityGeo builds their kits) stand lower. Only the
+  // heights change: the plots, and so what a unit walks round, stay the world's own
+  const LOW = { towns: { hx: .45, core: 1.0, min: 4, jit: 5 }, forts: { hx: .5, core: 1.1, min: 5, jit: 6 }, port: { hx: .55, core: 1.0, min: 5, jit: 8 } }[kind]; if (LOW) Object.assign(LAY, LOW);
   const hashf = (a, b, m) => (((a * 73856093) ^ (b * 19349663) ^ m) >>> 0) % 1000 / 1000;
   // the plots: the blocks regrouped by position in the city
   let cx0 = 0, cz0 = 0; for (const b of blocks) { cx0 += b.i + .5; cz0 += b.j + .5; } cx0 /= blocks.length || 1; cz0 /= blocks.length || 1;
