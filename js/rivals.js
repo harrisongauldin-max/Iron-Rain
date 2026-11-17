@@ -11,7 +11,8 @@ import { bodyOf } from './solar.js';
 
 const rnd = Math.random;
 const C = () => K.C;
-const MAX_LEARNED = 3; // talents a rival can learn from fighting us
+// talents a rival can learn from fighting us: 4 on Hard, 3 otherwise (G6, Harrison's decision of 16 Nov)
+export const maxLearned = () => (C().difficulty >= 2 ? 4 : 3);
 // the record kept on each: { id, vs, wins, esc, log: [{ t, w, k }], epithet, t0, learned: [] }
 export const rivalsOf = (me = C().player) => Object.values(C().rivals || {}).filter(R => R.vs === me);
 export const rivalRec = (c, me = C().player) => c && C().rivals && C().rivals[c.id] && C().rivals[c.id].vs === me ? C().rivals[c.id] : null;
@@ -37,8 +38,8 @@ function lessonOf(c, kind, res) {
   if ((res.margin || 1) >= 2.2 || res.grade === 'decisive' || res.grade === 'annihilation') return 'scourge';
   return 'bane';
 }
-function learn(c, R, first, lesson) {
-  if (R.learned.length >= MAX_LEARNED) return null;
+export function learn(c, R, first, lesson) { // exported for tests/parley.py
+  if (R.learned.length >= maxLearned()) return null;
   const want = first ? [LESSON[lesson][0]].concat(LATER) : LATER.slice().sort(() => rnd() - .5);
   const t = want.find(x => CM.TALENT[x] && !CM.hasT(c, x)); if (!t) return null;
   c.talents.push(t); R.learned.push(t); return t;

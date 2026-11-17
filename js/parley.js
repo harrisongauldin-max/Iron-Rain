@@ -102,9 +102,16 @@ export function surrender(cf, winO, loseO) {
 }
 // terms: one side leaves the field unharmed and the other holds it. No ship is lost, no weariness gained, and the
 // side that leaves cannot slip away twice running from the same foe
+// G6 (Harrison, 16 Nov): terms move influence. The side that grants them gains a little for its magnanimity; the side
+// that asks leave to go pays for backing down. Only the two powers that parleyed, not their allies
+export const TERMS_GRANT = 5, TERMS_ASK = 12;
 export function terms(cf, leaverO) {
-  const leaveAtt = pidx(cf, leaverO) === 0;
-  const res = { attWin: !leaveAtt, world: cf.world, att: cf.att, def: cf.def, atts: cf.atts, defs: cf.defs, withdrew: true, terms: true, space: cf.space, parley: true };
+  const leaveAtt = pidx(cf, leaverO) === 0, granter = leaveAtt ? cf.def : cf.att, rG = C().fac[granter] && C().fac[granter].res, rL = C().fac[leaverO] && C().fac[leaverO].res;
+  const paid = rL ? Math.min(TERMS_ASK, Math.max(0, rL.inf)) : 0; if (rL) rL.inf -= paid; if (rG) rG.inf += TERMS_GRANT;
+  const me = C().player, nm = bodyOf(cf.world).name;
+  if (granter === me) K.note(`Terms granted at ${nm}: they leave the field. +${TERMS_GRANT} influence for our magnanimity.`, 'good', cf.world);
+  else if (leaverO === me) K.note(`We asked leave to withdraw from ${nm}${paid ? `: backing down costs ${paid} influence` : ''}.`, 'warnc', cf.world);
+  const res = { attWin: !leaveAtt, world: cf.world, att: cf.att, def: cf.def, atts: cf.atts, defs: cf.defs, withdrew: true, terms: true, space: cf.space, parley: true, termsInf: { [granter]: TERMS_GRANT, [leaverO]: -paid } };
   C().stats = C().stats || {}; C().stats.terms = (C().stats.terms || 0) + 1;
   K.afterBattle(res);
   return res;

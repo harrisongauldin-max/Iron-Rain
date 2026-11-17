@@ -108,11 +108,22 @@ async def main():
         if hit:
             r = await pg.evaluate("""async()=>{const K=window.__CAMP.K, C=window.__CAMP.C, PA=await import('./js/parley.js'); const cf=window.__CF, me=C.player, foe=cf.att===me?cf.def:cf.att;
               const fl=K.cfFleets(cf, foe).filter(f=>f.owner===foe&&f.ships.length), hp0=fl.flatMap(f=>f.ships.map(s=>s.hp));
-              const res=PA.terms(cf, foe); const hp1=fl.flatMap(f=>f.ships.map(s=>s.hp));
-              return {same: JSON.stringify(hp0)===JSON.stringify(hp1), gone: fl.every(f=>!C.fleets.includes(f) || f.transit || f.at!==cf.world || cf.space), lock: !!(C.withdrawn && C.withdrawn[cf.world+'|'+foe]===C.turn), terms:res.terms, n:fl.length}}""")
+              C.fac[me].res.inf=100; C.fac[foe].res.inf=100;
+              const res=PA.terms(cf, foe); const hp1=fl.flatMap(f=>f.ships.map(s=>s.hp)); const grant=[C.fac[me].res.inf-100, C.fac[foe].res.inf-100];
+              C.fac[me].res.inf=100; C.fac[foe].res.inf=100; PA.terms(cf, me); const ask=[C.fac[me].res.inf-100, C.fac[foe].res.inf-100];
+              C.fac[me].res.inf=4; PA.terms(cf, me); const poor=C.fac[me].res.inf;
+              return {same: JSON.stringify(hp0)===JSON.stringify(hp1), gone: fl.every(f=>!C.fleets.includes(f) || f.transit || f.at!==cf.world || cf.space), lock: !!(C.withdrawn && C.withdrawn[cf.world+'|'+foe]===C.turn), terms:res.terms, n:fl.length, grant, ask, poor, G:PA.TERMS_GRANT, A:PA.TERMS_ASK}}""")
             check(r['same'] and r['terms'], f"terms: the leaving fleets take no damage ({r['n']} fleets)")
             check(r['gone'], 'terms: they leave the field')
             check(not r['lock'], 'terms: no withdrawal lock (they did not run under fire)')
+            check(r['grant'] == [r['G'], -r['A']], f"G6 terms we grant: we gain {r['G']} influence, the side that asked leave pays {r['A']} ({r['grant']})")
+            check(r['ask'] == [-r['A'], r['G']], f"G6 terms we ask: we pay {r['A']} influence, the side that let us go gains {r['G']} ({r['ask']})")
+            check(r['poor'] == 0, f"G6 asking leave with 4 influence leaves us at 0, not below ({r['poor']})")
+        # G6: the rival talent cap is 4 on Hard and 3 otherwise
+        r = await pg.evaluate("""async()=>{const C=window.__CAMP.C, RV=await import('./js/rivals.js'), CM=await import('./js/command.js'); const d0=C.difficulty, out={};
+          for (const d of [0,1,2]) { C.difficulty=d; const c={talents:[]}, R={learned:[]}; let n=0; for (let k=0;k<8;k++) if (RV.learn(c, R, k===0, 'bane')) n++; out[d]=n; }
+          C.difficulty=d0; return out;}""")
+        check(r == {'0': 3, '1': 3, '2': 4}, f"G6 rivals learn at most 3 talents on Easy and Normal, 4 on Hard ({r})")
         await pg.close()
         # a duel shifts the forecast; refusals cost what the card says
         pg = await fresh(b, errs); hit = await pg.evaluate(FIND)
