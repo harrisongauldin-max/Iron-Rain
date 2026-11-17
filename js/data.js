@@ -28,12 +28,12 @@ export const COUNTER = {
   corvette: ['Capital ships: torpedoes, from in under their guns · frigates', 'Destroyers and torchShips: their fire control holds a small hull'],
   corsair: ['Frigates, fighters, assault pods', 'Anything bigger'],
   frigate: ['Screening a capital ship: its flak kills missiles and ripWings · torpedoes at capitals', 'Anything in a straight gunfight'],
-  raider: ['torchShips, destroyers and frigates: harpoon lance, torpedoes', 'Dreadnoughts and moonBreakers'],
+  raider: ['torchShips, destroyers and frigates: harpoon lance, speed', 'Dreadnoughts and moonBreakers'],
   torch: ['Escorts and fighters: its fire control holds small hulls', 'Dreadnoughts and moonBreakers'],
   destroyer: ['Escorts, fighters and missiles: fire control and point defence', 'Dreadnoughts and moonBreakers'],
   dread: ['Destroyers, torchShips, Lancers: at long range', 'Corvettes and ripWings in close · anything on her stern'],
   moonbreaker: ['Every line ship, from the edge of the field', 'Corvettes and ripWings in close · anything on her stern'],
-  ripwing: ['Capital ships: one miniature nuke each · other fighters', 'Flak, point defence, destroyers and torchShips'],
+  ripwing: ['Other fighters, leechCraft and Storks · a capital ship whose flak is down or busy: one miniature nuke each', 'Flak, point defence, starShells, destroyers and torchShips · a capital ship with her own fighters up'],
 };
 export const counterHTML = t => { const c = COUNTER[t]; return c ? `<div class="ctr"><span class="cs">Strong against</span> ${c[0]}</div><div class="ctr"><span class="cw">Weak against</span> ${c[1]}</div>` : ''; };
 export const counterText = t => { const c = COUNTER[t]; return c ? `\nStrong against: ${c[0]}\nWeak against: ${c[1]}` : ''; };
@@ -51,10 +51,13 @@ export const WPN = {
   emp:     { name: 'EMP missiles', unit: 'msl', mag: 3, supply: 70, kind: 'missile', emp: true, eff: 4500, range: 9000, reload: 16, salvo: 1, dmg: 15, arc: PI, turn: 99, hp: 9, fuel: 10, life: 14 },
   nuke:    { name: 'Nuclear missiles', unit: 'nukes', mag: 2, supply: 0, kind: 'missile', nuke: true, manual: true, eff: 8000, range: 15000, reload: 4, salvo: 1, dmg: 0, arc: PI, turn: 99, hp: 20, fuel: 12, life: 22 },
   lance:   { name: 'Spinal lance', unit: 'shots', mag: 6, supply: 120, track: 2000, trackMin: .05, kind: 'slug', charge: 2, bow: true, eff: 5500, range: 9000, reload: 10, speed: 6200, dmg: 720, arc: .05, gimbal: .02, spread: 0, life: 1.7, turn: 0, recoil: 2600, col: 0xff6a3d, big: true },
-  harpoon: { name: 'Harpoon lance', unit: 'shots', mag: 10, supply: 80, track: 900, trackMin: .3, kind: 'slug', charge: 1.5, bow: true, eff: 3500, range: 6000, reload: 6, speed: 5000, dmg: 260, arc: .06, gimbal: .03, spread: 0, life: 1.4, turn: 0, recoil: 700, col: 0x9fe8ff, big: true },
+  // U3: reload 4.5 (was 6), 380 a hit (was 260), and it bears .14 rad off the bow (was .06: a Lancer working round her
+  // target seldom had it lined up, and fired a fifth of what she could): the harpoon is what lets her take on destroyers
+  harpoon: { name: 'Harpoon lance', unit: 'shots', mag: 10, supply: 80, track: 900, trackMin: .3, kind: 'slug', charge: 1.5, bow: true, eff: 3500, range: 6000, reload: 4.5, speed: 5000, dmg: 380, arc: .14, gimbal: .06, spread: 0, life: 1.4, turn: 0, recoil: 700, col: 0x9fe8ff, big: true },
   siege:   { name: 'Siege lances', unit: 'shots', mag: 5, supply: 200, track: 3000, trackMin: .04, kind: 'slug', charge: 3, bow: true, eff: 7000, range: 12000, reload: 14, speed: 7200, dmg: 2300, arc: .045, gimbal: .02, spread: 0, life: 1.95, turn: 0, recoil: 9000, col: 0xff4a2a, big: true, huge: true },
-  // escorts' answer to a capital ship: a short, heavy torpedo that goes through plate. Fired only at big hulls; point defence can kill it
-  torp:    { name: 'Breaching torpedoes', unit: 'torp', mag: 4, supply: 120, kind: 'missile', breach: true, eff: 2600, range: 3600, reload: 10, salvo: 1, dmg: 420, arc: PI, turn: 99, hp: 7, fuel: 6, life: 8 },
+  // escorts' answer to a capital ship: a short, heavy torpedo that goes through plate. Fired only at big hulls; point defence can kill it.
+  // U3: reload 3 (was 10), so a corvette's four go out in one run under the guns (a run of torpedoes 40 s apart never got in)
+  torp:    { name: 'Breaching torpedoes', unit: 'torp', mag: 4, supply: 120, kind: 'missile', breach: true, eff: 2600, range: 3600, reload: 3, salvo: 1, dmg: 420, arc: PI, turn: 99, hp: 7, fuel: 6, life: 8 },
   // the ripWing's sting, as at Ilium: one miniature nuke for a capital ship, then home to the carrier to rearm
   bomb:    { name: 'Miniature nuke', unit: 'nuke', mag: 1, supply: 100, kind: 'missile', breach: true, eff: 1000, range: 1300, reload: 4, salvo: 1, dmg: 700, arc: PI, turn: 99, hp: 5, fuel: 3, life: 5 },
   // a frigate's screen: point defence that reaches out far enough to cover the capital ship she guards
