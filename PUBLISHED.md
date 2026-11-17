@@ -4,6 +4,7 @@ Each publish of `main` to the claude.ai artifact (slug `fc8b77cf-d69b-4cca-9154-
 
 | Artifact version | Date | Commit | What changed |
 |---|---|---|---|
+| 1794887030-b9e5 | 2026-11-16 | 1ec49ac | G1, parley choices cost something: a refused demand x1.05 to the defiant side, a refused ask-leave x1.06 pursuit to the refuser, a refused challenge of ours x.94 to us against the refuser's x.96 (`js/parley.js`); parleyUI calls them (`js/stratview.js`). |
 | 1794886545-1e3c | 2026-11-16 | 4b75c10 | G6, Harrison's parley decisions: terms move influence (`js/parley.js` `terms`: granter +5, the side asking leave -12, never below 0, with a dispatch); rivals learn up to 4 talents on Hard, 3 otherwise (`js/rivals.js` `maxLearned`). |
 | 1794886262-03a6 | 2026-11-16 | 335d8d1 | G3: champions take their own power's Houses (`js/agents.js`, `HOUSES` exported from `js/command.js`). G4: food costs something to keep (`js/camp.js` `income`: 600 at the start, a glut beyond +400/week, spoilage and the cities eating above a working reserve; `C.fac[f].delta`); the top bar draws a stock red only if it did not rise last week (`js/stratview.js`). |
 | 1794885709-f38d | 2026-11-16 | 4eae33a | G7 (part), auto-resolver luck: `js/camp.js` `resolveCore` multiplies each side by e^(LUCK z), LUCK .40 (1.5:1 76%, 2:1 89%); `winOdds`; the AI's `oddsOf` keeps the old roll's odds. Player encounters 20-80%: 6.9% -> 22.8%. |
