@@ -491,11 +491,20 @@ function wreckTick() {
 // fleet bleeds less, not more. Damage is shared out across hulls by size: escorts die first, capital ships soak
 // hits, and a capital ship can only be destroyed by an enemy at least 60% of its own worth.
 const sval = (o, s) => { const d = defsOf(o)[s.t] || DEFS[s.t]; return d.value || d.cost || 50; };
+// G7: the luck of a battle. Each side's strength is multiplied by e^(LUCK * z), z a normal draw (cut at 2.5), so the
+// odds rise with the log of the strength ratio: equal 50%, 1.2:1 63%, 1.5:1 76%, 2:1 89%, 3:1 97%. The old roll (each
+// side x0.85-1.15) put a battle between 20% and 80% only within about 1.12:1 (1.2:1 was 92%, 1.3:1 99%), so almost
+// every battle of the campaign was settled before it was fought
+export const LUCK = .40;
+const gauss = rng => { const u = Math.max(1e-9, rng()), v = rng(); return clamp(Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v), -2.5, 2.5); };
+const erf = x => { const t = 1 / (1 + .3275911 * Math.abs(x)), y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - .284496736) * t + .254829592) * t * Math.exp(-x * x); return x >= 0 ? y : -y; };
+// the chance that strength a beats strength b, worked out from LUCK (the war councils use it; forecastBattle runs the dice)
+export function winOdds(a, b) { if (b <= 0) return 1; if (a <= 0) return 0; return .5 * (1 + erf(Math.log(a / b) / (LUCK * 2))); }
 function resolveCore(sides, world, rng) {
   // sides: [{ o, ships, extra }] where extra = the world's defensive strength (holder only)
   const ow = (sd, s) => (sd.own && sd.own.get(s)) || sd.o;
   const str = sides.map(sd => sd.ships.reduce((a, s) => a + shipVal(ow(sd, s), s), 0) * (sd.mul || 1) + (sd.extra || 0));
-  const roll = str.map(v => v * (.85 + rng() * .3));
+  const roll = str.map(v => v * Math.exp(LUCK * gauss(rng)));
   const win = roll[0] > roll[1] ? 0 : 1, lose = 1 - win, r = Math.max(1, roll[win] / Math.max(1, roll[lose]));
   const frac = [0, 0]; frac[lose] = clamp(.4 + .22 * (r - 1), .4, .9); frac[win] = clamp(.32 / Math.pow(r, 1.4), .015, .32);
   for (const i of [0, 1]) if (sides[i].shield) frac[i] *= .75;
@@ -990,7 +999,7 @@ function aiSides(f, fls, id) {
   return S;
 }
 // the auto-resolver's roll (each side ×0.85–1.15) worked out exactly: the chance that strength a beats strength b
-const oddsOf = (a, b) => { if (b <= 0) return 1; let p = 0; for (let k = 0; k < 24; k++) { const u0 = .85 + (k + .5) / 24 * .3; p += clamp((a * u0 / b - .85) / .3, 0, 1); } return p / 24; };
+const oddsOf = (a, b) => { if (b <= 0) return 1; let p = 0; for (let k = 0; k < 24; k++) { const u0 = .85 + (k + .5) / 24 * .3; p += clamp((a * u0 / b - .85) / .3, 0, 1); } return p / 24; }; // G7: still the old ±15% roll's odds, which the AI's appetites (wantOdds) and recall thresholds are tuned to; the battle itself now rolls LUCK (winOdds)
 function aiOdds(f, fls, id) { const S = aiSides(f, fls, id); return oddsOf(S[0], S[1]); }
 // the odds a ruler wants before a fleet goes in: its appetite for risk, from the superiority it asks for (rulers.js sup):
 // a Reckless ruler goes at two in five, an Onslaught at one in two, a Steady one at three in five, a Patient one at five
