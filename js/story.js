@@ -87,16 +87,32 @@ export const EVENTS = {
       { label: 'Side with Votum', tip: 'Votum +12 · Carthii −10', fx: f => { for (const g of P.groupsOf(f)) g.sat = clamp(g.sat + (g.id === 'votum' ? 12 : g.id === 'carthii' ? -10 : 0), 0, 100); } },
       { cost: { inf: 50 }, label: 'Buy them both off', tip: '−50 influence · both +4', fx: f => { C.fac[f].res.inf -= 50; for (const g of P.groupsOf(f)) if (g.id === 'votum' || g.id === 'carthii') g.sat = clamp(g.sat + 4, 0, 100); } } ] },
 };
+// every card fired, for any power (tests and the late-war cadence read it): { t, f, k }
+const logCard = (f, k) => { C.cardLog = C.cardLog || []; C.cardLog.push({ t: C.turn, f, k }); if (EVENTS[k] && EVENTS[k].late) { C.lateT = C.lateT || {}; C.lateT[f] = C.turn; } if (C.cardLog.length > 400) C.cardLog.splice(0, C.cardLog.length - 400); };
+// G5: once a power has fallen, the war's last act: a late card (EVENTS with late: true) comes up for each power still
+// standing at least every LATE_EVERY weeks, on top of the usual chance of any card
+export const LATE_EVERY = 3;
+export const fallenPowers = () => ['rep', 'soc', 'rim'].filter(f => !C.fac[f].alive);
+function lateTick() {
+  if (!fallenPowers().length) return;
+  C.fellT = C.fellT || C.turn; C.lateT = C.lateT || {}; C.evLast = C.evLast || {};
+  for (const f of ['rep', 'soc', 'rim']) {
+    if (!C.fac[f].alive || C.turn - (C.lateT[f] ?? C.fellT - 1) < LATE_EVERY) continue;
+    const ok = Object.keys(EVENTS).filter(k => EVENTS[k].late && !(EVENTS[k].once && C.evLast[f + k])).sort((a, b) => (C.evLast[f + a] || 0) - (C.evLast[f + b] || 0) || rnd() - .5);
+    for (const k of ok) { const t = EVENTS[k].when(f); if (t == null) continue; C.evLast[f + k] = C.turn; queueEvent(k, f, t); break; }
+  }
+}
 function eventTick() {
   C.evLast = C.evLast || {};
+  lateTick();
   for (const f of ['rep', 'soc', 'rim']) {
     if (!C.fac[f].alive || rnd() > .14) continue;
     const ok = Object.keys(EVENTS).filter(k => { const E = EVENTS[k], L = C.evLast[f + k]; return !(E.once && L) && !(L && C.turn - L < (E.cd || 20)); });
     for (const k of ok.sort(() => rnd() - .5)) {
       const t = EVENTS[k].when(f); if (t == null) continue;
-      C.evLast[f + k] = C.turn;
+      C.evLast[f + k] = C.turn; logCard(f, k);
       if (human(f)) (C.pendingEvents = C.pendingEvents || []).push({ k, f, t });
-      else { const ok = EVENTS[k].choices.filter(c => affordable(f, c)); (ok.length ? pickOne(ok) : EVENTS[k].choices[EVENTS[k].choices.length - 1]).fx(f, t); }
+      else { const E = EVENTS[k], ai = typeof E.ai === 'function' ? E.ai(f, t) : E.ai, ok = E.choices.filter(c => affordable(f, c)); (ai != null && affordable(f, E.choices[ai]) ? E.choices[ai] : ok.length ? pickOne(ok) : E.choices[E.choices.length - 1]).fx(f, t); }
       break;
     }
   }
@@ -287,7 +303,7 @@ const foeChamp = c => { const fl = C.fleets.find(x => x.id === c.fleet); if (!fl
 const groupSat = (f, ids, v) => { for (const g of P.groupsOf(f)) if (ids === '*' || ids.includes(g.id)) g.sat = clamp(g.sat + v, 0, 100); };
 const cmdr = n => C.cmdrs.find(c => lore(c, n));
 export function queueEvent(k, f, t) {
-  if (!C.fac[f] || !C.fac[f].alive) return; const E = EVENTS[k];
+  if (!C.fac[f] || !C.fac[f].alive) return; const E = EVENTS[k]; logCard(f, k);
   if (human(f)) (C.pendingEvents = C.pendingEvents || []).push({ k, f, t });
   else { const ai = typeof E.ai === 'function' ? E.ai(f, t) : E.ai, ok = E.choices.filter(c => affordable(f, c)); (ai != null && affordable(f, E.choices[ai]) ? E.choices[ai] : ok.length ? ok[0] : E.choices[E.choices.length - 1]).fx(f, t); }
 }
@@ -392,3 +408,62 @@ export function addMission(f, m) { C.missions = C.missions || {}; const L = C.mi
 const giverName = (f, id) => { const g = P.groupsOf(f).find(x => x.id === id); return g ? (P.defOf(f, id).name || id) : ''; };
 export function setupStory() { if (!fateOn) { CM.FATE.push(onFate); fateOn = true; } C.sit = {}; C.missions = {}; C.crisis = {}; C.pendingEvents = []; C.evLast = {}; C.startN = Object.fromEntries(['rep', 'soc', 'rim'].map(f => [f, mine(f).length])); }
 export function tick() { eventTick(); sitTick(); missionTick(); crisisTick(); storyTick(); }
+
+// ---------------------------------------------------------------- G5: the last act of the war
+// Once a power has fallen (fallenPowers), the war changes: the worlds it held do not love their new masters, the
+// conqueror is expected to celebrate and to pay the Houses their share, ruined worlds want rebuilding, and the two
+// powers left face each other. These cards come up at least every LATE_EVERY weeks for each power still standing
+// (lateTick), and they are where the late war's hoards of He-3 and influence go: what they ask for scales with what
+// the treasury holds. The AI takes the choice marked ai, so its hoards are spent too.
+const fallenWorlds = f => mine(f).filter(w => w.home && w.home !== f && C.fac[w.home] && !C.fac[w.home].alive);
+const share = (f, k, p, min) => Math.max(min, Math.round((C.fac[f].res[k] || 0) * p));
+const pay = (f, k, v) => { C.fac[f].res[k] = Math.max(0, (C.fac[f].res[k] || 0) - v); return v; };
+const lastOf = () => { const up = ['rep', 'soc', 'rim'].filter(f => C.fac[f].alive); return up.length === 2 ? up : null; };
+Object.assign(EVENTS, {
+  loyalists: { title: 'Loyalists rise', kind: 'revolt', late: true, cd: 5, ai: 1,
+    when: f => { const L = fallenWorlds(f).sort((a, b) => a.loyalty - b.loyalty); return L.length ? L[Math.floor(rnd() * Math.min(3, L.length))].id : null; },
+    text: (f, t) => `On ${nm(t)}, men who still swear by ${BLOC_NAME[C.worlds[t].home]} have taken the transit hubs and the comms towers. They cannot win. They can make ${nm(t)} ungovernable for a year.`,
+    choices: [
+      { cost: { man: 3000, inf: 20 }, label: 'Send in the legions', tip: '−3,000 manpower, −20 influence · the rising is crushed: garrison +2,000, every estate on the world −6 (fear)', fx: (f, t) => { pay(f, 'man', 3000); pay(f, 'inf', 20); const w = C.worlds[t]; w.garrison += 2000; EC.jolt(w, -6); } },
+      { cost: { he: 600 }, label: 'Amnesty, and bread', tip: 'A sixth of our He-3 (at least 600) · every estate on the world +12', fx: (f, t) => { pay(f, 'he', share(f, 'he', 1 / 6, 600)); EC.jolt(C.worlds[t], 12); } },
+      { label: 'Let it burn out', tip: 'Every estate on the world −15: it may slip from our hands', fx: (f, t) => EC.jolt(C.worlds[t], -15) } ] },
+  triumph: { title: 'A Triumph', kind: 'alliance', late: true, cd: 12, ai: 0,
+    when: f => fallenWorlds(f).length ? CAPITAL[f] : null,
+    text: (f, t) => `The city wants a Triumph: the captured standards carried down the processional, the fleets overhead, the prisoners in chains. It will cost the treasury dear, and the people will remember who gave it to them.`,
+    choices: [
+      { cost: { he: 1500 }, label: 'A Triumph worthy of the victory', tip: 'A quarter of our He-3 (at least 1,500) · war weariness −12 · every House and bloc +8 · Reds everywhere +4', fx: f => { pay(f, 'he', share(f, 'he', .25, 1500)); C.weary[f] = Math.max(0, (C.weary[f] || 0) - 12); groupSat(f, '*', 8); shockAll(f, 'red', 4); } },
+      { cost: { he: 400 }, label: 'A thanksgiving in the temples', tip: '−400 He-3 · war weariness −4', fx: f => { pay(f, 'he', 400); C.weary[f] = Math.max(0, (C.weary[f] || 0) - 4); } },
+      { label: 'There is still a war to win', tip: 'Every House and bloc −6', fx: f => groupSat(f, '*', -6) } ] },
+  spoils: { title: 'The spoils', kind: 'alliance', late: true, cd: 8, ai: 0,
+    when: f => true,
+    text: (f) => fallenWorlds(f).length ? `The Houses and blocs that bled for the victory want their share of what was taken: governorships, mining rights, the estates of the fallen. Every one of them has counted what the others got.` : `${BLOC_NAME[fallenPowers()[0]]} is gone, and the Houses and blocs smell the end of the war. Each wants to be owed something when the peace is made: offices, contracts, a seat at the table.`,
+    choices: [
+      { cost: { inf: 100 }, label: 'Share out the patronage', tip: 'A third of our influence (at least 100) · every House and bloc +10', fx: f => { pay(f, 'inf', share(f, 'inf', 1 / 3, 100)); groupSat(f, '*', 10); } },
+      { cost: { he: 800 }, label: 'Pay them in He-3 instead', tip: 'A sixth of our He-3 (at least 800) · every House and bloc +6', fx: f => { pay(f, 'he', share(f, 'he', 1 / 6, 800)); groupSat(f, '*', 6); } },
+      { label: 'The spoils belong to the state', tip: 'Every House and bloc −12', fx: f => groupSat(f, '*', -12) } ] },
+  rebuild: { title: 'Ruins', kind: 'revolt', late: true, cd: 6, ai: 0,
+    when: f => { const L = fallenWorlds(f).filter(w => w.loyalty < 55 || w.scorched); return L.length ? L[Math.floor(rnd() * L.length)].id : null; },
+    text: (f, t) => `${nm(t)} is a ruin: the docks gutted, the aquifers poisoned, the people living in the shells of the old towers. It produces nothing and hates whoever holds it.`,
+    choices: [
+      { cost: { he: 1000, ore: 300 }, label: 'Rebuild it', tip: 'A fifth of our He-3 (at least 1,000) and 300 ore · every estate on the world +14', fx: (f, t) => { pay(f, 'he', share(f, 'he', .2, 1000)); pay(f, 'ore', 300); const w = C.worlds[t]; EC.jolt(w, 14); if (w.scorched) w.scorched = Math.max(0, w.scorched - 2); } },
+      { label: 'Leave it as it is', tip: 'Every estate on the world −5', fx: (f, t) => EC.jolt(C.worlds[t], -5) } ] },
+  exiles: { title: 'Exiles', kind: 'fall', late: true, once: true, ai: 0,
+    when: f => fallenPowers().find(o => o !== f) || null,
+    text: (f, t) => `The officers and households of ${BLOC_NAME[t]} who got out are drifting through our ports: Golds without a cause, crews without a flag, families with nothing left but their names.`,
+    choices: [
+      { cost: { he: 600 }, label: 'Take them in', tip: 'A sixth of our He-3 (at least 600) · +8,000 manpower', fx: f => { pay(f, 'he', share(f, 'he', 1 / 6, 600)); C.fac[f].res.man += 8000; } },
+      { label: 'Turn them away', tip: 'Nothing', fx: () => {} } ] },
+  yards: { title: 'The yards of the fallen', kind: 'war', late: true, cd: 10, ai: 0,
+    when: f => C.fac[f].res.he >= 1500 ? CAPITAL[f] : null,
+    text: (f, t) => `The shipwrights who built for ${BLOC_NAME[fallenPowers()[0]]} are selling half-finished hulls to whoever pays first. A squadron could be in our docks at ${nm(t)} within the week.`,
+    choices: [
+      { cost: { he: 1500 }, label: 'Buy the squadron', tip: 'A quarter of our He-3 (at least 1,500) · a destroyer and two frigates join us at the capital', fx: (f, t) => { pay(f, 'he', share(f, 'he', .25, 1500)); const fl = fleetsAt(t, f)[0] || fleet(f, t, {}, 'Purchased Squadron'); for (const k of ['destroyer', 'frigate', 'frigate']) fl.ships.push(newShip(k)); } },
+      { label: 'We build our own', tip: 'Nothing', fx: () => {} } ] },
+  lastwar: { title: 'The last war', kind: 'war', late: true, once: true, ai: 0,
+    when: f => { const L = lastOf(); return L && L.includes(f) ? L.find(o => o !== f) : null; },
+    text: (f, t) => `${BLOC_NAME[fallenPowers()[0]]} is gone. Only ${BLOC_NAME[t]} stands between us and the Solar System. Everyone knows what comes next; the question is what we bring to it.`,
+    choices: [
+      { cost: { he: 2000 }, label: 'Mobilise everything', tip: 'A third of our He-3 (at least 2,000) and a third of our influence · our side +10% in every battle for 8 weeks · war weariness +6', fx: f => { pay(f, 'he', share(f, 'he', 1 / 3, 2000)); pay(f, 'inf', share(f, 'inf', 1 / 3, 0)); C.mobil = C.mobil || {}; C.mobil[f] = C.turn + 8; CM.weary(f, 6); } },
+      { cost: { inf: 80 }, label: 'Consolidate what we hold', tip: 'A quarter of our influence (at least 80) · every estate on every world +5', fx: f => { pay(f, 'inf', share(f, 'inf', .25, 80)); for (const w of mine(f)) EC.jolt(w, 5); } },
+      { label: 'Carry on as we are', tip: 'Nothing', fx: () => {} } ] },
+});

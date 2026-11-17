@@ -286,7 +286,10 @@ export function tickWorld(w) {
 }
 // storage: depots hold only so much; past it, a share of the excess spoils, leaks or is skimmed every week
 export const STORE = { he: 15000, ore: 10000, ord: 12000, alloy: 6000, rare: 1500, inf: 1000, sci: 1e9, man: 250000, food: 3000 };
-export function spoil(f) { const r = C.fac[f].res; let lost = 0; for (const k in STORE) if (r[k] > STORE[k]) { const x = (r[k] - STORE[k]) * .06; r[k] -= x; if (['he', 'ore', 'ord', 'alloy'].includes(k)) lost += x; }
+// G5: what lies above the store goes 15% a week (it was 6%): a hoard now levels off near STORE + 7 weeks' income
+// instead of climbing all war (the Rim held 58k He-3 at week 60 on 16 Nov)
+export const SPOIL = .15;
+export function spoil(f) { const r = C.fac[f].res; let lost = 0; for (const k in STORE) if (r[k] > STORE[k]) { const x = (r[k] - STORE[k]) * SPOIL; r[k] -= x; if (['he', 'ore', 'ord', 'alloy'].includes(k)) lost += x; }
   C.graft = C.graft || {}; C.graft[f] = lost; if (lost > 0) r.inf = Math.max(0, r.inf - lost / 500); } // hoards rot, and the skimming makes enemies at court
 
 // ---------------------------------------------------------------- the treasury: where surplus goes, and what it buys at home
