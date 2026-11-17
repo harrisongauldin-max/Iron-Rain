@@ -107,7 +107,7 @@ const LORE = {
     { name: 'Dido au Raa', title: 'Wife of the Sovereign, born of House Saud', house: 'raa', rank: 1, talents: ['tactician', 'beloved'], colour: 'Gold' },
   ],
 };
-const HOUSES = { rep: ['Telemanus', 'Barca', 'Julii', 'Arcos'], soc: ['Grimmus', 'Carthii', 'Votum', 'Saud', 'Bellona', 'Falthe', 'Valii-Rath', 'Cerana'], rim: ['Raa', 'Lux', 'Codovan', 'Norvo'] };
+export const HOUSES = { rep: ['Telemanus', 'Barca', 'Julii', 'Arcos'], soc: ['Grimmus', 'Carthii', 'Votum', 'Saud', 'Bellona', 'Falthe', 'Valii-Rath', 'Cerana'], rim: ['Raa', 'Lux', 'Codovan', 'Norvo'] };
 // the politics group an officer's family answers to: a House of the Remnant or the Rim, a bloc of the Senate.
 // Lesser Houses are clients of a greater one
 const HOUSE_GROUP = { Telemanus: 'sov', Barca: 'sov', Arcos: 'sov', Julii: 'mod', Grimmus: 'grimmus', Carthii: 'carthii', Votum: 'votum', Saud: 'saud', Bellona: 'grimmus', 'Valii-Rath': 'grimmus', Falthe: 'carthii', Cerana: 'saud', Raa: 'raa', Lux: 'lux', Codovan: 'codovan', Norvo: 'norvo' };

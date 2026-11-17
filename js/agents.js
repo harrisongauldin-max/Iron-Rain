@@ -60,7 +60,7 @@ export function recruit(f, type) {
   if (agentsOf(f).filter(a => a.type === type).length >= T.max) return `at most ${T.max}`;
   if (r.inf < T.cost.inf || r.he < T.cost.he) return `costs ${T.cost.inf} influence and ${T.cost.he} He-3`;
   r.inf -= T.cost.inf; r.he -= T.cost.he;
-  const a = { id: C.nid++, owner: f, type, name: `${pickOne(FIRST)}${type === 'champion' ? ' au ' + pickOne(['Lux', 'Grimmus', 'Telemanus', 'Raa', 'Votum', 'Arcos']) : ''}`, skill: 1, state: 'idle', at: CAPITAL[f], mission: null, left: 0, target: null, fleet: null };
+  const a = { id: C.nid++, owner: f, type, name: `${pickOne(FIRST)}${type === 'champion' ? ' au ' + pickOne(CM.HOUSES[f] || CM.HOUSES.soc) /* G3: a champion comes of one of his own power's Houses */ : ''}`, skill: 1, state: 'idle', at: CAPITAL[f], mission: null, left: 0, target: null, fleet: null };
   C.agents.push(a); if (f === C.player) note(`A new ${T.name[f]} is ready: ${a.name}.`, 'good'); return a;
 }
 export function send(a, mission, target) {
