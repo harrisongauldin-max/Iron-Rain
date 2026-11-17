@@ -370,6 +370,13 @@ export function refit(fl, ids, k) {
   r.alloy -= c.alloy; r.he -= c.he; return n ? null : 'no hull here takes that fit';
 }
 // prize hulls broken up in a friendly yard or orbit: their plate and keels go back into the depots
+// G2: recommissioning a prize hull at a yard: ore for a third of her build, and a full crew from manpower. Returns true
+// once she is ours; false if the treasury cannot pay yet (she waits, at her skeleton crew)
+export const recommissionCost = (f, s) => { const d = defsOf(f)[s.t] || DEFS[s.t] || {}; return { ore: Math.round((d.ore || 60) * .33), man: Math.round((1 - (s.crew ?? 0)) * (d.crew || 10)) }; };
+export function recommission(f, s) {
+  const r = C.fac[f] && C.fac[f].res, c = recommissionCost(f, s); if (!r || r.ore < c.ore || r.man < c.man) return false;
+  r.ore -= c.ore; r.man -= c.man; s.prize = false; s.crew = 1; C.stats = C.stats || {}; C.stats.recommissioned = C.stats.recommissioned || {}; C.stats.recommissioned[f] = (C.stats.recommissioned[f] || 0) + 1; return true;
+}
 export const scrapValue = (f, s) => { const d = defsOf(f)[s.t] || DEFS[s.t] || {}; return { ore: Math.round((d.ore || 60) * .55 * (.4 + .6 * s.hp)), alloy: Math.round(((EC.HULL[s.t] || {}).alloy || 0) * .5 * (.4 + .6 * s.hp)) }; };
 export function scrapPrizes(fl, ids) {
   const w = fl.at && C.worlds[fl.at]; if (fl.transit || !w || w.owner !== fl.owner) return 'only in orbit at a world of your own';
@@ -811,14 +818,19 @@ export function finishTurn() {
     if (w.owner !== 'neu' && w.loyalty < 12 && !(w.hostage > C.turn) && rnd() < .25) { const old = w.owner; w.owner = 'neu'; w.garrison = 1500; w.bq = []; w.sq = []; w.siege = null; P.seatLost(old, w.id); EC.onCapture(w, 'neu', 40); worldLost(old, w); note(`Revolt! ${nm} throws off ${BLOC_NAME[old]} and declares itself free.`, old === C.player ? 'bad' : 'gold', id, old === C.player ? { title: 'Revolt on ' + nm, kind: 'revolt' } : null); }
   }
   // supply: ships at friendly worlds repair, re-crew and rearm; ships far from supply lose a little each week
+  const recom = {};
   for (const fl of C.fleets) {
     const w = fl.at && C.worlds[fl.at], home = w && w.owner === fl.owner && !w.siege, r = C.fac[fl.owner].res;
     for (const s of fl.ships) {
+      // G2: a prize hull is not ours until it is recommissioned at one of our yards, for ore (a third of what the hull
+      // takes to build) and a full crew from our manpower; until then she keeps her skeleton crew and half her hull
+      if (s.prize) { if (home && w.lv.yard && recommission(fl.owner, s)) { if (fl.owner === C.player) recom[fl.at] = (recom[fl.at] || 0) + 1; } else { if (home && s.hp < .5) s.hp = Math.min(.5, s.hp + .1); continue; } }
       if (home) { s.hp = Math.min(1, s.hp + (CM.has(fl, 'quarter') ? .6 : .3) * TE.mod(fl.owner, 'repair'));
         if (s.sub) { const k = (CM.has(fl, 'quarter') ? .6 : .3) * TE.mod(fl.owner, 'repair') * (w.lv.yard ? 1 : .5); for (const q in s.sub) if (w.lv.yard || (q !== 'shld' && q !== 'bridge')) s.sub[q] = Math.min(1, s.sub[q] + k); if (Object.values(s.sub).every(v => v >= 1)) delete s.sub; } /* shields and bridges need a yard; the rest the crews can mend */ const need = (1 - s.crew) * ((defsOf(fl.owner)[s.t]?.crew) || 10); if (r.man > need) { r.man -= need; s.crew = 1; } const ord = (1 - s.ammo) * 60 + (s.nukes != null ? (1 - s.nukes) * 120 : 0); if (r.ord > ord) { r.ord -= ord; s.ammo = 1; s.nukes = null; } const H = s.hangar && hangarOf(fl.owner, s); if (H) { let he = 0, man = 0; for (const k of CRAFT) { const n = Math.max(0, (H.load[k] || 0) - (H.cur[k] || 0)); he += n * (REPLACE_COST[k] || 0); man += n * (REPLACE_MAN[k] || 0); } if (r.he >= he && r.man >= man) { r.he -= he; r.man -= man; s.hangar = null; } } else if (s.hangar === undefined) s.hangar = null; }
       else if (!fl.transit) s.crew = Math.max(.3, s.crew - .01);
     }
   }
+  for (const id in recom) note(`${recom[id]} prize hull${recom[id] === 1 ? '' : 's'} recommissioned at ${bodyOf(id).name}: crewed from our manpower, refitted with our ore. In service.`, 'good', id);
   EC.govTick(); EC.treasuryTick(); CM.attrition(); CM.wearyTick(); CM.cmdrTick(); RU.tick(); P.tick(); AG.tick(); ST.tick(); CQ.tick(); SR.tick(); QS.tick(); wreckTick();
   for (const f of ['rep', 'soc', 'rim']) {
     const inc = income(f), r = C.fac[f].res, r0 = Object.assign({}, r); C.fac[f].lastInc = inc;

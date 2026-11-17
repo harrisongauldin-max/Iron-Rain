@@ -97,9 +97,18 @@ async def main():
               const ctx=PA.context(cf, me); const foeShips=K.cfFleets(cf, foe).flatMap(f=>f.ships), leads=K.cfFleets(cf, foe).map(f=>CM.cmdrOf(f)).filter(Boolean);
               const probs=[ctx.pSurrender, ctx.pTerms, ctx.pChallenge, ctx.duelP, ctx.q];
               const res=PA.surrender(cf, me, foe); const mine=K.cfOwn(cf, me).flatMap(f=>f.ships);
-              return {probs, hail:ctx.hail, n:foeShips.length, prizes:foeShips.filter(s=>mine.includes(s)&&s.prize).length, left:K.cfFleets(cf, foe).reduce((a,f)=>a+f.ships.length,0), caps:leads.map(c=>c.state), grade:res.grade, captured:res.captured}}""")
+              return {probs, hail:ctx.hail, n:foeShips.length, prizes:foeShips.filter(s=>mine.includes(s)&&s.prize).length, left:K.cfFleets(cf, foe).reduce((a,f)=>a+f.ships.length,0), caps:leads.map(c=>c.state), grade:res.grade, captured:res.captured, scuttled:res.scuttled||0,
+                /* G2: a prize waits for a yard; there it is recommissioned for ore and a full crew */
+                g2:(()=>{ const s=foeShips.find(x=>mine.includes(x)&&x.prize); if(!s) return null; const r=C.fac[me].res, c=K.recommissionCost(me,s); const crew0=s.crew;
+                  r.ore=c.ore-1; const poor=K.recommission(me,s); r.ore=c.ore+100; r.man=c.man+100; const ore0=r.ore, man0=r.man, ok=K.recommission(me,s);
+                  return {crew0, poor, ok, prizeAfter:s.prize, crew:s.crew, ore:ore0-r.ore, man:man0-r.man, c}; })()}}""")
             check(all(0 <= x <= 1 for x in r['probs']), f"chances are probabilities {r['probs']} (hail: {r['hail']})")
-            check(r['prizes'] == r['n'] and r['left'] == 0, f"surrender: all {r['n']} enemy hulls are now our prizes ({r['prizes']}), none left with them ({r['left']})")
+            check(r['prizes'] + r['scuttled'] == r['n'] and r['left'] == 0, f"surrender: all {r['n']} enemy hulls are ours as prizes ({r['prizes']}) or scuttled by their crews ({r['scuttled']}), none left with them ({r['left']})")
+            g = r.get('g2')
+            if g is None: check(True, 'G2: every crew scuttled here (recommission check skipped)')
+            else:
+                check(g['crew0'] <= .25 and not g['poor'], f"G2 a prize keeps a skeleton crew ({g['crew0']}) and is not recommissioned without the ore ({g['c']})")
+                check(g['ok'] and not g['prizeAfter'] and g['crew'] == 1 and g['ore'] == g['c']['ore'] and g['man'] == g['c']['man'], f"G2 recommissioning costs {g['c']['ore']} ore and {g['c']['man']} manpower and puts her in service ({g})")
             check(all(s == 'captured' for s in r['caps']), f"surrender: their commanders are taken {r['caps']}")
             check(r['grade'] in ('victory', 'decisive', 'annihilation'), f"surrender: graded as a victory ({r['grade']})")
         await pg.close()
@@ -124,14 +133,17 @@ async def main():
         pg = await fresh(b, errs); hit = await pg.evaluate(FIND)
         if hit:
             r = await pg.evaluate("""async()=>{const K=window.__CAMP.K, C=window.__CAMP.C, PA=await import('./js/parley.js'); const cf=window.__CF, me=C.player, foe=cf.att===me?cf.def:cf.att, att=cf.att===me;
-              const q=()=>{ const p=K.forecastBattle(cf, 5000).attWin; return att?p:1-p; }, i=att?0:1, out={};
+              const q=(n=5000)=>{ const p=K.forecastBattle(cf, n).attWin; return att?p:1-p; }, i=att?0:1, out={};
+              /* first scale our side until the battle is close to even, so a few per cent of strength shows above the forecast's noise */
+              const base=m=>{ const mul=[1,1]; mul[i]=m; cf.parley={mul, mor:[0,0], lines:[]}; };
+              let lo=Math.log(1e-3), hi=Math.log(1e3); for (let k=0;k<14;k++) { const mid=(lo+hi)/2; base(Math.exp(mid)); if (q(1200)<.5) lo=mid; else hi=mid; } const m0=Math.exp((lo+hi)/2);
               for (const [k, f] of [['demand', ()=>PA.defied(cf, foe)], ['askLeave', ()=>PA.pursued(cf, foe, me)], ['challenge', ()=>PA.refuse(cf, foe, me)]]) {
-                delete cf.parley; const q0=q(); f(); const m=cf.parley.mul.slice(); const q1=q(); out[k]={q0, q1, ours:m[i], theirs:m[1-i]}; }
+                base(m0); const q0=q(20000); f(); const m=cf.parley.mul.slice(); const q1=q(20000); out[k]={q0, q1, ours:m[i]/m0, theirs:m[1-i]}; }
               delete cf.parley; return out;}""")
             for k, v in r.items():
                 rel = v['ours'] / v['theirs']
-                moved = v['q1'] < v['q0'] - .004 or v['q0'] < .02 or v['q0'] > .98
-                check(rel < 1 and moved, f"G1 a refused {k} turns the auto-resolve odds against us: strength x{rel:.3f} relative, our chance {v['q0']:.3f} -> {v['q1']:.3f}")
+                moved = v['q1'] < v['q0']  # 20,000 dry runs each: noise about 0.5 points against an expected move of 1.5-4
+                check(rel < 1 and moved, f"G1 a refused {k} turns the auto-resolve odds against us (battle scaled to about even first): strength x{rel:.3f} relative, our chance {v['q0']:.3f} -> {v['q1']:.3f}")
         await pg.close()
         pg = await fresh(b, errs)
         # G6: the rival talent cap is 4 on Hard and 3 otherwise

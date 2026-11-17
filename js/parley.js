@@ -82,21 +82,25 @@ function mod(cf, o, mul, mor, line) {
 }
 // a fleet strikes its colours: every ship of the side comes over as a prize hull with a skeleton crew, and the
 // commanders are taken. The battle is over before it starts
+export const SCUTTLE = { reckless: .45, onslaught: .35, steady: .25, patient: .2, cunning: .3 };
 export function surrender(cf, winO, loseO) {
   const nm = bodyOf(cf.world).name, losers = K.cfFleets(cf, loseO).filter(f => f.ships.length);
   let to = K.cfOwn(cf, winO).find(f => f.ships.length && (cf.space || (f.at === cf.world && !f.transit))) || K.cfOwn(cf, winO)[0];
   if (!to) to = K.fleet(winO, cf.world, {}, 'Prize Squadron');
-  let n = 0;
+  let n = 0, scut = 0;
   for (const f of losers) {
     const c = CM.cmdrOf(f); if (c) CM.capture(c, f, winO, nm);
-    for (const s of f.ships) { s.prize = true; s.crew = Math.min(s.crew == null ? 1 : s.crew, .25); s.ammo = Math.min(s.ammo == null ? 1 : s.ammo, .5); to.ships.push(s); n++; } // the same hulls change hands
+    // G2: not every crew hands its ship over. Some open the valves and blow the cores first: more often under a proud
+    // commander (SCUTTLE by doctrine), and the hull is lost to both sides
+    const doc = c ? doctrineOf(c.name) : 'steady', pS = SCUTTLE[doc] ?? SCUTTLE.steady;
+    for (const s of f.ships) { if (rnd() < pS) { scut++; continue; } s.prize = true; s.crew = Math.min(s.crew == null ? 1 : s.crew, .25); s.ammo = Math.min(s.ammo == null ? 1 : s.ammo, .5); to.ships.push(s); n++; } // the same hulls change hands
     f.ships = []; if (AG.championOf(f)) AG.recall(AG.championOf(f));
   }
   const winAtt = pidx(cf, winO) === 0;
-  const res = { attWin: winAtt, world: cf.world, att: cf.att, def: cf.def, atts: cf.atts, defs: cf.defs, margin: 4, space: cf.space, lossF: winAtt ? [0, 1] : [1, 0], captured: n, surrendered: true, parley: true };
-  C().stats = C().stats || {}; C().stats.surrenders = (C().stats.surrenders || 0) + 1;
+  const res = { attWin: winAtt, world: cf.world, att: cf.att, def: cf.def, atts: cf.atts, defs: cf.defs, margin: 4, space: cf.space, lossF: winAtt ? [0, 1] : [1, 0], captured: n, scuttled: scut, surrendered: true, parley: true };
+  C().stats = C().stats || {}; C().stats.surrenders = (C().stats.surrenders || 0) + 1; C().stats.prizesTaken = (C().stats.prizesTaken || 0) + n; C().stats.scuttled = (C().stats.scuttled || 0) + scut;
   const lead = losers.map(f => f.name).slice(0, 2).join(' and ');
-  K.chron('battle', `Off ${nm}, ${lead} ${losers.length > 1 ? 'strike their' : 'strikes its'} colours to ${K.BLOC_NAME[winO] || 'the rebels'} without a shot fired: ${n} hull${n === 1 ? '' : 's'} taken.`, cf.world, winO);
+  K.chron('battle', `Off ${nm}, ${lead} ${losers.length > 1 ? 'strike their' : 'strikes its'} colours to ${K.BLOC_NAME[winO] || 'the rebels'} without a shot fired: ${n} hull${n === 1 ? '' : 's'} taken${scut ? `, ${scut} scuttled by their own crews` : ''}.`, cf.world, winO);
   K.afterBattle(res);
   return res;
 }
