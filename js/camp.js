@@ -750,7 +750,12 @@ export function groundSpec(fl) {
     def: { f: w.owner, men: Math.round(w.garrison * ctx.dmul * GROUND_FIELD * GROUND_SCALE), garrison: w.garrison, fort: w.lv.fort || 0, gun: w.gun || 0, shield: w.shield || 0, barracks: w.lv.barracks || 0, morale: clamp(1 - weeks * .02, .8, 1), cmdr: 'The Legate',
       air: { rip: 12 * Math.min(2, w.gun || 0), thunder: (w.lv.fort || 0) >= 2 ? 4 : 0 } }, // the garrison's own squadrons (placeholder: the campaign keeps no planetary air yet)
     // the same Rain as a war across the planet (planetwar.js; the ground brief offers it as a preview where the world has a map)
-    planet: { world: w.id, by: fl.owner, def: w.owner, troops: Math.round(o.troops), garrison: w.garrison, fort: w.lv.fort || 0, gun: w.gun || 0, shield: w.shield || 0, barracks: w.lv.barracks || 0, loyalty: w.cl ? w.cl.war : w.loyalty } };
+    planet: { world: w.id, by: fl.owner, def: w.owner, troops: Math.round(o.troops), garrison: w.garrison, fort: w.lv.fort || 0, gun: w.gun || 0, shield: w.shield || 0, barracks: w.lv.barracks || 0, loyalty: w.cl ? w.cl.war : w.loyalty,
+      cmdrs: c ? [planetCmdr(c)] : [] } };
+}
+// a campaign commander as the planet map carries one: the strength their talents give when auto-resolved (ar), and the
+// talents in effect, some of which mean something on the planet (planetwar.js CMDR_T)
+function planetCmdr(c) { const t = CM.effTalents(c); return { id: c.id ?? c.name, name: c.name, ar: t.reduce((k, x) => k * ((CM.TALENT[x] && CM.TALENT[x].ar) || 1), 1), t };
 }
 // the drop is made: the Senate's vote is defied if it stood, the pods and Storks are spent
 export function groundDrop(fl) { const w = C.worlds[fl.at]; senateDefied(fl.owner, w.id); spendDrop(fl); C.fleets = C.fleets.filter(f => f.ships.length); }

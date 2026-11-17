@@ -12,6 +12,9 @@ import * as PW from '../js/planetwar.js';
 const q = new URLSearchParams(location.search), num = (k, d) => q.has(k) ? +q.get(k) : d;
 const spec = { world: q.get('world') || 'mercury', by: 'rep', def: 'soc', troops: num('troops', 8072), garrison: num('garrison', 5720), fort: num('fort', 0), gun: num('gun', 1), shield: num('shield', 0), barracks: num('barracks', 1), loyalty: num('loyalty', 50) };
 window.__pw = { PMV, PW, V: PMV._view, done: null };
-const go = () => PMV.open(spec, { human: q.get('side') === 'def' ? 'def' : 'att', preview: true }).then(r => { window.__pw.done = r; });
+spec.cmdrs = q.has('cmdr') ? [{ id: 'darrow', name: 'Darrow of Lykos', ar: 1.08, t: ['reaper', 'hunter', 'rain'] }] : [];
+// ?headless fights each province battle with ground.js headless (no ground view): the result comes straight back
+const fight = q.has('headless') ? async sp => (await import('../js/ground.js')).runHeadless(sp, 7, +q.get('headless') || 900) : undefined;
+const go = () => PMV.open(spec, { human: q.get('side') === 'def' ? 'def' : 'att', preview: true, fight }).then(r => { window.__pw.done = r; });
 go();
 </script></body></html>

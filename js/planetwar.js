@@ -55,36 +55,117 @@ export function reach(war, army) {
 // here the whole garrison is on the map, spread over the provinces.
 // the garrison's edge on its own world (it knows the ground, holds the strongpoints and is fed): tuned with tests/planet_war.mjs
 // so the stand-in attacker's plan takes Mercury in week 1 about two times in three; a test may change it
-export const TUNE = { def: 1.15 };
-const TERRAIN = { alpine: 1.12, highland: 1.18, jungle: 1.15, desert: 1, temperate: 1.02 }; // the defender's ground
-const wallsK = (war, p) => { const pr = war.provs[p.id]; return pr.walls ? 1 + .22 * pr.walls * (1 - (pr.breach || 0)) : 1; };
-export function power(war, side, prov, men) {
-  const p = P(war, prov), pr = war.provs[prov], held = pr.own === side;
-  let k = 1; if (held) k *= (TERRAIN[p.terrain] || 1) * wallsK(war, p);
-  if (side === 'att') k *= war.attQ; else k *= war.defQ;
-  return men * k;
+export const TUNE = { def: 2 }; // 16 Nov (M2b): with the fitted field, a garrison troop puts about twice the men of a Rain troop in the line (the city's militia, police and levies under arms)
+// What the field shows, fitted from ground.js province battles (tests/planet_fit.mjs, 2026-11-16: 234 battles on
+// Mercury's provinces at 15,000 holders, both ways round; claude/planet-maps.md):
+//   HOLD: the holder's edge on its own ground with no walls, by settlement and terrain. Small towns and hill forts are
+//     hard to take; the great cities, spread over many streets, are easier than their size suggests.
+//   WALL: each level of walls multiplies it, less as a siege opens them.
+//   LEGION: the Rain's legions with their starShells against the same number of the garrison's men.
+export const HOLD = { 'city:temperate': .92, 'port:temperate': .92, 'towns:desert': 1.4, 'towns:jungle': 1.62, 'forts:highland': 1.62, 'capital:alpine': .87 };
+const HOLD_KIND = { capital: .9, city: .92, port: .92, towns: 1.5, forts: 1.62 }; // for ground not yet fitted (other worlds)
+//   LANDING: a landing battle (the drop scattered over the province, coming down under fire) counts the legions' power
+//     at 1 / LANDING of a formed army's: fitted from 48 landings fought in ground.js's drop mode.
+export const WALL = 1.52, LEGION = 1.54, LANDING = 1.34;
+const holdOf = p => HOLD[p.kind + ':' + p.terrain] ?? HOLD_KIND[p.kind] ?? 1.2;
+const wallsK = (war, p) => { const pr = war.provs[p.id]; return pr.walls ? WALL ** (pr.walls * (1 - (pr.breach || 0))) : 1; };
+// power = men × what the field shows (the holder's ground and walls: native) × what it doesn't (the side's quality and
+// its commander: qual). A fought battle puts men × qual on the field and lets the field supply the rest.
+export const native = (war, prov, side) => { const p = P(war, prov); return (war.provs[prov].own === side ? holdOf(p) * wallsK(war, p) : 1) * (side === 'att' ? LEGION : 1); };
+export const qual = (war, side, prov, ck) => (side === 'att' ? war.attQ : war.defQ) * Math.max(ck || 1, stackK(war, side, prov));
+export function power(war, side, prov, men, ck) { return men * native(war, prov, side) * qual(war, side, prov, ck); }
+// ---------------------------------------------------------------- commanders (Harrison's decision 6)
+// An army can carry campaign commanders: { id, name, ar, t }. ar is the auto-resolve strength factor of their talents
+// (camp.js knows it); t lists the talents in effect (CM.effTalents). The one with the highest ar leads the army. Their
+// strength counts on both paths (as men on the field), and these talents mean something on the planet map:
+export const CMDR_T = {
+  inspiring: '+4% strength',
+  quarter: 'no losses out of supply',
+  shield: 'holding its province, the army loses a quarter less',
+  hunter: 'an enemy it beats loses a tenth more',
+  discipline: 'beaten, the army loses a fifth less',
+  rain: 'its landing loses 30% less in the sky',
+  butcher: 'a siege it leads opens the walls faster',
+  breacher: 'a siege it leads opens the walls faster',
+  beloved: 'a captured city where it stands raises twice the levy',
+};
+export const leadOf = a => a && a.cmdrs && a.cmdrs.length ? a.cmdrs.reduce((b, c) => (c.ar || 1) > (b.ar || 1) ? c : b) : null;
+const hasT = (a, t) => { const c = leadOf(a); return !!(c && c.t && c.t.includes(t)); };
+const stackHas = (war, side, prov, t) => war.armies.some(a => a.side === side && a.prov === prov && a.men > 0 && hasT(a, t));
+export const cmdrK = c => c ? (c.ar || 1) * (c.t && c.t.includes('inspiring') ? 1.04 : 1) : 1;
+const stackK = (war, side, prov) => war.armies.reduce((k, a) => a.side === side && a.prov === prov && a.men > 0 ? Math.max(k, cmdrK(leadOf(a))) : k, 1);
+// a commander changes armies within a province (or is given to one that has none)
+export function assign(war, cmdrId, armyId) {
+  const to = war.armies.find(a => a.id === armyId); if (!to) return false;
+  const from = war.armies.find(a => (a.cmdrs || []).some(c => c.id === cmdrId)); if (!from || from === to || from.prov !== to.prov || from.side !== to.side) return false;
+  const c = from.cmdrs.find(x => x.id === cmdrId); from.cmdrs = from.cmdrs.filter(x => x !== c); (to.cmdrs = to.cmdrs || []).push(c); return true;
 }
+export const cmdrsOf = (war, side) => war.armies.flatMap(a => a.side === side ? (a.cmdrs || []).map(c => ({ ...c, army: a.id, prov: a.prov })) : []);
+
 // Auto-resolve: the odds follow the ratio of power (a fitted logistic; tests/planet_war.mjs), losses follow the fight.
 // Fought battles use ground.js; the auto-resolve is fitted to it so neither is the better choice.
-export const FIT = { s: .32, lossW: .32, lossL: .62 };
+export const FIT = { s: .24, lossW: .2, lossL: .46 }; // fitted with HOLD (tests/planet_fit.mjs)
 export function oddsOf(pa, pd) { const r = Math.log(Math.max(1e-6, pa) / Math.max(1e-6, pd)); return 1 / (1 + Math.exp(-r / FIT.s)); }
+const landingAt = (war, prov) => (war.pending || []).some(b => b.prov === prov && b.kind === 'landing');
+export const oddsAt = (war, prov) => oddsOf(power(war, 'att', prov, sideMen(war, 'att', prov)) / (landingAt(war, prov) ? LANDING : 1), power(war, 'def', prov, sideMen(war, 'def', prov)));
 function fight(war, prov, rnd) {
-  const A = war.armies.filter(a => a.prov === prov && a.side === 'att' && a.men > 0), Dd = war.armies.filter(a => a.prov === prov && a.side === 'def' && a.men > 0);
-  if (!A.length || !Dd.length) return null;
-  const ma = A.reduce((s, a) => s + a.men, 0), md = Dd.reduce((s, a) => s + a.men, 0), pa = power(war, 'att', prov, ma), pd = power(war, 'def', prov, md);
-  const p = oddsOf(pa, pd), won = rnd() < p ? 'att' : 'def', W = won === 'att' ? A : Dd, L = won === 'att' ? Dd : A, pw = won === 'att' ? pa : pd, pl = won === 'att' ? pd : pa;
+  const ma = sideMen(war, 'att', prov), md = sideMen(war, 'def', prov); if (!ma || !md) return null;
+  const pa = power(war, 'att', prov, ma) / (landingAt(war, prov) ? LANDING : 1), pd = power(war, 'def', prov, md);
+  const p = oddsOf(pa, pd), won = rnd() < p ? 'att' : 'def', pw = won === 'att' ? pa : pd, pl = won === 'att' ? pd : pa;
   const lw = clamp(FIT.lossW * pl / pw * (.8 + rnd() * .4), .03, .6), ll = clamp(FIT.lossL * (.8 + rnd() * .4) + .1 * pl / pw, .3, .95);
-  for (const a of W) a.men = Math.round(a.men * (1 - lw)); for (const a of L) a.men = Math.round(a.men * (1 - ll));
-  const res = { prov, won, att0: ma, def0: md, odds: p, lostA: won === 'att' ? lw : ll, lostD: won === 'def' ? lw : ll, week: war.week };
-  // the beaten fall back to a province of their own next door, or are lost
-  for (const a of L) { if (a.men <= 0) continue; const back = neighbours(war.world, prov).filter(n => war.provs[n].own === a.side && !bySea(war.world, prov, n));
+  return outcome(war, prov, won, won === 'att' ? lw : ll, won === 'def' ? lw : ll, p, 'auto');
+}
+// a battle's verdict on the map, auto-resolved or fought: losses (with the commanders' talents), the beaten fall back to
+// a province of their own next door or are lost, the winner holds the province
+function outcome(war, prov, won, lostA, lostD, p, how) {
+  const ma = sideMen(war, 'att', prov), md = sideMen(war, 'def', prov), lose = won === 'att' ? 'def' : 'att', holder = war.provs[prov].own;
+  const loss = side => { let f = side === 'att' ? lostA : lostD;
+    if (side === holder && stackHas(war, side, prov, 'shield')) f *= .75;
+    if (side === lose && stackHas(war, side, prov, 'discipline')) f *= .8;
+    if (side === lose && stackHas(war, won, prov, 'hunter')) f += .1;
+    return clamp(f, 0, .97); };
+  const fa = loss('att'), fd = loss('def');
+  for (const a of war.armies) if (a.prov === prov && a.men > 0) a.men = Math.round(a.men * (1 - (a.side === 'att' ? fa : fd)));
+  const res = { prov, won, att0: ma, def0: md, odds: p, lostA: fa, lostD: fd, week: war.week, how };
+  for (const a of war.armies.filter(x => x.prov === prov && x.side === lose && x.men > 0)) { const back = neighbours(war.world, prov).filter(n => war.provs[n].own === a.side && !bySea(war.world, prov, n));
     if (back.length) a.prov = back.sort((x, y) => sideMen(war, a.side, y) - sideMen(war, a.side, x))[0]; else a.men = 0; }
-  if (won === 'att') take(war, prov, 'att');
-  war.log.push(`${P(war, prov).name}: ${won === 'att' ? 'the legions win' : 'the garrison holds'} (${Math.round(p * 100)}% for the attacker; ${ma.toLocaleString()} against ${md.toLocaleString()}).`);
-  war.battles.push(res); return res;
+  for (const a of war.armies) if (a.men <= 0 && a.cmdrs && a.cmdrs.length) { for (const c of a.cmdrs) { war.cmdrLost.push({ ...c, side: a.side, prov, week: war.week }); war.log.push(`${c.name} is lost with the army at ${P(war, prov).name}.`); } a.cmdrs = []; }
+  if (won === 'att') take(war, prov, 'att'); else if (holder === 'att') take(war, prov, 'def');
+  war.log.push(`${P(war, prov).name}: ${won === 'att' ? 'the legions win' : 'the garrison wins'}${how === 'fought' ? ' on the field' : ''} (${Math.round(p * 100)}% for the attacker; ${ma.toLocaleString()} against ${md.toLocaleString()}).`);
+  war.battles.push(res); war.pending = (war.pending || []).filter(b => b.prov !== prov); war.armies = war.armies.filter(a => a.men > 0);
+  return res;
 }
 const sideMen = (war, side, prov) => war.armies.reduce((s, a) => s + (a.side === side && a.prov === prov ? a.men : 0), 0);
 function take(war, prov, side) { const pr = war.provs[prov]; if (pr.own === side) return; pr.own = side; pr.siege = 0; if (side === 'att') { pr.gun = 0; pr.shield = 0; } }
+
+// ---------------------------------------------------------------- fought battles (ground.js)
+// A battle in war.pending can be fought on the province's own 8 km field. battleSpec builds the ground battle: the side
+// that holds the province stands at its posts in the settlement, the other comes to take it (formed on the plain, or
+// falling from the sky for a landing). Each side brings men × FIELD_SCALE × its quality and commander (qual), the things
+// the field doesn't model; the field supplies the rest (the ground, the walls). settle writes the verdict back.
+export const FIELD_SCALE = 10; // ten men on the field for each campaign troop (camp.js GROUND_SCALE)
+const SHELLS = .055; // the share of the Rain's strength in starShells (a suit counts as six men), as in Mercury's opening Rain
+const other = side => side === 'att' ? 'def' : 'att';
+export function battleSpec(war, prov) {
+  const p = P(war, prov), pr = war.provs[prov], holder = pr.own, foe = other(holder);
+  const b = (war.pending || []).find(x => x.prov === prov), landing = !!(b && b.kind === 'landing');
+  const men = side => Math.round(sideMen(war, side, prov) * FIELD_SCALE * qual(war, side, prov));
+  const cm = side => { const c = war.armies.filter(a => a.side === side && a.prov === prov).map(leadOf).filter(Boolean).sort((x, y) => (y.ar || 1) - (x.ar || 1))[0]; return c ? c.name : null; };
+  const f = side => side === 'att' ? war.by : war.def, am = men(foe), shells = foe === 'att' ? Math.round(am * SHELLS) : 0; // the Rain's legions bring their starShells, as in a Rain
+  return { world: war.world, mode: landing ? 'drop' : 'field', noSky: true, maxT: 1800, fleet: null,
+    site: { id: p.id, name: p.name, kind: p.kind, terrain: p.terrain, field: p.field === war.world },
+    att: { f: f(foe), leech: am - shells, total: am, shells: Math.round(shells / 6), storks: 0, cmdr: cm(foe), air: null },
+    def: { f: f(holder), men: men(holder), garrison: sideMen(war, holder, prov), fort: pr.walls || 0, breach: pr.breach || 0, gun: holder === 'def' ? pr.gun : 0, shield: holder === 'def' ? pr.shield : 0, barracks: 0, morale: 1, cmdr: cm(holder), air: null },
+    planet: { prov, holder, foe, odds: oddsAt(war, prov) } };
+}
+// r: ground.js result() for that battle: won (the side that came to take the province won), att0 / attLeft and
+// def0 / defLeft (strength at the start and at the end). The share each side lost comes off its armies on the map.
+export function settle(war, prov, r) {
+  if (!(war.pending || []).some(b => b.prov === prov)) return null;
+  const holder = war.provs[prov].own, foe = other(holder), p = oddsAt(war, prov);
+  const lf = clamp(1 - r.attLeft / Math.max(1, r.att0), 0, 1), lh = clamp(1 - r.defLeft / Math.max(1, r.def0), 0, 1);
+  return outcome(war, prov, r.won ? foe : holder, foe === 'att' ? lf : lh, foe === 'att' ? lh : lf, p, 'fought');
+}
 
 // ---------------------------------------------------------------- a war
 // spec: { world, by, def, troops (the drop, campaign troops), garrison, fort, gun, shield, barracks, loyalty (0..100) }
@@ -93,34 +174,40 @@ export function newWar(spec) {
   const m = MAPS[spec.world]; if (!m) return null;
   const war = { world: spec.world, by: spec.by, def: spec.def, week: 0, provs: {}, armies: [], log: [], battles: [], over: null, orbit: true,
     attQ: 1, defQ: clamp((spec.loyalty ?? 50) + 30, 40, 130) / 80 * TUNE.def, // a loyal garrison fights harder, on its own ground
-    barracks: spec.barracks || 0, recruit: spec.recruit ?? null, land0: 0 };
+    barracks: spec.barracks || 0, recruit: spec.recruit ?? null, land0: 0, loyalty: spec.loyalty ?? 50, pending: [], cmdrLost: [], levied: 0 };
   const g = spec.garrison, guns = spec.gun || 0, fort = spec.fort || 0;
   for (const p of m.provs) war.provs[p.id] = { own: 'def', walls: p.walls ? Math.max(0, fort - (p.walls - 1)) + (p.kind === 'capital' ? 1 : 0) : 0, gun: Math.round(guns * (p.guns || 0) * 10) / 10, shield: p.shield ? spec.shield || 0 : 0, siege: 0, breach: 0 };
-  for (const p of m.provs) war.armies.push({ id: nextId++, side: 'def', prov: p.id, men: Math.round(g * p.gar), post: p.id });
+  for (const p of m.provs) war.armies.push({ id: nextId++, side: 'def', prov: p.id, men: Math.round(g * p.gar), post: p.id, cmdrs: p.id === m.capital ? (spec.defCmdrs || []).slice() : [] }); // the garrison's commanders hold the capital
   return war;
 }
 // the guns and shield platforms of a province shoot down part of a landing on it
 export const skyToll = (war, prov) => { const pr = war.provs[prov], p = P(war, prov); if (pr.own === 'att') return 0;
   return clamp(pr.gun * .12 + pr.shield * .05 + (p.kind === 'capital' ? .08 : 0) + pr.walls * .06, 0, .6); }; // a capital has its Sarissa batteries, and a drop onto walls comes down among the guns
-// The Rain: plan = [{ prov, troops }]. Each landing loses its toll in the sky, then fights whatever stands there.
-export function land(war, plan, rnd = Math.random) {
+// The Rain: plan = [{ prov, troops, cmdrs? }]. Each landing loses its toll in the sky, then fights whatever stands
+// there. With { defer: true } the landing battles wait in war.pending, to be fought (settle) or auto-resolved (resolve).
+export function land(war, plan, rnd = Math.random, { defer = false } = {}) {
   const out = [];
-  for (const { prov, troops } of plan) { if (!troops) continue; const lost = Math.round(troops * skyToll(war, prov));
-    const a = { id: nextId++, side: 'att', prov, men: troops - lost, landed: war.week }; war.armies.push(a); war.land0 += troops; out.push({ prov, troops, lost });
+  for (const { prov, troops, cmdrs } of plan) { if (!troops) continue; const rain = (cmdrs || []).some(c => c.t && c.t.includes('rain')), lost = Math.round(troops * skyToll(war, prov) * (rain ? .7 : 1));
+    const a = { id: nextId++, side: 'att', prov, men: troops - lost, landed: war.week, cmdrs: (cmdrs || []).slice() }; war.armies.push(a); war.land0 += troops; out.push({ prov, troops, lost });
     war.log.push(`The Rain falls on ${P(war, prov).name}: ${troops.toLocaleString()} troops, ${lost.toLocaleString()} lost in the sky.`); }
-  for (const prov of new Set(plan.map(x => x.prov))) { merge(war, prov); if (!fight(war, prov, rnd) && sideMen(war, 'att', prov) > 0) take(war, prov, 'att'); }
+  for (const prov of new Set(plan.map(x => x.prov))) { merge(war, prov);
+    if (sideMen(war, 'att', prov) > 0 && sideMen(war, 'def', prov) > 0) { war.pending.push({ prov, kind: 'landing' }); if (!defer) resolve(war, prov, rnd); }
+    else if (sideMen(war, 'att', prov) > 0) take(war, prov, 'att'); }
   merge(war); return out;
 }
-function merge(war, only) { // armies of one side in one province march as one
+function merge(war, only) { // armies of one side in one province march as one, with all their commanders
   const seen = new Map();
-  for (const a of war.armies) { if (a.men <= 0 || (only && a.prov !== only)) continue; const k = a.side + ':' + a.prov, b = seen.get(k); if (b) { b.men += a.men; a.men = 0; } else seen.set(k, a); }
+  for (const a of war.armies) { if (a.men <= 0 || (only && a.prov !== only)) continue; const k = a.side + ':' + a.prov, b = seen.get(k);
+    if (b) { b.men += a.men; a.men = 0; if (a.cmdrs && a.cmdrs.length) { b.cmdrs = [...(b.cmdrs || []), ...a.cmdrs]; a.cmdrs = []; } b.hungry = Math.max(b.hungry || 0, a.hungry || 0); } else seen.set(k, a); }
   war.armies = war.armies.filter(a => a.men > 0);
 }
-// orders: a list of { id, to, men? } (men: split off that many and send them; the rest stay)
-export function order(war, id, to, men) {
+// orders: (id, to, men?, cmdrIds?). men: split off that many and send them, the rest stay; cmdrIds: the commanders who
+// go with the part sent (by default they stay with the rest). Sending the whole army takes all its commanders.
+export function order(war, id, to, men, cmdrIds) {
   const a = war.armies.find(x => x.id === id); if (!a || !reach(war, a).includes(to)) return false;
   if (a.side === 'def' && sideMen(war, 'att', a.prov) > 0) return false; // a garrison with the enemy at its walls is pinned there
-  if (men && men < a.men) { const b = { id: nextId++, side: a.side, prov: a.prov, men, post: a.post }; a.men -= men; war.armies.push(b); b.to = to; } else a.to = to;
+  if (men && men < a.men) { const go = (a.cmdrs || []).filter(c => (cmdrIds || []).includes(c.id)), b = { id: nextId++, side: a.side, prov: a.prov, men, post: a.post, cmdrs: go, hungry: a.hungry || 0 };
+    a.cmdrs = (a.cmdrs || []).filter(c => !go.includes(c)); a.men -= men; war.armies.push(b); b.to = to; } else a.to = to;
   return true;
 }
 // supply: an army is fed while it can trace a path through its own provinces to a source: for the attacker, a province
@@ -132,9 +219,20 @@ function supplied(war, side) {
   while (q.length) { const id = q.shift(); for (const n of neighbours(war.world, id)) if (!ok.has(n) && war.provs[n].own === side) { ok.add(n); q.push(n); } }
   return ok;
 }
-// One planet turn (a campaign week). ai: (war, side) => [[id, to, men?], ...] for each side the computer plays.
+// One planet turn (a campaign week) runs in three steps, so that a battle can be fought on the field in between:
+//   weekMoves(war, { ai, orbit }) → the week's battles (war.pending: [{ prov, kind: 'field' | 'landing' }])
+//   then for each battle either resolve(war, prov, rnd) (auto) or settle(war, prov, groundResult) (fought: ground.js)
+//   weekEnd(war) → supply, recruitment, levies, and whether the war is over (war.over).
+// weekTick does all three with every battle auto-resolved (the tests, forecast, and the campaign until M3).
+// ai: (war, side) => [[id, to, men?, cmdrIds?], ...] for each side the computer plays.
 export function weekTick(war, { ai = {}, rnd = Math.random, orbit = true } = {}) {
-  if (war.over) return war.over; war.week++; war.orbit = orbit; war.battles = [];
+  if (war.over) return war.over; weekMoves(war, { ai, orbit });
+  for (const b of war.pending.slice()) resolve(war, b.prov, rnd);
+  return weekEnd(war);
+}
+export function resolve(war, prov, rnd = Math.random) { const r = fight(war, prov, rnd); war.pending = war.pending.filter(b => b.prov !== prov); return r; }
+export function weekMoves(war, { ai = {}, orbit = true } = {}) {
+  if (war.over) return []; war.week++; war.orbit = orbit; war.battles = []; war.pending = [];
   for (const side of ['att', 'def']) if (ai[side]) for (const o of ai[side](war, side)) order(war, ...o);
   // movement: everyone moves at once; armies that pass each other on a road meet in the province they were bound for
   // two armies marching opposite ways down the same road meet on it: the one heading into the other's province stops there
@@ -143,28 +241,46 @@ export function weekTick(war, { ai = {}, rnd = Math.random, orbit = true } = {})
   merge(war);
   // battles wherever both sides stand; an unopposed army takes the province (a walled one by siege, below)
   for (const id of Object.keys(war.provs)) { const fa = sideMen(war, 'att', id), fd = sideMen(war, 'def', id);
-    if (fa && fd) { if (war.provs[id].own === 'def' && war.provs[id].walls && fa < fd * 2.2 && (war.provs[id].siege || 0) < 2) { war.provs[id].siege = (war.provs[id].siege || 0) + 1; war.provs[id].breach = Math.min(.8, war.provs[id].siege * .3); war.log.push(`${P(war, id).name} is besieged (week ${war.provs[id].siege}).`); continue; } // a walled city: invest it, break the walls, then storm
-      fight(war, id, rnd); }
+    if (fa && fd) { const pr = war.provs[id]; if (pr.own === 'def' && pr.walls && fa < fd * 2.2 && (pr.siege || 0) < 2) { pr.siege = (pr.siege || 0) + 1; // a walled city: invest it, break the walls, then storm
+        pr.breach = Math.min(.8, (pr.breach || 0) + .3 + (stackHas(war, 'att', id, 'butcher') || stackHas(war, 'att', id, 'breacher') ? .15 : 0)); war.log.push(`${P(war, id).name} is besieged (week ${pr.siege}).`); continue; }
+      war.pending.push({ prov: id, kind: 'field' }); }
     else if (fa && war.provs[id].own === 'def') { take(war, id, 'att'); war.log.push(`${P(war, id).name} is taken unopposed.`); }
     else if (fd && war.provs[id].own === 'att') { take(war, id, 'def'); war.log.push(`The garrison retakes ${P(war, id).name}.`); } }
   merge(war);
-  // supply: hungry armies lose men; a cut-off garrison too, more slowly
-  for (const side of ['att', 'def']) { const ok = supplied(war, side); for (const a of war.armies) if (a.side === side && !ok.has(a.prov)) { const k = side === 'att' ? .1 : .05; a.men = Math.round(a.men * (1 - k)); a.hungry = (a.hungry || 0) + 1; } else if (a.side === side) a.hungry = 0; }
+  return war.pending;
+}
+export function weekEnd(war) {
+  if (war.over) return war.over;
+  for (const b of war.pending.slice()) resolve(war, b.prov); // a battle left neither fought nor resolved is auto-resolved
+  merge(war);
+  // supply: hungry armies lose men (not with a Quartermaster); a cut-off garrison too, more slowly
+  for (const side of ['att', 'def']) { const ok = supplied(war, side); for (const a of war.armies) if (a.side === side && !ok.has(a.prov)) { const k = hasT(a, 'quarter') ? 0 : side === 'att' ? .1 : .05; a.men = Math.round(a.men * (1 - k)); a.hungry = (a.hungry || 0) + 1; } else if (a.side === side) a.hungry = 0; }
   // recruitment: the defender raises men in the cities it still holds, the capital most
   const rec = war.recruit ?? (150 + 100 * war.barracks);
   const held = M(war).provs.filter(p => war.provs[p.id].own === 'def' && (p.kind === 'capital' || p.kind === 'city' || p.kind === 'port'));
   const popHeld = held.reduce((s, p) => s + p.pop, 0);
   for (const p of held) { const n = Math.round(rec * p.pop / Math.max(.01, popHeld) * Math.min(1, popHeld / .5)); if (n > 0) { const g = war.armies.find(a => a.side === 'def' && a.prov === p.id); if (g) g.men += n; else war.armies.push({ id: nextId++, side: 'def', prov: p.id, men: n, post: p.id }); } }
+  // levies (Harrison's decision 7): each city the attacker holds raises a few local troops a week, more where its people
+  // cared little for their old masters, twice as many where a Beloved commander stands. Most troops still come from orbit.
+  const lev0 = war.levied;
+  for (const p of M(war).provs) { if (war.provs[p.id].own !== 'att' || !(p.kind === 'capital' || p.kind === 'city' || p.kind === 'port')) continue;
+    const n = Math.round(LEVY.k * p.pop * clamp(1.3 - war.loyalty / 100, .3, 1.3) * (stackHas(war, 'att', p.id, 'beloved') ? 2 : 1)); if (n <= 0) continue;
+    const g = war.armies.find(a => a.side === 'att' && a.prov === p.id); if (g) g.men += n; else war.armies.push({ id: nextId++, side: 'att', prov: p.id, men: n, cmdrs: [] }); war.levied += n; }
+  if (war.levied > lev0) war.log.push(`The captured cities raise ${(war.levied - lev0).toLocaleString()} levies.`);
   merge(war);
   return check(war);
 }
+export const LEVY = { k: 500 }; // a week's levy: k × the city's share of the people × (1.3 − loyalty/100); Heliopolis at loyalty 50: about 100
 export const menOf = (war, side) => war.armies.reduce((s, a) => s + (a.side === side ? a.men : 0), 0);
 export const popOf = (war, side) => M(war).provs.reduce((s, p) => s + (war.provs[p.id].own === side ? p.pop : 0), 0);
 function check(war) {
   const cap = M(war).capital, am = menOf(war, 'att'), dm = menOf(war, 'def');
   war.hopeless = am < dm * .2 && popOf(war, 'att') < .5 ? (war.hopeless || 0) + 1 : 0; // a remnant with no hope of the planet
+  const owners = Object.keys(war.provs).map(id => war.provs[id].own).join(); // a war where nothing changes hands for eight weeks has bogged down
+  war.still = owners === war.owners && !(war.battles || []).some(b => b.won === 'att') ? (war.still || 0) + 1 : 0; war.owners = owners;
   if (am <= 0) war.over = { won: 'def', why: 'The legions on the planet are destroyed.', week: war.week };
   else if (war.hopeless >= 3) war.over = { won: 'def', why: 'What is left of the legions lays down its arms.', week: war.week };
+  else if (war.still >= 8 && war.provs[cap].own !== 'att') war.over = { won: 'def', why: 'The war bogs down: the legions are taken off the planet.', week: war.week, withdrawn: am }; // the campaign returns them to the fleet
   else if (war.provs[cap].own === 'att' && popOf(war, 'att') >= .6) war.over = { won: 'att', why: `${P(war, cap).name} has fallen, and most of ${M(war).name} with it.`, week: war.week };
   else if (dm <= 0 && popOf(war, 'att') >= .4) war.over = { won: 'att', why: 'The garrison is gone.', week: war.week };
   if (war.over) war.log.push(war.over.why);
@@ -198,7 +314,10 @@ export function standIn(war, side) {
     const stacks = Object.keys(war.provs).filter(id => foeAt(id)).sort((x, y) => foeAt(x) - foeAt(y));
     for (const e of stacks) {
       const pe = power(war, 'att', e, foeAt(e)), near = mine.filter(a => !sent.has(a) && reach(war, a).includes(e) && !bySea(war.world, a.prov, e));
-      const part = a => a.prov === cap ? Math.round(a.men * .6) : a.men; // the capital's garrison sallies with three in five, the rest keep the walls
+      // the capital's garrison sallies with all it can spare: enough stays to hold the walls against the other stacks next
+      // door (and never less than two in five)
+      const part = a => { if (a.prov !== cap) return a.men; const other = neighbours(war.world, cap).filter(n => n !== e).reduce((m, n) => Math.max(m, power(war, 'att', n, foeAt(n))), 0);
+        return Math.round(Math.max(0, Math.min(a.men * .6, a.men - other / Math.max(.01, native(war, cap, 'def') * war.defQ) * 1.1))); };
       const pw = near.reduce((s, a) => s + part(a) * war.defQ, 0); if (pw > pe * 1.25) for (const a of near) { out.push(a.prov === cap ? [a.id, e, part(a)] : [a.id, e]); sent.add(a); }
     }
     // the rest: a post that can't hold against a stack next door falls back toward the capital and joins what is there

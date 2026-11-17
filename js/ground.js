@@ -91,11 +91,25 @@ export const G = { on: false };
 let R = Math.random;
 
 // ---------------------------------------------------------------- terrain
+// A province of a planet map (planetwar.js) fights on a field of its own: spec.site = { id, name, kind, terrain, field }.
+// The province that is the world's own field (Heliopolis on Mercury: site.field) keeps the world's city and its named
+// sites; the others get their own ground from the seed, a settlement sized to its kind, the terrain's relief and cover,
+// and plain descriptive names for the places to take (nothing invented passed off as canon).
+const SITE_K = { capital: 1, city: 1, port: .78, towns: .55, forts: .5 };
+const SITE_N = { capital: ['the Citadel', 'the North Gate', 'the South Gate', 'the Market', 'the Barracks'], city: ['the Centre', 'the Spaceport', 'the West Gate', 'the Market', 'the Barracks'],
+  port: ['the Harbour', 'the Docks', 'the Sea Gate', 'the Customs House', 'the Market'], towns: ['the Square', 'the Depot', 'the Pumphouse', 'the Crossroads', 'the Ridge'],
+  forts: ['the Keep', 'the Gatehouse', 'the Upper Battery', 'the Cistern', 'the Ridge'] };
+const TERR = { highland: { relief: 1.7, veg: .5, sea: false }, alpine: { relief: 1.4, veg: .3, sea: false }, desert: { relief: .65, veg: 0, sea: false }, jungle: { relief: 1, veg: 1.8, sea: true }, temperate: { relief: 1, veg: 1, sea: true } };
+function siteBiome(spec) {
+  const B0 = biomeOf(spec.world), S = spec.site; if (!S || S.field) return B0;
+  const T = TERR[S.terrain] || TERR.temperate, port = S.kind === 'port' || S.kind === 'city' || S.kind === 'capital';
+  return { ...B0, city: S.name, sites: SITE_N[S.kind] || SITE_N.towns, relief: B0.relief * T.relief, veg: clamp(B0.veg * T.veg, 0, .9), sea: port && T.sea ? B0.sea : null };
+}
 function buildMap(spec) {
-  const B = biomeOf(spec.world), seed = hashStr(spec.world + ':ground');
+  const B = siteBiome(spec), seed = hashStr(spec.world + (spec.site && !spec.site.field ? ':' + spec.site.id : '') + ':ground');
   const n1 = noise2(seed), n2 = noise2(seed + 7), n3 = noise2(seed + 13), r = rng(seed + 99);
   const H = new Float32Array((NH + 1) * (NH + 1)), cover = new Float32Array(NH * NH), urban = new Uint8Array(NH * NH), veg = new Uint8Array(NH * NH);
-  const city = { x: MAP * (.5 + (r() - .5) * .15), y: MAP * .7, r: 520 * SC };
+  const city = { x: MAP * (.5 + (r() - .5) * .15), y: MAP * .7, r: 520 * SC * (spec.site && !spec.site.field ? SITE_K[spec.site.kind] || .6 : 1) };
   // the city sits on a shoulder of high ground, the drop lands on the plains below it
   for (let j = 0; j <= NH; j++) for (let i = 0; i <= NH; i++) {
     const x = i * CH, y = j * CH, u = x / (900 * SC), v = y / (900 * SC);
@@ -149,8 +163,9 @@ function buildMap(spec) {
       walls.push({ id: walls.length, x0: city.x + Math.cos(a0) * R0, y0: city.y + Math.sin(a0) * R0, x1: city.x + Math.cos(a1) * R0, y1: city.y + Math.sin(a1) * R0, h: 14 + spec.def.fort * 4, hp: WALL_HP(spec.def.fort), hp0: WALL_HP(spec.def.fort), down: false });
     }
   }
+  if (spec.def.breach > 0) for (const w of walls) if (r() < spec.def.breach * .5) { w.down = true; w.hp = 0; } // a siege on the planet map has already opened stretches of the wall
   const bld = buildingIndex(cityPlan(keep, CH, spec.world).plots, CH); // the buildings, as the view will draw them: units walk round them
-  return { B, H, cover, urban, veg, blocks: keep, sites, city, walls, wl: walls.slice(), seaH, relief, bld, far };
+  return { B, H, cover, urban, veg, blocks: keep, sites, city, walls, wl: walls.filter(w => !w.down), seaH, relief, bld, far };
 }
 export function heightAt(x, y) {
   const M = G.map; if (!M) return 0;
@@ -387,7 +402,7 @@ export function setup(spec, opts = {}) {
   Object.assign(G, { army: null, on: true, spec, t: 0, phase: 'deploy', units: [], fx: [], feed: [], pods: [], zones: [], planAuto: true, zoneLast: null, over: null, speed: 1, paused: false, stats: [{ killed: 0, lost: 0 }, { killed: 0, lost: 0 }], storkT: 100, storksDone: false, holdT: 0, maxT: spec.maxT || 1800, leaderLost: [false, false], aaCover: [], human: opts.human == null ? 0 : opts.human, broke: [false, false] });
   cAcc = 0; aiAcc = [0, 0]; mAcc = 0; // each battle starts its clocks from zero
   G.map = buildMap(spec); buildNav(); G.bombs = [];
-  deployDefender(spec);
+  deployDefender(spec); G.def0 = strengthOf(1); G.att0 = spec.att.total || 0; // the strength each side starts with (result() counts what is left against it)
   return G;
 }
 // the attacker's units, built but not yet on the ground: they fall at the drop zones when the Rain begins
@@ -633,6 +648,24 @@ export function beginRain() {
   const n = G.zones.map(z => W.filter(d => d[2].zone === z.id).length);
   log(`The Iron Rain falls on ${G.map.B.city}: ${W.length} cohorts${G.zones.length > 1 ? ` (${G.zones.map((z, i) => 'ABCD'[i] + ' ' + n[i]).join(', ')})` : ''}.`, 'gold');
 }
+// A field battle of a planet war (spec.mode 'field'): no drop. The attacker's army stands formed on the plain below the
+// settlement, all of it (no Storks to wait for), and the battle starts at once; the garrison stands at its posts as for a Rain.
+export function beginField() {
+  const city = G.map.city, cx = clamp(city.x, 1200, MAP - 1200), cy = clamp(city.y - city.r - 1500, 700, MAP * .55); // formed up a kilometre and a half out
+  let x0 = cx, y0 = cy; for (let k = 0; k < 40 && (isWater(x0, y0) || isUrban(x0, y0)); k++) { x0 = clamp(cx + (R() - .5) * 2400, 500, MAP - 500); y0 = clamp(cy + (R() - .5) * 900, 500, MAP * .5); }
+  G.zones = [{ id: 0, n: ++zoneN, x: x0, y: y0 }]; G.phase = 'battle'; G.t = 0; G.storksDone = true;
+  const all = [...G.drop[0], ...G.drop[1]]; G.drop = [[], []];
+  const row = { legion: 0, starshell: 0, railmen: 1, obsidian: 2, peerless: 3 }, rows = [[], [], [], []];
+  for (const d of all) rows[row[d[0]] ?? 0].push(d);
+  rows.forEach((L, r) => L.forEach(([k, m, o], i) => {
+    const wide = Math.min(L.length, r === 0 ? 9 : 7), col = i % wide, rank = Math.floor(i / wide), side = r === 2 ? (i % 2 ? 1 : -1) : 0;
+    let x = x0 + (col - (wide - 1) / 2) * (r === 2 ? 0 : 150) + side * (700 + Math.floor(i / 2) * 130), y = y0 - [0, 260, 120, 420][r] - rank * 110;
+    if (o.leader) { x = x0; y = y0 - 560; }
+    x = clamp(x, 80, MAP - 80); y = clamp(y, 80, MAP - 80); for (let q = 0; q < 8 && isWater(x, y); q++) { x = clamp(x + (R() - .5) * 400, 80, MAP - 80); y = clamp(y - 150, 80, MAP - 80); }
+    const u = mkUnit(0, k, m, x, y, Math.atan2(city.y - y, city.x - x), Object.assign({}, o, { wave: 0 }));
+    u.zone = 0; u.how = 'march'; if (G.map.bld.any) { const p = G.map.bld.out(u.x, u.y, 4); u.x = p.x; u.y = p.y; } G.units.push(u); }));
+  log(`The legions form up before ${G.map.B.city}: ${all.length} cohorts.`, 'gold');
+}
 function land(k, m, o, z, t, wave) {
   const how = deliveryOf(k, wave), sc = SCATTER[how]; let x = z.x, y = z.y;
   for (let k = 0; k < 12; k++) { const a = R() * TAU, r = sc * R(), tx = clamp(z.x + Math.cos(a) * r, 60, MAP - 60), ty = clamp(z.y + Math.sin(a) * r, 60, MAP - 60); if (!isWater(tx, ty)) { x = tx; y = ty; break; } } // the scatter never puts a cohort in the sea
@@ -643,7 +676,7 @@ function land(k, m, o, z, t, wave) {
 }
 // a falling unit reaches the ground: what the sky took is gone
 function touchDown(u) {
-  const aa = aaAt(u.x, u.y), lost = aa * (SKY_K[u.how] ?? 1); // the heavy suits ride through more of it, the knights are hard to hit
+  const aa = G.spec.noSky ? 0 : aaAt(u.x, u.y), lost = aa * (SKY_K[u.how] ?? 1); // the heavy suits ride through more of it, the knights are hard to hit (a planet war has taken the sky's toll already: noSky)
   const dead = Math.round(u.men * clamp(lost * (.75 + R() * .5), 0, .9));
   u.men -= dead; u.men0 = Math.max(u.men, 1); u.sh = (u.T.shield || 0) * u.men; G.stats[0].lost += dead; G.skyLost = (G.skyLost || 0) + dead * u.eq;
   u.state = 'idle'; u.fall = null; u.width = defaultWidth(u);
@@ -913,12 +946,16 @@ function morale(dt) {
     let cap = u.m0 * (.45 + .55 * u.men / u.men0), drift = 0;
     drift -= fresh * 75; if (recent > .18) drift -= 1 * dt;
     if (u.flanked && G.t - u.flanked < 2) drift -= 4 * dt;
-    let near = 0, auraK = 0, outn = 0, fear = 0;
+    let near = 0, auraK = 0, outn = 0, fear = 0, runS = 0, steadyS = 0;
     for (const v of L) { const d = Math.sqrt(dist2(u, v)); if (d > 520) continue;
-      if (v.team === u.team) { if (v.state === 'rout' && v !== u && d < 350 && G.t - (v.routT || 0) < 20) near++; if (v.T.aura && v.state !== 'rout') auraK = Math.max(auraK, v.T.aura * (v.leader ? 1.6 : 1)); }
-      else if (fighting(v)) { if (d < 350) outn += v.men * v.eq; if (v.T.fear && d < 220) fear = Math.max(fear, v.T.fear * Math.min(1, v.men / 60)); } }
+      if (v.team === u.team) { if (v !== u && d < 350) { if (v.state === 'rout' && G.t - (v.routT || 0) < 20) { near++; runS += v.men * v.eq; } else if (v.state !== 'rout') steadyS += v.men * v.eq; }
+        if (v.T.aura && v.state !== 'rout') auraK = Math.max(auraK, v.T.aura * (v.leader ? 1.6 : 1)); }
+      else if (fighting(v)) { if (d < 350) outn += v.men * v.eq; if (v.T.fear && d < 220) fear = Math.max(fear, v.T.fear * Math.min(1, v.men / 60, v.men * v.eq / Math.max(1, .5 * u.men * u.eq))); } } // a big cohort fears a small band less (one of 2,000 against 300 Obsidians: half)
     // the terror of Obsidians, knights and starShells close at hand: lowColors feel it most, a Gold nearby steadies them
     if (fear) drift -= fear * (u.T.low ? .15 : .06) * (auraK ? .5 : 1) * dt;
+    // friends running past shake a unit: as many as two, counted against the steady strength around it (one cohort running
+    // through a formed army shakes it less than one of three on a beachhead)
+    if (near) near = Math.min(near, 3 * runS / Math.max(1, steadyS + u.men * u.eq));
     drift -= Math.min(2, near) * .6 * dt; cap += auraK;
     if (G.debug) G.debug.push({ t: G.t, id: u.id, team: u.team, type: u.type, m: u.morale, fresh, fear, near, drift, cap, melee: !!u.melee, st: u.state });
     if (u.melee) { const mine = L.filter(v => v.team === u.team && fighting(v) && Math.sqrt(dist2(u, v)) < 350).reduce((a, v) => a + v.men * v.eq, 0); if (outn > mine * 2) drift -= 3 * dt; }
@@ -937,7 +974,11 @@ function morale(dt) {
     u.morale = clamp(m, 0, 100); if (u.morale > cap) u.morale = Math.max(cap, u.morale - 2 * dt);
     if (u.morale < 12 || (u.men < u.men0 * .12 && u.men0 > 10)) { u.state = 'rout'; u.routT = G.t; u.routs++; u.melee = null; u.order = null; u.path = null; u.aim = null; u.faceTo = null; u.target = null; u.rallyT = G.t + 15; u.morale = Math.min(u.morale, 8);
       log(`${u.name} ${u.routs > 1 ? 'break again' : 'break and run'}!`, u.team === G.human ? 'bad' : 'good');
-      for (const v of L) if (v.team === u.team && v !== u && fighting(v) && dist2(u, v) < 400 * 400) v.morale -= 5; }
+      // the shock to the units around it: a cohort breaking beside a few others shakes them; one cohort of a big formed army
+      // breaking shakes the rest less (in proportion to its share of the strength there), so a whole army does not run
+      // from one rout (planet-map field battles stand 60 cohorts in one formation)
+      const by = L.filter(v => v.team === u.team && v !== u && fighting(v) && dist2(u, v) < 400 * 400), str = by.reduce((a, v) => a + v.men * v.eq, 0), k = clamp(3 * u.men0 * u.eq / Math.max(1, str), .2, 1);
+      for (const v of by) v.morale -= 5 * k; }
   }
 }
 
@@ -1260,7 +1301,7 @@ function bestStrike(u, foes, reach = 900) { // weak, isolated, or busy fighting 
 
 // ---------------------------------------------------------------- a whole battle, headless (tests and auto-resolve)
 export function runHeadless(spec, seed, maxT) {
-  setup(spec, { seed, human: -1 }); G.def0 = strengthOf(1); aiZones(); beginRain(); G.att0 = spec.att.total || 0;
+  setup(spec, { seed, human: -1 }); G.def0 = strengthOf(1); if (spec.mode === 'field') beginField(); else { aiZones(); beginRain(); } G.att0 = spec.att.total || 0;
   const T = maxT || G.maxT; while (!G.over && G.t < T + 1) step(1);
   if (!G.over) finish(1, 'Time runs out');
   return result();

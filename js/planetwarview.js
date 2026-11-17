@@ -27,7 +27,7 @@ const SZ = { capital: .062, city: .056, port: .048, towns: .042, forts: .046, ar
 
 let V = null;
 export const _view = () => V; // for the test harness
-export const active = () => !!(V && V.on);
+export const active = () => !!(V && V.on); // false while one of its battles is being fought in the ground view
 
 // ---------------------------------------------------------------- setup
 const CSS = `
@@ -64,6 +64,7 @@ const CSS = `
 #pw .good{color:#7fd88a}#pw .bad{color:#ff7a6a}#pw .dim{opacity:.65}#pw .gold{color:var(--gold,#f2c14e)}
 #pw .pw-fc{margin-top:8px;padding:8px;border:1px solid var(--line,#333);background:rgba(255,255,255,.03)}
 #pw .pw-fc b{font-size:18px}
+#pw .pw-cm{margin:6px 0;font-size:12px}#pw .pw-cm select{background:#14151c;color:inherit;border:1px solid var(--line,#444);font-size:11px}
 #pw .pw-lbls{z-index:1;position:absolute;inset:0;pointer-events:none;overflow:hidden}
 #pw .pw-lb{position:absolute;transform:translate(-50%,0);white-space:nowrap;font-size:11px;text-shadow:0 1px 2px #000,0 0 4px #000}
 #pw .pw-lb.name{font-family:Cinzel,Georgia,serif;letter-spacing:.06em;color:#f3ead8}
@@ -123,8 +124,9 @@ export function open(spec, opts = {}) {
     V.root.querySelector('#pwClose').textContent = opts.preview ? 'Close preview' : 'Close';
     resize(); buildScene();
     const cap = M.provs.find(p => p.id === M.capital); look(8, 4, 3.4, true); // Helios, the main continent, in view
+    V.planC = new Map(); V.withC = new Set();
     if (V.human === 'def') { // the enemy's Rain comes down at once, where its legate would put it
-      PW.land(war, PW.suggestPlan(spec)); V.phase = 'war'; flushLog(0); }
+      PW.land(war, PW.suggestPlan(spec).map(x => ({ ...x, cmdrs: [] })), Math.random, { defer: true }); flushLog(0); battles('landing'); }
     refresh(true);
     V.R.setAnimationLoop(frame);
   });
@@ -195,7 +197,7 @@ function sync() {
   const marks = new Map();
   if (V.phase === 'plan') for (const [id, n] of V.plan) if (n > 0) marks.set('landing:' + id, ['landing', id]);
   for (const p of M.provs) { const pr = war.provs[p.id]; if (pr.siege && pr.own === 'def' && war.armies.some(a => a.side === 'att' && a.prov === p.id)) marks.set('siege:' + p.id, ['siege', p.id]); }
-  for (const b of war.battles || []) if (b.week === war.week) marks.set('battle:' + b.prov, ['battle', b.prov]);
+  for (const b of [...(war.battles || []).filter(b => b.week === war.week), ...(war.pending || [])]) marks.set('battle:' + b.prov, ['battle', b.prov]);
   for (const [k, m] of V.markM) if (!marks.has(k)) { V.scene.remove(m); V.markM.delete(k); }
   for (const [k, [kind, id]] of marks) if (!V.markM.has(k)) { const p = M.provs.find(x => x.id === id), f = frameAt(seat(p)), m = piece(kind, kind === 'landing' ? side[V.human === 'att' ? 'att' : 'def'] : null, SZ[kind]);
     place(m, f.n, f.nn.clone().multiplyScalar(kind === 'battle' ? -.07 : .075)); V.scene.add(m); V.markM.set(k, m); }
@@ -239,6 +241,7 @@ function bindInput() {
   cv.addEventListener('dblclick', e => { const id = provAt(e.clientX, e.clientY); if (id >= 0) { const p = V.M.provs[id]; look(p.lat, p.lon); } });
   cv.addEventListener('wheel', e => { if (!V.on) return; V.cam.tdist = clamp(V.cam.tdist * (e.deltaY > 0 ? 1.12 : .89), 1.32, 5.5); e.preventDefault(); }, { passive: false });
   addEventListener('keydown', e => { if (!V || !V.on) return; if (e.key === 'Escape') { V.selA = null; V.selP = -1; V.pm.setSelected(-1); refresh(); } else if (e.key === 'Enter' && V.phase === 'war') endWeek(); });
+  V.root.addEventListener('change', e => { const t = e.target; if (t.dataset && t.dataset.p === 'cmdrat') { V.planC.set(t.dataset.a, t.value); forecastSoon(); } });
   V.root.addEventListener('click', e => {
     const b = e.target.closest('[data-p]'); if (!b || b.disabled) return; const g = b.dataset.p, arg = b.dataset.a;
     if (g === 'close') close();
@@ -251,6 +254,10 @@ function bindInput() {
     else if (g === 'legate') { V.plan = new Map(PW.suggestPlan(V.spec).map(x => [x.prov, x.troops])); refresh(true); }
     else if (g === 'clear') { V.plan.clear(); refresh(true); }
     else if (g === 'drop') drop();
+    else if (g === 'fightb') fightBattle(arg);
+    else if (g === 'autob') autoBattle(arg);
+    else if (g === 'autoall') { for (const x of V.war.pending.slice()) PW.resolve(V.war, x.prov); afterBattle(); }
+    else if (g === 'withc') { if (V.withC.has(arg)) V.withC.delete(arg); else V.withC.add(arg); }
     else if (g === 'reland') reland(arg);
     else if (g === 'again') { const s = V.spec, o = V.opts, r = V.resolve; V.resolve = null; close(); V.resolve = null; open(s, o).then(x => r && r(x)); }
   });
@@ -269,7 +276,7 @@ function orderTo(id, men = 0) {
   const a = V.selA, to = V.M.provs[id].id;
   if (to === a.prov) { a.to = null; mergeBack(a); refresh(); return; }
   if (a.to) { a.to = null; mergeBack(a); }
-  const sent = V.selA; if (!PW.order(V.war, sent.id, to, men && men < sent.men ? men : 0)) { toast(sent.side === 'def' && V.war.armies.some(x => x.side === 'att' && x.prov === sent.prov) ? 'The enemy is at the walls: this garrison is pinned.' : `${V.M.provs[id].name} is out of reach this week.`); return; }
+  const sent = V.selA, half = men && men < sent.men; if (!PW.order(V.war, sent.id, to, half ? men : 0, half ? [...V.withC] : [])) { toast(sent.side === 'def' && V.war.armies.some(x => x.side === 'att' && x.prov === sent.prov) ? 'The enemy is at the walls: this garrison is pinned.' : `${V.M.provs[id].name} is out of reach this week.`); return; }
   refresh();
 }
 
@@ -282,29 +289,55 @@ function planEdit(id, g) {
   if (v > 0) V.plan.set(id, v); else V.plan.delete(id);
   refresh(true);
 }
+// the plan as planetwar.js takes it: each commander lands with the landing chosen for them (the biggest, if none)
+function planList() {
+  const plan = [...V.plan].filter(([, n]) => n > 0).map(([prov, troops]) => ({ prov, troops, cmdrs: [] })); if (!plan.length) return plan;
+  const big = plan.reduce((b, x) => x.troops > b.troops ? x : b);
+  for (const c of V.spec.cmdrs || []) (plan.find(x => x.prov === V.planC.get(c.id)) || big).cmdrs.push(c);
+  return plan;
+}
 function drop() {
-  const plan = [...V.plan].filter(([, n]) => n > 0).map(([prov, troops]) => ({ prov, troops })); if (!plan.length) return;
-  V.reserve = V.spec.troops - planned(); V.phase = 'war';
-  PW.land(V.war, plan); V.selA = null; V.selP = -1; V.pm.setSelected(-1);
-  flushLog(0); refresh(true);
+  const plan = planList(); if (!plan.length) return;
+  V.reserve = V.spec.troops - planned();
+  PW.land(V.war, plan, Math.random, { defer: true }); V.selA = null; V.selP = -1; V.pm.setSelected(-1);
+  flushLog(0); battles('landing');
 }
 function reland(id) { // land the troops kept in orbit on a province (a second wave)
   if (!V.reserve || V.war.over) return; const n = V.reserve; V.reserve = 0;
-  V.moves = []; PW.land(V.war, [{ prov: id, troops: n }]); flushLog(V.war.week); refresh(true);
+  V.moves = []; PW.land(V.war, [{ prov: id, troops: n, cmdrs: [] }], Math.random, { defer: true }); flushLog(V.war.week); battles('landing');
+}
+// ---------------------------------------------------------------- the battles (war.pending): fought, or auto-resolved
+// then: 'week' (the week's battles, after the marches; weekEnd follows) or 'landing' (a landing's battles)
+function battles(then) { V.after = then; if (!V.war.pending.length) return battlesDone(); V.phase = 'battles'; refresh(true); }
+function battlesDone() {
+  const t = V.after; V.after = null; if (t === 'week') PW.weekEnd(V.war);
+  flushLog(V.war.week); V.phase = V.war.over ? 'over' : 'war'; if (V.war.over) setTimeout(showEnd, 900);
+  refresh(true);
+}
+function afterBattle() { flushLog(V.war.week); if (!V.war.pending.length) battlesDone(); else refresh(true); }
+function autoBattle(prov) { PW.resolve(V.war, prov); afterBattle(); }
+async function fightBattle(prov) {
+  const spec = PW.battleSpec(V.war, prov), M = V.M, holder = spec.planet.holder, nm = side => side === 'att' ? (V.opts.attName || 'The legions') : (V.opts.defName || 'The garrison');
+  const meta = { world: M.name, date: V.opts.date || `Week ${V.war.week} of the war`, attName: nm(spec.planet.foe), defName: nm(holder) };
+  const go = V.opts.fight || (async (sp, m) => (await import('./groundview.js')).fight(sp, m)); // groundview is loaded only when a battle is fought
+  V.on = false; V.R.setAnimationLoop(null); V.root.classList.add('hide');
+  let r = null; try { r = await go(spec, meta); } catch (e) { console.error('the province battle failed', e); }
+  V.on = true; V.root.classList.remove('hide'); last = 0; V.R.setAnimationLoop(frame);
+  if (r && r.att0 != null) PW.settle(V.war, prov, r); else PW.resolve(V.war, prov);
+  afterBattle();
 }
 // ---------------------------------------------------------------- the week
 function endWeek() {
   if (V.phase !== 'war' || V.war.over) return;
   const before = new Map(V.war.armies.map(a => [a.id, a.prov])), ai = {}; ai[V.human === 'att' ? 'def' : 'att'] = PW.standIn;
-  PW.weekTick(V.war, { ai });
+  PW.weekMoves(V.war, { ai });
   // the pieces glide from where their stacks stood
   V.moves = []; for (const a of V.war.armies) { const p0 = before.get(a.id); if (p0 && p0 !== a.prov) V.moves.push({ key: a.side + ':' + a.prov, from: armyPos(a.side, p0) }); }
   for (const [k, m] of V.armyM) { const mv = V.moves.find(x => x.key === k); if (mv) { m.userData.from = mv.from; m.userData.t = 0; } }
-  V.selA = null; flushLog(V.war.week);
-  if (V.war.over) { V.phase = 'over'; setTimeout(showEnd, 900); }
-  refresh(true);
+  V.selA = null; V.withC.clear(); flushLog(V.war.week);
+  battles('week');
 }
-function flushLog(week) { const L = V.war.log; if (V.logSeen < L.length) { V.weekLog.push({ week, lines: L.slice(V.logSeen) }); V.logSeen = L.length; } }
+function flushLog(week) { const L = V.war.log; if (V.logSeen < L.length) { const g = V.weekLog[V.weekLog.length - 1], add = L.slice(V.logSeen); if (g && g.week === week) g.lines.push(...add); else V.weekLog.push({ week, lines: add }); V.logSeen = L.length; } }
 
 // ---------------------------------------------------------------- panels
 function refresh(full) {
@@ -345,11 +378,13 @@ function side() {
       <div class="dim" style="display:grid;grid-template-columns:1fr 34px 50px 46px auto;gap:5px;padding:0 5px;font-size:10px;letter-spacing:.1em;text-transform:uppercase"><span>Province</span><span style="text-align:right">Sky</span><span style="text-align:right">Foes</span><span style="text-align:right">Drop</span><span></span></div>
       <div class="pw-rows">${rows}</div>
       <div>Unassigned: <b>${n0(free)}</b>${free && planned() ? ' <span class="dim">(stays in orbit)</span>' : ''}</div>
+      ${cmdrPlan()}
       <div class="pw-fc">${!planned() ? '<span class="dim">Assign troops to see the legate\'s reckoning.</span>' : fc && fc.key === planKey() ? `The legate's reckoning: <b class="${fc.win >= .55 ? 'good' : fc.win < .4 ? 'bad' : 'gold'}">${pct(fc.win)}</b> to take ${esc(V.M.name)}, in about ${fc.weeks.toFixed(1)} weeks, losing about ${n0(fc.lost)} troops.` : '<span class="dim">Reckoning…</span>'}</div>
       <div class="pw-bb"><button class="btn" data-p="legate">Legate's plan</button><button class="btn" data-p="clear" ${planned() ? '' : 'disabled'}>Clear</button><button class="btn go" data-p="drop" ${planned() ? '' : 'disabled'}>Drop the Rain ▸</button></div>`;
     return;
   }
   if (V.phase === 'over') { el.innerHTML = `<h3>${w.over && w.over.won === V.human ? 'Victory' : 'Defeat'}</h3><p>${esc(w.over ? w.over.why : '')}</p>`; return; }
+  if (V.phase === 'battles') { el.innerHTML = battlePanel(); return; }
   // the war: the selected army's orders, else the list of armies
   const mine = w.armies.filter(a => a.side === V.human && a.men > 0), M = V.M, nm = id => M.provs.find(p => p.id === id).name;
   let h = '';
@@ -357,7 +392,8 @@ function side() {
   if (a) {
     const pinned = a.side === 'def' && w.armies.some(x => x.side === 'att' && x.prov === a.prov);
     h += `<h3>${V.human === 'att' ? 'Legion' : 'Garrison'} in ${esc(nm(a.prov))}</h3><p><b>${n0(a.men)}</b> men${a.hungry ? ` · <span class="bad">out of supply ${a.hungry} week${a.hungry > 1 ? 's' : ''}</span>` : ''}</p>`;
-    if (a.to) h += `<p>Marching on <b>${esc(nm(a.to))}</b>. <button class="btn" data-p="stay" data-a="${a.id}">Stay</button></p>`;
+    if (a.cmdrs && a.cmdrs.length) h += `<div class="pw-cm">${a.cmdrs.map(c => `<div><b class="gold">${esc(c.name)}</b>${cmdrNote(c)}${a.to ? '' : ` <label class="dim"><input type="checkbox" data-p="withc" data-a="${esc(c.id)}" ${V.withC.has(c.id) ? 'checked' : ''}> goes with a half</label>`}</div>`).join('')}</div>`;
+    if (a.to) h += `<p>Marching on <b>${esc(nm(a.to))}</b>${(a.cmdrs || []).length ? ` with ${a.cmdrs.map(c => esc(c.name)).join(', ')}` : ''}. <button class="btn" data-p="stay" data-a="${a.id}">Stay</button></p>`;
     if (pinned) h += '<p class="bad">The enemy is at the walls: this garrison is pinned.</p>';
     else { h += '<p class="dim">March to (all, or half):</p>';
       for (const to of PW.reach(w, a)) { const pv = PW.preview(w, a, to), half = Math.floor(a.men / 2);
@@ -370,6 +406,28 @@ function side() {
   if (V.reserve && V.human === 'att' && V.selP >= 0) { const p = M.provs[V.selP]; h += `<p style="margin-top:10px"><b>${n0(V.reserve)}</b> troops wait in orbit. <button class="btn" data-p="reland" data-a="${p.id}">Land them on ${esc(p.name)}</button> <span class="dim">(${pct(PW.skyToll(w, p.id))} lost in the sky)</span></p>`; }
   else if (V.reserve && V.human === 'att') h += `<p style="margin-top:10px"><b>${n0(V.reserve)}</b> troops wait in orbit: select a province to land them.</p>`;
   el.innerHTML = h;
+}
+// a commander's line: what their talents do on the planet map
+function cmdrNote(c) { const k = PW.cmdrK(c), t = (c.t || []).filter(x => PW.CMDR_T[x]);
+  return ` <span class="dim">${k > 1.001 ? `+${Math.round((k - 1) * 100)}% strength` : ''}${t.length ? (k > 1.001 ? '; ' : '') + t.map(x => PW.CMDR_T[x]).join('; ') : ''}</span>`; }
+function cmdrPlan() {
+  const L = V.spec.cmdrs || []; if (!L.length) return '';
+  const landings = [...V.plan].filter(([, n]) => n > 0), big = landings.length ? landings.reduce((b, x) => x[1] > b[1] ? x : b)[0] : null;
+  return `<div class="pw-cm"><p class="dim" style="margin:8px 0 2px">Commanders land with:</p>${L.map(c => { const at = landings.some(([id]) => id === V.planC.get(c.id)) ? V.planC.get(c.id) : big;
+    return `<div><b class="gold">${esc(c.name)}</b> <select data-p="cmdrat" data-a="${esc(c.id)}" ${landings.length ? '' : 'disabled'}>${landings.length ? landings.map(([id]) => `<option value="${id}" ${id === at ? 'selected' : ''}>${esc(V.M.provs.find(p => p.id === id).name)}</option>`).join('') : '<option>(no landing yet)</option>'}</select>${cmdrNote(c)}</div>`; }).join('')}</div>`;
+}
+// the battles waiting: fight each on its own field, or let it be auto-resolved
+function battlePanel() {
+  const w = V.war, M = V.M, men = (side, prov) => w.armies.reduce((s, a) => s + (a.side === side && a.prov === prov ? a.men : 0), 0);
+  const cm = (side, prov) => w.armies.filter(a => a.side === side && a.prov === prov).flatMap(a => a.cmdrs || []).map(c => esc(c.name)).join(', ');
+  let h = `<h3>${V.after === 'landing' ? 'The landings' : `Battles, week ${w.week}`}</h3><p class="dim">Fight a battle on its own field, or let it be auto-resolved. The odds are the same either way.</p>`;
+  for (const b of w.pending) { const p = M.provs.find(x => x.id === b.prov), pa = PW.oddsAt(w, b.prov), mine = V.human === 'att' ? pa : 1 - pa, ca = cm('att', b.prov), cd = cm('def', b.prov);
+    h += `<div class="pw-fc" style="margin-top:6px"><div><b>${esc(p.name)}</b> <span class="dim">${b.kind === 'landing' ? 'landing' : w.provs[b.prov].own === 'att' ? 'the garrison attacks' : 'the legions attack'}</span></div>
+      <div>Legions <b>${n0(men('att', b.prov))}</b>${ca ? ` (${ca})` : ''} · garrison <b>${n0(men('def', b.prov))}</b>${cd ? ` (${cd})` : ''}</div>
+      <div>Your chance: <b class="${mine >= .55 ? 'good' : mine < .4 ? 'bad' : 'gold'}">${pct(mine)}</b></div>
+      <div class="pw-bb" style="margin-top:6px"><button class="btn go" data-p="fightb" data-a="${b.prov}">Fight it ▸</button><button class="btn" data-p="autob" data-a="${b.prov}">Auto-resolve</button></div></div>`; }
+  if (w.pending.length > 1) h += `<div class="pw-bb"><button class="btn" data-p="autoall">Auto-resolve all</button></div>`;
+  return h;
 }
 function previewText(pv) {
   if (pv.kind === 'join') return '· join';
@@ -392,12 +450,11 @@ function showEnd() {
 }
 function toast(msg) { const el = document.createElement('div'); el.className = 'gb-toast'; el.style.cssText = 'position:absolute;left:50%;top:70px;transform:translateX(-50%);background:rgba(10,10,16,.92);border:1px solid var(--gold,#f2c14e);padding:6px 12px;z-index:3'; el.textContent = msg; V.root.appendChild(el); setTimeout(() => el.remove(), 2000); }
 // the forecast plays a few hundred wars, so it waits until the plan stops changing
-const planKey = () => [...V.plan].filter(([, n]) => n > 0).sort().map(([k, n]) => k + n).join('|');
+const planKey = () => planList().map(x => x.prov + x.troops + x.cmdrs.map(c => c.id).join('+')).sort().join('|');
 function forecastSoon() { V.fcT = .35; }
 function forecastNow() {
   const key = planKey(); if (!key || (V.fc && V.fc.key === key)) return;
-  const plan = [...V.plan].filter(([, n]) => n > 0).map(([prov, troops]) => ({ prov, troops }));
-  V.fc = { key, ...PW.forecast(V.spec, plan, 160) }; side();
+  V.fc = { key, ...PW.forecast(V.spec, planList(), 160) }; side();
 }
 
 // ---------------------------------------------------------------- the frame
