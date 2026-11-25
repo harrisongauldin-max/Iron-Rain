@@ -9,7 +9,7 @@
 //   groundShields(sc, spec) → { city, dome, set(o), tick(t) }   (groundfx owns the call; spec.shield is the ground chat's)
 //   globeShield(seat, radDeg, opts) → { mesh, setOn(k), setColor(c), tick(t) }   (for planetwarview.js)
 import * as THREE from 'three/webgpu';
-import { Fn, float, vec2, vec3, vec4, uniform, positionWorld, positionView, positionGeometry, normalView, smoothstep, mix, dot, length, floor, max, clamp, abs, sin, atan, normalize, select } from 'three/tsl';
+import { Fn, float, vec2, vec3, vec4, uniform, positionWorld, positionView, positionGeometry, normalView, smoothstep, mix, dot, length, floor, max, clamp, abs, sin, atan, normalize, select, fwidth } from 'three/tsl';
 import { FACTIONS } from './data.js';
 
 const PI = Math.PI;
@@ -36,12 +36,12 @@ function shieldMat(mode, o = {}) {
     if (mode === 'ceil') { p2 = P.xz.div(U.cell).add(vec2(t.mul(.012), t.mul(.007))); }
     else if (mode === 'dome') { const d = P.sub(U.c), az = atan(d.z, d.x), n = U.cells; p2 = vec2(az.div(PI * 2).add(.5).mul(n).add(t.mul(.01)), P.y.div(U.cell).add(t.mul(.008))); foot = smoothstep(120, 0, P.y.sub(U.c.y)); } // n cells round, so the seam joins
     else { const q = positionGeometry.xz, rr = length(q).div(U.r); p2 = q.div(U.r).mul(U.cells.mul(.5)).add(vec2(t.mul(.02), 0)); rim = smoothstep(.8, .96, rr).mul(smoothstep(1.03, .98, rr)); } // the cap round +Y: its x,z are the disc's own plane, so the cells are even across it
-    const d = hexD(p2), edge = smoothstep(.43, .5, d).toVar(), cellK = smoothstep(.5, .1, d).mul(.12); // thin bright edges, a faint fill toward each cell's centre
+    const d = hexD(p2).toVar(), fw = fwidth(d).max(1e-5).toVar(), edge = smoothstep(float(.5).sub(fw.mul(2.2)), float(.5).sub(fw.mul(.6)), d).toVar(), cellK = smoothstep(.5, .1, d).mul(.12); // hairline edges about two pixels wide at any distance, a faint fill toward each cell's centre
     const V = normalize(positionView), fres = float(1).sub(abs(dot(normalView, V))).toVar(), graze = fres.mul(fres).mul(fres).toVar();
     const wave = sin(P.x.mul(.0012).add(P.z.mul(.0007)).sub(t.mul(1.6))).mul(.5).add(.5).mul(.35).add(.65); // a slow brightness wave through the lattice
     let a;
-    if (mode === 'globe') a = float(.11).add(edge.mul(.4)).add(cellK.mul(.6)).add(rim.mul(1.1)).mul(span).mul(wave.mul(.6).add(.4)); // on the globe we look square on: a visible veil with a bright rim
-    else a = float(.02).add(edge.mul(.15)).add(cellK.mul(.4)).add(graze.mul(.4)).add(foot.mul(.4)).mul(wave); // on the ground: nearly clear from above, a sheen at the horizon, a glowing foot
+    if (mode === 'globe') a = float(.08).add(edge.mul(.5)).add(cellK.mul(.4)).add(rim.mul(1.1)).mul(span).mul(wave.mul(.6).add(.4)); // on the globe we look square on: a visible veil with a bright rim
+    else a = float(.012).add(edge.mul(.3)).add(cellK.mul(.2)).add(graze.mul(.32)).add(foot.mul(.4)).mul(wave); // on the ground: nearly clear from above, a sheen at the horizon, a glowing foot
     const col = mix(U.col, vec3(1, 1, 1), edge.mul(.5).add(graze.mul(.3)));
     return vec4(col, clamp(a, 0, 1).mul(U.on));
   })();
