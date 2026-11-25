@@ -4,6 +4,7 @@
 import * as THREE from 'three/webgpu';
 import { NH, CH, MAP, BIOME, G, heightAt } from './ground.js';
 import { S } from './state.js';
+import { groundShields } from './shieldfx.js';
 import { Fn, float, vec2, vec3, vec4, uniform, uniformArray, attribute, varying, positionGeometry, positionWorld, normalWorld, cameraPosition, cameraViewMatrix, cameraProjectionMatrix, uv,
   mx_noise_float, mx_fractal_noise_float, mx_worley_noise_float, smoothstep, mix, dot, cross, sqrt, normalize, length, fract, floor, max, min, clamp, pow, abs, select, sin, cos, step, exp, hash,
   transformNormalToView, texture, If } from 'three/tsl';
@@ -25,7 +26,7 @@ function trample(x, y, r, heavy) { const sc = TROD_N / MAP, cx = x * sc, cy = y 
 const trodden = p => { const v = trodT.sample(p.xz.div(MAP)).r, heavy = step(900, v), t0 = v.sub(heavy.mul(1000)), age = T.sub(t0); return vec2(clamp(one.sub(age.div(180)), 0, 1).mul(step(0, age)).mul(step(.5, v)), heavy); };
 const CHAR = { phobos: [1, 0, 0, 0], deimos: [1, 0, 0, 0], luna: [.35, 0, 0, 0], mercury: [.5, .4, 0, 0], mars: [.25, .6, 0, 0], venus: [0, 0, 0, 0], earth: [0, 0, 0, 0], titan: [0, .5, 0, 0],
   europa: [0, 0, 1, 0], ganymede: [.3, 0, .8, 0], callisto: [.6, 0, .4, 0], triton: [.1, 0, .8, 0], rhea: [.5, 0, .5, 0], io: [.2, 0, 0, 1], _ice: [.2, 0, .7, 0] }; // the Sun and the cloud cover, shared by the dome and the ground (the dome sets them)
-let dome = null, sunShadow = null, frameN = 0;
+let dome = null, sunShadow = null, frameN = 0, shields = null;
 // the clouds, as the dome paints them and as the ground wears their shadows: one noise, in world metres, drifting with the clock
 const cloudN = q => mx_fractal_noise_float(vec3(q.x.mul(.00075), q.y.mul(.00075), T.mul(.006)), 4, 2.1, .5, 1).mul(.5).add(.5);
 const cloudCover = n => smoothstep(one.sub(coverU), one.sub(coverU).add(.32), n);
@@ -253,6 +254,7 @@ export function skyDome(sc, B, world, sunLight) {
   dome = new THREE.Mesh(geo, m); dome.renderOrder = -10; dome.frustumCulled = false; sc.add(dome);
   sc.background = null; sc.fog = new THREE.Fog(hor.clone().lerp(sky, .2), 3500 + (1 - K.haze) * 9000, 18000 + (1 - K.haze) * 50000); // next to no haze on an airless world
   weatherInit(sc, world, B);
+  shields = groundShields(sc, G.spec || {}, G.map && G.map.city, G.map && G.map.H ? G.map.H.reduce((a, v) => v > a ? v : a, 0) : 0, G.map && G.map.city ? heightAt(G.map.city.x, G.map.city.y) : 0); if (S.gx && S.gx.shields === false) shields.set({ city: null, field: null }); // the city shield's ceiling and a field generator's dome (claude/shields.md, S-GFX)
   return { dome, bright };
 }
 
@@ -441,9 +443,12 @@ function lightningTick(dt, camera) {
   g.instanceCount = n; for (const kk of ['iP', 'iS']) { const a = g.attributes[kk]; a.clearUpdateRanges(); a.addUpdateRange(0, n * a.itemSize); a.needsUpdate = true; }
 }
 // per frame: the clock, the dome follows the camera, dust and scorches, weather, the tracers' light
-export function tick(dt, camera) { T.value += dt; if (dome) dome.position.copy(camera.position); if (sunShadow) { frameN++; if (frameN % 2 === 0 || S.gx && S.gx.shadowEvery === 1) sunShadow.needsUpdate = true; } const step = G.paused ? 0 : dt * (G.speed || 1); dustTick(dt, camera); weatherTick(dt, camera); lightsTick(dt, step); shaftsTick(camera); shimmerTick(dt, step); lightningTick(dt, camera);
+export function tick(dt, camera) { T.value += dt; if (dome) dome.position.copy(camera.position); if (shields) shields.tick(T.value); if (sunShadow) { frameN++; if (frameN % 2 === 0 || S.gx && S.gx.shadowEvery === 1) sunShadow.needsUpdate = true; } const step = G.paused ? 0 : dt * (G.speed || 1); dustTick(dt, camera); weatherTick(dt, camera); lightsTick(dt, step); shaftsTick(camera); shimmerTick(dt, step); lightningTick(dt, camera);
   if (trodDirty) { trodTex.needsUpdate = true; trodDirty = false; } }
-export function dispose() { dome = null; sunShadow = null; puffMesh = null; puffs = null; wxMesh = null; wx = null; litMesh = null; lights = []; shaftMesh = null; shimMesh = null; shims = []; boltMesh = null; bolt = null; wetU.value = 0; flashU.value = 0; trodArr.fill(0); trodTex.needsUpdate = true; }
+export function dispose() { dome = null; sunShadow = null; shields = null; puffMesh = null; puffs = null; wxMesh = null; wx = null; litMesh = null; lights = []; shaftMesh = null; shimMesh = null; shims = []; boltMesh = null; bolt = null; wetU.value = 0; flashU.value = 0; trodArr.fill(0); trodTex.needsUpdate = true; }
 export const _dbg = () => ({ scorch: scorchA.array.map(v => v.toArray()), live: puffs ? puffs.filter(p => p.life > 0).length : -1, n: puffMesh ? puffMesh.geometry.instanceCount : -1, T: T.value, mesh: !!puffMesh, dome: !!dome, units: G.units ? G.units.filter(u => !u.gone && Math.hypot(u.vx, u.vy) > .6).length : -1 });
 export const _forceWeather = kind => { _FORCE = kind; }; let _FORCE = null;
 export const _probe = { trample, bolt: () => { nextBolt = 0; } };
+
+// shields up or down without rebuilding the field: o = { city: 'att'|'def'|null, field: 'att'|'def'|null, gen: { x, y } } (tests, and the ground chat when a generator falls)
+export function setShields(o) { if (shields) shields.set(o); }

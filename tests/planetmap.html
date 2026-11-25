@@ -6,7 +6,7 @@
 <script type="importmap">{"imports":{"three":"../vendor/three/three.webgpu.js","three/webgpu":"../vendor/three/three.webgpu.js","three/tsl":"../vendor/three/three.tsl.js"}}</script>
 </head><body><canvas id="cv"></canvas>
 <div id="hud"><b>Planet map globe</b> — Mercury's painted surface with the province overlay (render.js <code>planetMapMaterial</code>, provinces from planetwar.js <code>provMap</code>).
-drag to orbit · wheel to zoom · hover a province · click to select · <kbd>O</kbd> overlay on/off · <kbd>W</kbd> hairline width · <kbd>1</kbd>–<kbd>3</kbd> give the selected province to the Republic / Society / Rim, <kbd>0</kbd> no one · <span id="st">painting…</span></div>
+drag to orbit · wheel to zoom · hover a province · click to select · <kbd>O</kbd> overlay on/off · <kbd>S</kbd> city shields on/off · <kbd>W</kbd> hairline width · <kbd>1</kbd>–<kbd>3</kbd> give the selected province to the Republic / Society / Rim, <kbd>0</kbd> no one · <span id="st">painting…</span></div>
 <div id="lbl"></div>
 <script type="module">
 // A test page for P2 (claude/planet-maps.md): a sphere, Mercury's maps from planetgen, provMap's ids, and the globe
@@ -17,6 +17,8 @@ import { generate, HI } from '../js/planetgen.js';
 import { MAPS, provMap } from '../js/planetwar.js';
 import { planetMapMaterial } from '../js/render.js';
 import { FACTIONS, NEUTRAL_C } from '../js/data.js';
+import { globeShield } from '../js/shieldfx.js';
+import { seatDir } from '../js/render.js';
 const world = new URLSearchParams(location.search).get('world') || 'mercury', W = +(new URLSearchParams(location.search).get('w')) || 1536;
 const cv = document.getElementById('cv'), st = document.getElementById('st'), lbl = document.getElementById('lbl');
 const R = new THREE.WebGPURenderer({ canvas: cv, antialias: true, forceWebGL: /webgl/i.test(location.hash) }); R.setPixelRatio(Math.min(2, devicePixelRatio));
@@ -36,6 +38,9 @@ globe.rotation.y = -Math.PI / 2; // uv 0 at lon −180 faces −z as planetgen p
 const own = { tyche: 'core', highlands: 'core', heliopolis: 'rising', ladon: 'rising', jungles: 'rising', keryx: 'rim' };
 M.provs.forEach((p, i) => { const f = own[p.id]; if (f) pm.setOwner(i, FACTIONS[f].col.main); });
 const sun = new THREE.Vector3(3, 1.2, 4); pm.setSun(sun);
+// city shields (claude/shields.md, S-GFX): a disc of 3.8° (160 km on Mercury) over each shielded city, in its owner's colour; S toggles them
+const RAD = 160 / (2440 * Math.PI / 180), shields = M.provs.filter(p => p.kind === 'capital' || p.kind === 'city' || p.kind === 'port').map(p => { const sh = globeShield(seatDir(p.lat, p.lon), RAD, { faction: own[p.id] || 'core' }); globe.add(sh.mesh); return sh; });
+let shOn = true;
 // a globe camera
 let dist = 2.6, lat = 10, lon = 0, drag = null;
 const setView = (d, la, lo) => { dist = d; lat = la; lon = lo; };
@@ -45,7 +50,7 @@ addEventListener('pointerup', e => { if (drag && !drag.moved) pick(e, true); dra
 addEventListener('pointermove', e => { if (drag) { const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true; lon = drag.lon - dx * .25 * dist / 2.6; lat = Math.max(-85, Math.min(85, drag.lat + dy * .25 * dist / 2.6)); } else pick(e, false); });
 cv.addEventListener('wheel', e => { dist = Math.max(1.25, Math.min(8, dist * (e.deltaY > 0 ? 1.1 : .91))); e.preventDefault(); }, { passive: false });
 let hov = -1, sel = -1, ovl = true, lw = 1.1;
-addEventListener('keydown', e => { if (e.key === 'o' || e.key === 'O') { ovl = !ovl; pm.setOverlay(ovl); } if (e.key === 'w' || e.key === 'W') { lw = lw > 1.5 ? 1.1 : lw + .4; pm.setLineWidth(lw); }
+addEventListener('keydown', e => { if (e.key === 'o' || e.key === 'O') { ovl = !ovl; pm.setOverlay(ovl); } if (e.key === 's' || e.key === 'S') { shOn = !shOn; for (const sh of shields) sh.setOn(shOn); } if (e.key === 'w' || e.key === 'W') { lw = lw > 1.5 ? 1.1 : lw + .4; pm.setLineWidth(lw); }
   if (sel >= 0 && /^[0-3]$/.test(e.key)) pm.setOwner(sel, ['', 'rising', 'core', 'rim'][+e.key] ? FACTIONS[['', 'rising', 'core', 'rim'][+e.key]].col.main : null); });
 const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
 function pick(e, click) { ndc.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ndc, cam); const h = ray.intersectObject(globe)[0]; let id = -1;
@@ -54,6 +59,6 @@ function pick(e, click) { ndc.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / 
   if (id >= 0) { lbl.style.display = 'block'; lbl.style.left = e.clientX + 14 + 'px'; lbl.style.top = e.clientY + 10 + 'px'; lbl.textContent = M.provs[id].name + (own[M.provs[id].id] ? ' · ' + own[M.provs[id].id] : ''); } else lbl.style.display = 'none'; }
 function size() { const w = innerWidth, h = innerHeight; R.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); } addEventListener('resize', size); size();
 let frames = 0; const t0 = performance.now();
-R.setAnimationLoop(() => { place(); R.render(sc, cam); if (++frames % 30 === 0) st.textContent = `${world} ${W}×${H} · provinces ${PW}×${PH} · ${(frames / ((performance.now() - t0) / 1000)).toFixed(0)} fps · ${R.backend.constructor.name.replace('Backend', '')}`; });
-window.__pm = { pm, cam, setView, ids, M, globe, R };
+R.setAnimationLoop(() => { place(); for (const sh of shields) sh.tick(performance.now() / 1000); R.render(sc, cam); if (++frames % 30 === 0) st.textContent = `${world} ${W}×${H} · provinces ${PW}×${PH} · ${(frames / ((performance.now() - t0) / 1000)).toFixed(0)} fps · ${R.backend.constructor.name.replace('Backend', '')}`; });
+window.__pm = { pm, cam, setView, ids, M, globe, R, shields };
 </script></body></html>
