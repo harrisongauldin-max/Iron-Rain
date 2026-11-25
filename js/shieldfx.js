@@ -41,7 +41,7 @@ function shieldMat(mode, o = {}) {
     const wave = sin(P.x.mul(.0012).add(P.z.mul(.0007)).sub(t.mul(1.6))).mul(.5).add(.5).mul(.35).add(.65); // a slow brightness wave through the lattice
     let a;
     if (mode === 'globe') a = float(.08).add(edge.mul(.5)).add(cellK.mul(.4)).add(rim.mul(1.1)).mul(span).mul(wave.mul(.6).add(.4)); // on the globe we look square on: a visible veil with a bright rim
-    else a = float(.012).add(edge.mul(.3)).add(cellK.mul(.2)).add(graze.mul(.32)).add(foot.mul(.4)).mul(wave); // on the ground: nearly clear from above, a sheen at the horizon, a glowing foot
+    else a = float(.012).add(edge.mul(fres.mul(.26).add(.13))).add(cellK.mul(.18)).add(graze.mul(.32)).add(foot.mul(.4)).mul(wave); // on the ground: a faint lattice from above, denser and brighter toward the horizon, a glowing foot
     const col = mix(U.col, vec3(1, 1, 1), edge.mul(.5).add(graze.mul(.3)));
     return vec4(col, clamp(a, 0, 1).mul(U.on));
   })();
