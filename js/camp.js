@@ -138,7 +138,7 @@ export const subMul = s => { if (!s.sub) return 1; const v = Object.values(s.sub
 // dreadnought squadron half again her worth, so auto-resolve and the forecast count her at 1.5)
 export const shipVal = (f, s) => { const d = defsOf(f)[s.t] || DEFS[s.t]; return (d.value || d.cost || 50) * (d.cvK || 1) * s.hp * subMul(s) * (.45 + .55 * s.crew) * (.4 + .6 * s.ammo) * (1 + .1 * s.rank) * (s.fit && TE.FITS[s.fit] ? TE.FITS[s.fit].ar || 1 : 1) * (s.cls ? (TE.classSpec(f, s.cls) || { ar: 1 }).ar : 1) * (s.crewName ? 1.05 : 1); };
 export const fleetStr = fl => fl.ships.reduce((a, s) => a + shipVal(fl.owner, s), 0);
-export const defStr = w => ((w.gun * 260 + w.shield * 180 * TE.mod(w.owner, 'wshield')) * (1 + .15 * w.lv.grid) + w.gov * (isCap(w.id) ? 2200 : 500)) * TE.mod(w.owner, 'defense');
+export const defStr = w => ((w.gun * 260 + shieldLit(w) * 180 * TE.mod(w.owner, 'wshield')) * (1 + .15 * w.lv.grid) + w.gov * (isCap(w.id) ? 2200 : 500)) * TE.mod(w.owner, 'defense');
 const isCap = id => Object.values(CAPITAL).includes(id);
 // a carrier's hangars, for the campaign: its bay space, the yard's own mix, the mix chosen for it (load), and what is
 // aboard now (cur). A ship record with no hangar record aboard carries a full load
@@ -224,8 +224,90 @@ export function income(f) {
   { const st = Math.max(0, C.fac[f].res.food), keep = foodKeep(f, rations), lost = st * .05 + Math.max(0, st - keep) * (.6 + .4 * Math.min(1, st / 3000) ** 2); C.foodLoss = C.foodLoss || {}; C.foodLoss[f] = { lost: Math.round(lost), keep: Math.round(keep) }; o.food -= lost; }
   if (C.fac[f].res.food > 1000) o.man *= 1 + Math.min(.06, Math.floor((C.fac[f].res.food - 1000) / 500) * .01); // full granaries: more hands for the legions
   for (const fl of C.fleets) if (fl.owner === f) o.he -= upkeep(fl);
+  o.he -= shieldCost(f).total; // S-C: the shields that are lit
   o.man *= CM.wearyMan(f);
   return o;
+}
+
+// ---------------------------------------------------------------- shields (S-C; the design is claude/shields.md)
+// A Shield Array level (w.shield: the world's shield platforms, which on the planet map cover its cities, capital first)
+// costs 4 He-3 a week to keep lit; a field generator costs 3 a week while it is set up on a planet, nothing while carried.
+// Field generators are built at a world with a Shipyard and carried in a fleet that can carry troops (fl.gens), or kept in
+// a world's depot (w.gens). When the He-3 runs out the shields go dark (w.shieldDark: the top levels that are dark;
+// war.dark[side]: that side's field generators in a planet war), and they light again when it can be paid.
+export const SHIELD_UPKEEP = 4, GEN_UPKEEP = 3;
+export const GEN = { name: 'Field generator', ore: 120, he: 60, rare: 8, t: 2, max: 2 /* in one yard's queue at once */ };
+export const shieldLit = w => Math.max(0, (w.shield || 0) - (w.shieldDark || 0));
+// the field generators set up in a planet war: planetwar.js counts them (S-G's PW.gensUp(war, side)); dark ones cost nothing
+const gensSet = (war, side) => typeof PW.gensUp === 'function' ? PW.gensUp(war, side) || 0 : 0;
+export const gensUp = (war, side) => war && !(war.dark && war.dark[side]) ? gensSet(war, side) : 0;
+// the generators a side still has in a war, set up or packed (PW.gensHeld; until planetwar.js has them, all it brought)
+const gensHeld = (war, side) => typeof PW.gensHeld === 'function' ? PW.gensHeld(war, side) || 0 : (war.gensIn && war.gensIn[side]) || 0;
+// the planet wars a power fights, and its side in each
+const warsOf = f => Object.values(C.worlds).filter(w => w.war && !w.war.over && (w.war.by === f || w.war.def === f)).map(w => ({ w, war: w.war, side: w.war.by === f ? 'att' : 'def' }));
+// what a power's shields cost it a week: the lit Array levels on its worlds, and the generators set up in its wars
+export function shieldCost(f) {
+  let arr = 0, gen = 0;
+  for (const id in C.worlds) { const w = C.worlds[id]; if (w.owner === f) arr += SHIELD_UPKEEP * shieldLit(w); }
+  for (const x of warsOf(f)) gen += GEN_UPKEEP * gensUp(x.war, x.side);
+  return { arr, gen, total: arr + gen };
+}
+// how many field generators a fleet can carry: one for each hull that carries troops (a troopship, or a hangar of starShells or Storks)
+export function genRoom(fl) {
+  let n = 0;
+  for (const s of fl.ships) { if (s.prize) continue; const d = defsOf(fl.owner)[s.t] || DEFS[s.t] || {}, H = hangarOf(fl.owner, s); if (d.troops || (H && (H.mix.stork || H.mix.starshell))) n++; }
+  return n;
+}
+export function canBuildGen(f, w) {
+  if (w.owner !== f) return 'not your world'; if (w.siege) return 'the yards are under siege';
+  if (!(w.lv.yard >= 1)) return 'needs a Shipyard';
+  if ((w.gq || []).length >= GEN.max) return `the yards here build ${GEN.max} at a time`;
+  const r = C.fac[f].res; if (r.ore < GEN.ore || r.he < GEN.he || (r.rare || 0) < GEN.rare) return `need ${GEN.ore} ore, ${GEN.he} He-3, ${GEN.rare} rare metals`;
+  return null;
+}
+export function orderGen(f, w) {
+  const e = canBuildGen(f, w); if (e) return e; const r = C.fac[f].res, paid = { ore: GEN.ore, he: GEN.he, rare: GEN.rare };
+  for (const k in paid) r[k] = (r[k] || 0) - paid[k]; (w.gq = w.gq || []).push({ left: GEN.t, paid }); return null;
+}
+export function cancelGen(f, w, i) { if (w.owner !== f) return 'not your world'; const q = (w.gq || [])[i]; if (!q) return 'nothing in the yards'; refund(f, q.paid); w.gq.splice(i, 1); return null; }
+// generators taken aboard from the world's depot, or put ashore into it (n: how many; all that fit by default)
+export function loadGens(fl, n = Infinity) {
+  const w = !fl.transit && C.worlds[fl.at]; if (!w || w.owner !== fl.owner) return 'only at one of our worlds';
+  const k = Math.min(n, w.gens || 0, genRoom(fl) - (fl.gens || 0)); if (k <= 0) return (w.gens || 0) ? 'no room aboard: a generator needs a troopship or a hangar of Storks' : 'no field generators in the depot here';
+  w.gens -= k; fl.gens = (fl.gens || 0) + k; return null;
+}
+export function unloadGens(fl, n = Infinity) {
+  const w = !fl.transit && C.worlds[fl.at]; if (!w || w.owner !== fl.owner) return 'only at one of our worlds';
+  const k = Math.min(n, fl.gens || 0); if (k <= 0) return 'no field generators aboard';
+  fl.gens -= k; w.gens = (w.gens || 0) + k; return null;
+}
+// a world's place in the order its shields go dark: the capital last, then by what it yields
+const shieldRank = (f, w) => (w.id === CAPITAL[f] ? 1e6 : 0) + (yv => yv.he + yv.ore + yv.ord * .5 + yv.man * .2 + Math.max(0, yv.food) * .5 + (yv.alloy || 0) * 3 + (yv.rare || 0) * 5)(yieldOf(w));
+// the start of the week (finishTurn, before the week's income): shields the He-3 can't pay for go dark, the field generators
+// first, then the Array levels from the least important city up (each world's top level first, the least valued worlds
+// first; the capital's first level last). When the stock can pay again they light, the most important first.
+export function shieldPower(f) {
+  const r = C.fac[f].res, wars = warsOf(f), worlds = Object.values(C.worlds).filter(w => w.owner === f && (w.shield || 0) > 0);
+  for (const w of worlds) if (w.shieldDark) w.shieldDark = Math.min(w.shieldDark, w.shield); // a siege may have knocked levels out
+  const levels = []; for (const w of worlds) { const v = shieldRank(f, w); for (let l = 1; l <= w.shield; l++) levels.push({ w, l, v }); }
+  levels.sort((a, b) => b.l - a.l || a.v - b.v);
+  let budget = r.he + income(f).he; const out = [], back = [];
+  if (budget < 0) {
+    for (const x of wars) { if (budget >= 0) break; const n = gensUp(x.war, x.side); if (!n) continue; (x.war.dark = x.war.dark || {})[x.side] = true; budget += GEN_UPKEEP * n; out.push({ war: x, n }); }
+    for (const L of levels) { if (budget >= 0) break; if (L.l > shieldLit(L.w)) continue; L.w.shieldDark = (L.w.shieldDark || 0) + 1; budget += SHIELD_UPKEEP; out.push(L); }
+  } else {
+    for (const L of levels.slice().reverse()) { if (L.l <= shieldLit(L.w) || budget < SHIELD_UPKEEP) continue; L.w.shieldDark--; budget -= SHIELD_UPKEEP; back.push(L); }
+    for (const x of wars) { if (!(x.war.dark && x.war.dark[x.side])) continue; const n = gensSet(x.war, x.side); if (budget < GEN_UPKEEP * n) continue; x.war.dark[x.side] = false; budget -= GEN_UPKEEP * n; if (n) back.push({ war: x, n }); }
+  }
+  for (const w of worlds) if (w.war) w.war.shieldLit = shieldLit(w);
+  if (f === C.player && (out.length || back.length)) {
+    const say = list => { const by = new Map(); for (const L of list) if (L.w) by.set(L.w, [...(by.get(L.w) || []), L.l]);
+      const g = list.filter(x => x.war).map(x => `the ${x.n === 1 ? 'field generator' : x.n + ' field generators'} on ${bodyOf(x.war.w.id).name}`);
+      return [...g, ...[...by].map(([w, ls]) => `${bodyOf(w.id).name} (level${ls.length > 1 ? 's ' + Math.min(...ls) + '–' + Math.max(...ls) : ' ' + ls[0]})`)].join(', '); };
+    if (out.length) note(`Helium-3 is short: the shields go dark over ${say(out)}. They light again when the stock can pay for them (${SHIELD_UPKEEP} He-3 a week a level, ${GEN_UPKEEP} a generator).`, 'bad', out[0].w ? out[0].w.id : out[0].war.w.id);
+    if (back.length) note(`The shields are lit again: ${say(back)}.`, 'good', back[0].w ? back[0].w.id : back[0].war.w.id);
+  }
+  return { out: out.length, back: back.length };
 }
 export const yieldOf = w => EC.yieldOf(w, WK);
 export const garrisonCap = w => Math.round(2200 * ((WORLDS.find(x => x.id === w.id).ground) || 1) * (isCap(w.id) ? 2.5 : 1) + 1000 * w.lv.barracks + 2500 * w.lv.fort) * (w.desig === 'legion' ? 1.2 : 1) * TE.mod(w.owner, 'garrison');
@@ -387,8 +469,9 @@ export function scrapPrizes(fl, ids) {
   r.ore += o.ore; r.alloy = (r.alloy || 0) + o.alloy; fl.ships = fl.ships.filter(s => !L.includes(s)); if (!fl.ships.length) { CM.relieve(fl, true); C.fleets = C.fleets.filter(f => f !== fl); }
   return o;
 }
-export function splitFleet(fl, ids) { const ships = fl.ships.filter(s => ids.includes(s.id)); if (!ships.length || ships.length === fl.ships.length) return null; fl.ships = fl.ships.filter(s => !ids.includes(s.id)); const nf = { id: C.nid++, owner: fl.owner, name: autoName(fl.owner), at: fl.at, transit: null, ships, orders: null }; C.fleets.push(nf); return nf; }
-export function mergeFleets(a, b) { if (a.at !== b.at || a.transit || b.transit || a.owner !== b.owner || a === b) return; CM.onMerge(a, b); for (const g of C.agents || []) if (g.fleet === b.id) { if (AG.championOf(a)) { g.state = 'idle'; g.fleet = null; } else g.fleet = a.id; } a.ships.push(...b.ships); C.fleets.splice(C.fleets.indexOf(b), 1); }
+export function splitFleet(fl, ids) { const ships = fl.ships.filter(s => ids.includes(s.id)); if (!ships.length || ships.length === fl.ships.length) return null; fl.ships = fl.ships.filter(s => !ids.includes(s.id)); const nf = { id: C.nid++, owner: fl.owner, name: autoName(fl.owner), at: fl.at, transit: null, ships, orders: null }; C.fleets.push(nf);
+  if ((fl.gens || 0) > genRoom(fl)) { const k = Math.min(fl.gens - genRoom(fl), genRoom(nf)); if (k > 0) { fl.gens -= k; nf.gens = k; } } /* S-C: field generators go with the hulls that can carry them */ return nf; }
+export function mergeFleets(a, b) { if (a.at !== b.at || a.transit || b.transit || a.owner !== b.owner || a === b) return; CM.onMerge(a, b); for (const g of C.agents || []) if (g.fleet === b.id) { if (AG.championOf(a)) { g.state = 'idle'; g.fleet = null; } else g.fleet = a.id; } a.ships.push(...b.ships); if (b.gens) a.gens = (a.gens || 0) + b.gens; if (b.legions) a.legions = (a.legions || 0) + b.legions; C.fleets.splice(C.fleets.indexOf(b), 1); }
 
 // ---------------------------------------------------------------- turn resolution
 // endTurn() advances everything, then returns the battles that must be fought; the caller resolves each
@@ -680,7 +763,7 @@ export function rainOdds(fl) {
   if (fleetsAt(fl.at).some(o => o.owner === w.owner && !bottled(o))) return { err: 'Win the orbit first', troops };
   if (w.war && w.war.by !== fl.owner) return { err: `${BLOC_NAME[w.war.by]}'s legions already fight on the surface`, troops };
   if (PW.hasMap(w.id)) return warRainOdds(fl, w, troops);
-  const storm = w.siege && w.siege.by === fl.owner && (w.siege.hold || 0) > 0, shot = clamp(w.gun * .12 + w.shield * .05, 0, .6), mul = 5 * (1 - shot) * rainBonus(fl, w) * (storm ? .5 : 1);
+  const storm = w.siege && w.siege.by === fl.owner && (w.siege.hold || 0) > 0, shot = clamp(w.gun * .12 + shieldLit(w) * .05, 0, .6), mul = 5 * (1 - shot) * rainBonus(fl, w) * (storm ? .5 : 1);
   const def = w.garrison * (1.25 + .2 * w.lv.fort) * (((w.cl ? w.cl.war : w.loyalty) + 8) / 70), att = troops * mul;
   const chance = clamp((1.25 - def / att) / .5, 0, 1), need = Math.max(0, Math.ceil(def / mul - troops));
   if (!w.siege || w.siege.by !== fl.owner || w.siege.turns < 1) return { err: 'Hold the siege a week first', troops, chance, need, shot, def };
@@ -703,7 +786,7 @@ function ironRain0(fl) {
   if (w.war && w.war.by !== fl.owner) return { err: 'another power\'s legions already fight on the surface' };
   if (PW.hasMap(w.id)) { const war = startWar(fl, null, { defer: w.owner === C.player }); return { war: true, won: war.over ? war.over.won === 'att' : null, world: w.id }; } // the war for the planet (M3-C)
   senateDefied(fl.owner, w.id);
-  const shotDown = clamp(w.gun * .12 + w.shield * .05, 0, .6), storm = (w.siege.hold || 0) > 0; troops *= (1 - shotDown) * (storm ? .5 : 1); // storming the walls before they are broken costs half the drop
+  const shotDown = clamp(w.gun * .12 + shieldLit(w) * .05, 0, .6), storm = (w.siege.hold || 0) > 0; troops *= (1 - shotDown) * (storm ? .5 : 1); // storming the walls before they are broken costs half the drop
   const def = w.garrison * (1.25 + .2 * w.lv.fort) * (((w.cl ? w.cl.war : w.loyalty) + 8) / 70), att = troops * 5 * rainBonus(fl, w) * (.75 + rnd() * .5);
   spendDrop(fl);
   const nm = bodyOf(w.id).name;
@@ -727,7 +810,7 @@ function spendDrop(fl) {
 // a world taken by an Iron Rain, however it was fought: gar(w) is the garrison the surviving legions make, reckoned
 // after the world has changed hands
 function rainTaken(fl, w, gar) {
-  const old = w.owner; CM.weary(old, 6); CM.gainXp(CM.cmdrOf(fl), 40); P.react(fl.owner, 'rain'); P.react(fl.owner, 'conquest'); P.seatLost(old, w.id); w.owner = fl.owner; w.garrison = gar(w); w.siege = null; EC.onCapture(w, fl.owner, CM.has(fl, 'butcher') ? 20 : CM.cmdrOf(fl) && CM.cmdrOf(fl).talents.includes('breaker') ? 45 : 30); w.scorched = 0; w.gov = .8; worldLost(old, w); w.bq = []; w.sq = []; /* the surviving legions hold the ground */ worldTaken(w, fl.owner, old, 'rain');
+  const old = w.owner; CM.weary(old, 6); CM.gainXp(CM.cmdrOf(fl), 40); P.react(fl.owner, 'rain'); P.react(fl.owner, 'conquest'); P.seatLost(old, w.id); w.owner = fl.owner; w.garrison = gar(w); w.siege = null; EC.onCapture(w, fl.owner, CM.has(fl, 'butcher') ? 20 : CM.cmdrOf(fl) && CM.cmdrOf(fl).talents.includes('breaker') ? 45 : 30); w.scorched = 0; w.gov = .8; worldLost(old, w); w.bq = []; w.sq = []; w.gq = []; w.shieldDark = 0; w.gens = Array.from({ length: w.gens || 0 }).filter(() => rnd() < .4).length; /* the surviving legions hold the ground; S-C: they take each generator in the depot 40% of the time */ worldTaken(w, fl.owner, old, 'rain');
   return old;
 }
 
@@ -754,11 +837,11 @@ export function groundSpec(fl) {
   const c = CM.cmdrOf(fl), weeks = w.siege ? w.siege.turns || 0 : 0;
   return { world: w.id, storm: ctx.storm, maxT: 1800, fleet: fl.id,
     att: { f: fl.owner, shells: Math.round(shells * k * GROUND_SCALE), leech: Math.round(leech * k * GROUND_SCALE), storks: Math.round(storks * k * GROUND_SCALE), cmdr: c ? c.name : null, total: Math.round(o.troops * GROUND_SCALE), air: { rip: Math.round(rip * 2), thunder } }, // at legion scale a campaign ripWing stands for a pair
-    def: { f: w.owner, men: Math.round(w.garrison * ctx.dmul * GROUND_FIELD * GROUND_SCALE), garrison: w.garrison, fort: w.lv.fort || 0, gun: w.gun || 0, shield: w.shield || 0, barracks: w.lv.barracks || 0, morale: clamp(1 - weeks * .02, .8, 1), cmdr: 'The Legate',
+    def: { f: w.owner, men: Math.round(w.garrison * ctx.dmul * GROUND_FIELD * GROUND_SCALE), garrison: w.garrison, fort: w.lv.fort || 0, gun: w.gun || 0, shield: shieldLit(w), barracks: w.lv.barracks || 0, morale: clamp(1 - weeks * .02, .8, 1), cmdr: 'The Legate',
       air: { rip: 12 * Math.min(2, w.gun || 0), thunder: (w.lv.fort || 0) >= 2 ? 4 : 0 } }, // the garrison's own squadrons (placeholder: the campaign keeps no planetary air yet)
     // the same Rain as a war across the planet (planetwar.js; the ground brief offers it as a preview where the world has a map)
-    planet: { world: w.id, by: fl.owner, def: w.owner, troops: Math.round(o.troops), garrison: w.garrison, fort: w.lv.fort || 0, gun: w.gun || 0, shield: w.shield || 0, barracks: w.lv.barracks || 0, loyalty: w.cl ? w.cl.war : w.loyalty,
-      cmdrs: c ? [planetCmdr(c)] : [] } };
+    planet: { world: w.id, by: fl.owner, def: w.owner, troops: Math.round(o.troops), garrison: w.garrison, fort: w.lv.fort || 0, gun: w.gun || 0, shield: shieldLit(w), barracks: w.lv.barracks || 0, loyalty: w.cl ? w.cl.war : w.loyalty,
+      cmdrs: c ? [planetCmdr(c)] : [], gens: fl.gens || 0, defGens: w.gens || 0 } };
 }
 // a campaign commander as the planet map carries one: the strength their talents give when auto-resolved (ar), and the
 // talents in effect, some of which mean something on the planet (planetwar.js CMDR_T)
@@ -818,17 +901,21 @@ const warQ = (fl, w) => TE.mod(fl.owner, 'rain') * AG.rainMul(fl) * (1 + .1 * ((
 // defender's commanders are those of its fleets bottled up over the world.
 export function warSpec(fl, troops) {
   const w = C.worlds[fl.at], c = CM.cmdrOf(fl), def = fleetsAt(w.id, w.owner).map(CM.cmdrOf).filter(Boolean).map(planetCmdr);
-  return { world: w.id, by: fl.owner, def: w.owner, troops: Math.round(troops ?? troopsOf(fl)), garrison: Math.round(w.garrison), fort: w.lv.fort || 0, gun: w.gun || 0, shield: w.shield || 0,
-    barracks: w.lv.barracks || 0, loyalty: Math.round(w.cl ? w.cl.war : w.loyalty), cmdrs: c ? [planetCmdr(c)] : [], defCmdrs: def, attQ: warQ(fl, w) };
+  return { world: w.id, by: fl.owner, def: w.owner, troops: Math.round(troops ?? troopsOf(fl)), garrison: Math.round(w.garrison), fort: w.lv.fort || 0, gun: w.gun || 0, shield: shieldLit(w),
+    barracks: w.lv.barracks || 0, loyalty: Math.round(w.cl ? w.cl.war : w.loyalty), cmdrs: c ? [planetCmdr(c)] : [], defCmdrs: def, attQ: warQ(fl, w),
+    gens: fl.gens || 0, defGens: w.gens || 0 }; // S-C: the field generators the fleet carries down, and those in the world's depot
 }
 // the legate's landing plan (planetwar.js suggestPlan plays out a few dozen plans: about half a second, so it is kept)
 const planKeep = new Map();
 function legatePlan(spec) {
-  const k = [spec.world, spec.troops >> 6, spec.garrison >> 6, spec.fort, spec.gun, spec.shield, spec.loyalty / 5 | 0, Math.round(spec.attQ * 20)].join();
+  const k = [spec.world, spec.troops >> 6, spec.garrison >> 6, spec.fort, spec.gun, spec.shield, spec.loyalty / 5 | 0, Math.round(spec.attQ * 20), spec.gens || 0, spec.defGens || 0].join();
   let p = planKeep.get(k); if (!p) { p = PW.suggestPlan(spec); if (planKeep.size > 40) planKeep.clear(); planKeep.set(k, p); } return p;
 }
 // the commanders land with the biggest landing
 const withCmdrs = (plan, cmdrs) => { const big = plan.reduce((b, x, i) => x.troops > plan[b].troops ? i : b, 0); return plan.map((x, i) => ({ ...x, cmdrs: i === big ? (cmdrs || []).slice() : [] })); };
+// S-C: the field generators land with the biggest landing, unless the plan already gives them out (the planet map's plan
+// can carry gens on a landing the way it carries commanders)
+const withGens = (plan, n) => { if (!n || !plan.length || plan.some(x => x.gens)) return plan; const big = plan.reduce((b, x, i) => x.troops > plan[b].troops ? i : b, 0); return plan.map((x, i) => i === big ? { ...x, gens: n } : x); };
 // more troops for a war already on: they come down where the legions stand thickest, or by the legate's plan if they
 // hold nothing
 function reinforcePlan(war, troops, spec) {
@@ -851,14 +938,14 @@ export function warOdds(war, plan, n = 100) {
 const oddsKeep = new Map();
 function warRainOdds(fl, w, troops) {
   const spec = warSpec(fl, troops), war = w.war && w.war.by === fl.owner ? w.war : null;
-  const k = [C.turn, fl.id, spec.troops, spec.garrison, spec.gun, spec.shield, spec.fort, spec.loyalty, Math.round(spec.attQ * 20), war ? war.week + ':' + war.log.length : 0].join();
+  const k = [C.turn, fl.id, spec.troops, spec.garrison, spec.gun, spec.shield, spec.fort, spec.loyalty, Math.round(spec.attQ * 20), spec.gens, spec.defGens, war ? war.week + ':' + war.log.length : 0].join();
   let o = oddsKeep.get(k);
   if (!o) {
     const plan = war ? reinforcePlan(war, spec.troops, spec) : withCmdrs(legatePlan(spec), spec.cmdrs);
     const at = (m, n) => war ? warOdds(war, plan.map(x => ({ ...x, troops: Math.round(x.troops * m) })), n).win : PW.forecast({ ...spec, troops: Math.round(spec.troops * m) }, plan.map(x => ({ ...x, troops: Math.round(x.troops * m) })), n).win;
     const chance = at(1, 120); let need = 0;
     if (chance < .5) { need = null; for (const m of [1.25, 1.5, 2, 3]) if (at(m, 50) >= .5) { need = Math.ceil(spec.troops * (m - 1)); break; } if (need == null) need = spec.troops * 3; }
-    const shot = clamp(w.gun * .12 + w.shield * .05, 0, .6);
+    const shot = clamp(w.gun * .12 + shieldLit(w) * .05, 0, .6);
     o = { troops, shot, chance, need, def: w.garrison, storm: false, hold: 0, planet: true, plan, war: !!war };
     if (oddsKeep.size > 40) oddsKeep.clear(); oddsKeep.set(k, o);
   }
@@ -871,8 +958,12 @@ function warRainOdds(fl, w, troops) {
 export function startWar(fl, plan, { defer = false } = {}) {
   const w = C.worlds[fl.at], nm = bodyOf(w.id).name, spec = warSpec(fl), old = w.war && w.war.by === fl.owner ? w.war : null;
   if (!plan) plan = old ? reinforcePlan(old, spec.troops, spec) : withCmdrs(legatePlan(spec), spec.cmdrs);
+  plan = withGens(plan, spec.gens); const gensDown = Math.min(fl.gens || 0, plan.reduce((n, x) => n + (x.gens || 0), 0)); fl.gens = (fl.gens || 0) - gensDown; // S-C: the fleet's field generators go down with the landings
   senateDefied(fl.owner, w.id); spendDrop(fl); C.fleets = C.fleets.filter(f => f.ships.length);
-  const war = old || Object.assign(PW.newWar(spec), { t0: C.turn, fleet: fl.id, ordered: -1 });
+  const war = old || Object.assign(PW.newWar(spec), { t0: C.turn, fleet: fl.id, ordered: -1, gensIn: { att: 0, def: spec.defGens || 0 } });
+  if (!old) w.gens = 0; // the depot's generators are the garrison's in the war
+  war.gensIn = war.gensIn || { att: 0, def: 0 }; war.gensIn.att += gensDown;
+  war.dark = war.dark || { att: false, def: false }; war.shieldLit = shieldLit(w);
   w.war = war;
   const L = PW.land(war, plan, rnd, { defer: defer && !!warHuman(war) });
   if (!defer || !warHuman(war)) for (const b of war.pending.slice()) PW.resolve(war, b.prov, rnd);
@@ -891,7 +982,7 @@ function planetMoves() {
     const h = warHuman(war);
     if (war.t0 !== C.turn) { // the week the Rain lands, the landing is the week's fighting (reinforcements don't stop the marches)
       const ai = {}; for (const side of ['att', 'def']) ai[side] = side === h ? (x => x.ordered === C.turn ? [] : PW.standIn(x, side)) : planetAI;
-      PW.weekMoves(war, { ai, orbit: orbitHeld(w, war) });
+      war.shieldLit = shieldLit(w); PW.weekMoves(war, { ai, orbit: orbitHeld(w, war) });
     }
     for (const b of war.pending.slice()) if (h) C.planetBattles.push({ world: id, prov: b.prov, kind: b.kind }); else PW.resolve(war, b.prov, rnd);
   }
@@ -912,7 +1003,7 @@ function planetEnd() {
   for (const id in C.worlds) { const w = C.worlds[id], war = w.war; if (!war) continue; const nm = bodyOf(id).name;
     if (w.owner !== war.def || !C.fac[war.by] || !C.fac[war.by].alive) { // the world changed hands some other way, or the attacker is gone
       w.war = null; note(`The war on ${nm}'s surface is over: ${BLOC_NAME[war.by]}'s legions there lay down their arms.`, war.by === C.player ? 'bad' : '', id); continue; }
-    war.orbit = orbitHeld(w, war); PW.weekEnd(war); planetCmdrs(w, war);
+    war.orbit = orbitHeld(w, war); war.shieldLit = shieldLit(w); PW.weekEnd(war); planetCmdrs(w, war);
     war.share = PW.popOf(war, 'def'); w.garrison = PW.menOf(war, 'def');
     if (war.over) warOver(w, war);
   }
@@ -923,13 +1014,15 @@ function warOver(w, war) {
   if (o.won === 'att') {
     const fl = C.fleets.find(f => f.id === war.fleet && f.owner === war.by) || fleetsAt(w.id, war.by)[0] || { id: -1, owner: war.by, ships: [] }, men = PW.menOf(war, 'att');
     const old = rainTaken(fl, w, () => Math.round(Math.max(1200, Math.min(garrisonCap(w), men))));
+    w.gens = (w.gens || 0) + gensHeld(war, 'att'); // S-C: the legions' field generators (and any they took) go to the depot
     note(`${nm} falls to ${BLOC_NAME[war.by]} after ${weeks} week${weeks === 1 ? '' : 's'} of war on the surface. ${o.why}`, war.by === me ? 'good' : old === me ? 'bad' : 'gold', w.id, war.by === me || old === me ? { title: war.by === me ? nm + ' is ours' : nm + ' has fallen', kind: 'rain' } : null);
     chron('battle', `The war for ${nm} ends: ${BLOC_NAME[war.by]} holds the planet.`, w.id, war.by);
     checkEnd();
   } else {
     w.garrison = Math.max(200, PW.menOf(war, 'def'));
     const back = Math.round(o.withdrawn || 0), fl = back ? fleetsAt(w.id, war.by).sort((a, b) => fleetStr(b) - fleetStr(a))[0] : null;
-    if (fl) fl.legions = (fl.legions || 0) + back;
+    if (fl) { fl.legions = (fl.legions || 0) + back; fl.gens = (fl.gens || 0) + gensHeld(war, 'att'); } // S-C: generators come back up with the legions
+    w.gens = (w.gens || 0) + gensHeld(war, 'def');
     note(`The war for ${nm} is lost for ${BLOC_NAME[war.by]}: ${o.why}${back ? fl ? ` ${back.toLocaleString()} troops are taken back aboard ${fl.name}.` : ` No fleet holds the orbit: the ${back.toLocaleString()} troops left are lost.` : ''}`, war.by === me ? 'bad' : war.def === me ? 'good' : '', w.id, war.by === me || war.def === me ? { title: `${nm} holds`, kind: 'rain' } : null);
     chron('battle', `The war for ${nm} ends: the garrison holds for ${BLOC_NAME[war.def]}.`, w.id, war.def);
   }
@@ -961,12 +1054,16 @@ export function finishTurn() {
     if (w.owner !== 'neu') {
       // building and shipbuilding
       if (w.bq.length && !w.siege) { const q = w.bq[0]; if (--q.left <= 0) { w.bq.shift(); w.lv[q.k]++; if (q.k === 'grid') w.gun++; if (q.k === 'array') w.shield++; if (w.owner === C.player) note(`${nm}: ${BUILD[q.k].name} ${w.lv[q.k] > 1 ? 'raised to level ' + w.lv[q.k] : 'completed'}.`, '', id); } }
+      // S-C: field generators come off the yards and go aboard a fleet here that can carry them, or into the depot
+      if (w.gq && w.gq.length && !w.siege && !EC.yardsStalled(w)) { const q = w.gq[0]; if (--q.left <= 0) { w.gq.shift(); const fl = fleetsAt(id, w.owner).find(f => !f.transit && genRoom(f) > (f.gens || 0));
+        if (fl) fl.gens = (fl.gens || 0) + 1; else w.gens = (w.gens || 0) + 1;
+        if (w.owner === C.player) note(`${nm}: a field generator is finished${fl ? ` and taken aboard ${fl.name}` : '. It waits in the depot for a fleet with troopships or Storks to carry it'}.`, '', id); } }
       if (w.sq.length && !w.siege && !EC.yardsStalled(w)) { const q = w.sq[0]; if (--q.left <= 0) { w.sq.shift(); let fl = fleetsAt(id, w.owner).find(f => !f.orders && !f.garrison && f.ships.length < CM.capOf(f)); if (!fl) fl = fleet(w.owner, id, {}, null); const ns = newShip(q.t); if (q.cls && TE.classById(w.owner, q.cls)) ns.cls = q.cls; ns.crew = EC.crewOnLaunch(w); fl.ships.push(ns); if (w.owner === C.player) note(`${nm}: a new ${q.cls && TE.classById(w.owner, q.cls) ? TE.classById(w.owner, q.cls).name + '-class ' : ''}${defsOf(w.owner)[q.t].name} joins ${fl.name}.`, 'good', id); } }
     }
     { const grow = Math.max(0, Math.min(garrisonCap(w) - w.garrison, 150 + 100 * w.lv.barracks + (!w.siege && w.owner !== 'neu' && fleetsAt(id, w.owner).length ? 300 : 0))), r = w.owner !== 'neu' && C.fac[w.owner].res, keep = r && C.fac[w.owner].ai && !frontier(w) && w.id !== CAPITAL[w.owner] && !w.siege ? 10000 : 0, g = r ? Math.min(grow, Math.max(0, r.man - keep)) : grow; if (w.war) w.war.recruit = g; else w.garrison += g; if (r) r.man -= g; } // at war on the surface, the week's recruits join the cities' armies (planetwar weekEnd) // garrisons are raised from the realm's manpower; an AI keeps a reserve for its ships rather than fill quiet worlds' barracks
     w.gov = Math.min(1, w.gov + (w.siege ? 0 : .15));
     EC.tickWorld(w); // every estate moves toward where its loyalty settles; strikes, plots and risings
-    if (w.owner !== 'neu' && w.loyalty < 12 && !(w.hostage > C.turn) && rnd() < .25) { const old = w.owner; w.owner = 'neu'; w.garrison = 1500; w.bq = []; w.sq = []; w.siege = null; P.seatLost(old, w.id); EC.onCapture(w, 'neu', 40); worldLost(old, w); note(`Revolt! ${nm} throws off ${BLOC_NAME[old]} and declares itself free.`, old === C.player ? 'bad' : 'gold', id, old === C.player ? { title: 'Revolt on ' + nm, kind: 'revolt' } : null); }
+    if (w.owner !== 'neu' && w.loyalty < 12 && !(w.hostage > C.turn) && rnd() < .25) { const old = w.owner; w.owner = 'neu'; w.garrison = 1500; w.bq = []; w.sq = []; w.gq = []; w.gens = 0; w.shieldDark = 0; w.siege = null; P.seatLost(old, w.id); EC.onCapture(w, 'neu', 40); worldLost(old, w); note(`Revolt! ${nm} throws off ${BLOC_NAME[old]} and declares itself free.`, old === C.player ? 'bad' : 'gold', id, old === C.player ? { title: 'Revolt on ' + nm, kind: 'revolt' } : null); }
   }
   planetEnd(); // the planet wars' week ends (M3-C)
   // supply: ships at friendly worlds repair, re-crew and rearm; ships far from supply lose a little each week
@@ -985,6 +1082,7 @@ export function finishTurn() {
   for (const id in recom) note(`${recom[id]} prize hull${recom[id] === 1 ? '' : 's'} recommissioned at ${bodyOf(id).name}: crewed from our manpower, refitted with our ore. In service.`, 'good', id);
   EC.govTick(); EC.treasuryTick(); CM.attrition(); CM.wearyTick(); CM.cmdrTick(); RU.tick(); P.tick(); AG.tick(); ST.tick(); CQ.tick(); SR.tick(); QS.tick(); wreckTick();
   for (const f of ['rep', 'soc', 'rim']) {
+    shieldPower(f); // S-C: the shields the He-3 can't pay for go dark, or light again
     const inc = income(f), r = C.fac[f].res, r0 = Object.assign({}, r); C.fac[f].lastInc = inc;
     for (const k in inc) r[k] += inc[k];
     for (const k of ['inf', 'ore', 'alloy', 'rare', 'ord']) if (r[k] < 0) r[k] = 0;
